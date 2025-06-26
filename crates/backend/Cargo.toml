@@ -15,4 +15,12 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
+# alloy
 alloy.workspace = true
+
+# foundry
+foundry-compilers.workspace = true
+
+# misc
+eyre.workspace = true
+paste.workspace = true

@@ -26,9 +26,17 @@ rust-2018-idioms = "warn"
 # unreachable-pub = "warn"
 unused-must-use = "warn"
 redundant-lifetimes = "warn"
+missing-docs = "warn"
+missing-crate-level-docs = "warn"
 
 [workspace.lints.rustdoc]
 all = "warn"
+missing-docs = "warn"
+missing-crate-level-docs = "warn"
+private-doc-tests = "warn"
+invalid-html-tags = "warn"
+invalid-rust-codeblocks = "warn"
+bare-urls = "warn"
 
 # Speed up compilation time for dev builds by reducing emitted debug info.
 # NOTE: Debuggers may provide less useful information with this setting.
@@ -66,5 +74,12 @@ codegen-units = 1
 # alloy
 alloy = { version = "1.0.12", default-features = false }
 
+# foundry
+foundry-compilers = { version = "0.17.3", default-features = false }
+
 # revm
 revm = { version = "26.0.1", default-features = false }
+
+# misc
+eyre = "0.6"
+paste = "1.0"
