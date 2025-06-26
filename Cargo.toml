@@ -1,0 +1,70 @@
+[workspace]
+members = ["crates/backend/"]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+# Remember to update clippy.toml as well
+rust-version = "1.87"
+authors = ["The MEDGA Team"]
+license = "MIT OR Apache-2.0"
+homepage = "https://medga.org/"
+repository = "https://github.com/MedGa-eth/EDB"
+exclude = ["benches/", "tests/", "test-data/", "testdata/"]
+
+[workspace.lints.clippy]
+dbg-macro = "warn"
+manual-string-new = "warn"
+uninlined-format-args = "warn"
+use-self = "warn"
+redundant-clone = "warn"
+octal-escapes = "allow"
+
+[workspace.lints.rust]
+rust-2018-idioms = "warn"
+# unreachable-pub = "warn"
+unused-must-use = "warn"
+redundant-lifetimes = "warn"
+
+[workspace.lints.rustdoc]
+all = "warn"
+
+# Speed up compilation time for dev builds by reducing emitted debug info.
+# NOTE: Debuggers may provide less useful information with this setting.
+# Uncomment this section if you're using a debugger.
+[profile.dev]
+debug = true
+
+# Local "release" mode, more optimized than dev but much faster to compile than release.
+[profile.local]
+inherits = "dev"
+opt-level = 1
+debug-assertions = false
+overflow-checks = false
+strip = "debuginfo"
+panic = "abort"
+codegen-units = 16
+
+# Like release, but with full debug symbols and with stack unwinds. Useful for e.g. `perf`.
+[profile.debug-fast]
+inherits = "local"
+debug = true
+strip = "none"
+panic = "unwind"
+
+# Optimized release profile.
+[profile.release]
+opt-level = 3
+debug = "line-tables-only"
+lto = "fat"
+strip = "debuginfo"
+panic = "abort"
+codegen-units = 1
+
+[workspace.dependencies]
+# alloy
+alloy = { version = "1.0.12", default-features = false }
+
+# revm
+revm = { version = "26.0.1", default-features = false }
