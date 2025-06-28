@@ -23,4 +23,5 @@ foundry-compilers.workspace = true
 
 # misc
 eyre.workspace = true
+lazy_static.workspace = true
 paste.workspace = true

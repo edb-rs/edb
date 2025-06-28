@@ -2,11 +2,10 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 mod artifact;
-mod ast;
 pub use artifact::*;
 
-mod core;
-pub use core::*;
+mod analysis;
+pub use analysis::*;
 
 mod debugger;
 pub use debugger::*;

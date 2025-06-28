@@ -1,0 +1,1 @@
+//! Variable scope analysis.
