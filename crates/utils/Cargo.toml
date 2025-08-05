@@ -1,0 +1,30 @@
+[package]
+name = "edb-utils"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+# Core dependencies
+alloy-primitives = { workspace = true }
+alloy-provider = { workspace = true }
+alloy-rpc-types = { workspace = true }
+alloy-transport-http = { workspace = true }
+alloy-network = { workspace = true }
+alloy-evm = { workspace = true }
+
+# REVM with required features
+revm = { workspace = true, features = ["std", "serde"] }
+reqwest = { workspace = true }
+
+# Async and utilities
+eyre = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+futures = { workspace = true }
+
+# Misc
+indicatif = { workspace = true }
+
+[dev-dependencies]
+serde_json = "1.0"

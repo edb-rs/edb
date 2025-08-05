@@ -1,0 +1,53 @@
+[package]
+name = "edb"
+description = "Ethereum Debugger - A step-by-step debugger for Ethereum transactions"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[[bin]]
+name = "edb"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# workspace crates
+edb-engine = { path = "../engine" }
+edb-tui = { path = "../tui" }
+edb-webui = { path = "../webui" }
+edb-utils = { path = "../utils" }
+
+# alloy - using individual crates like Foundry does
+alloy-primitives = { workspace = true }
+alloy-provider = { workspace = true }
+alloy-rpc-types = { workspace = true }
+
+# revm
+revm = { workspace = true, features = ["std", "serde"] }
+
+# foundry
+foundry-compilers = { workspace = true }
+
+# async
+tokio = { version = "1", features = ["full"] }
+
+# cli
+clap = { version = "4", features = ["derive", "env"] }
+
+# misc
+eyre.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenv = "0.15"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.0"

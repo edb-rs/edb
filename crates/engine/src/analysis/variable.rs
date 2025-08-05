@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use alloy::primitives::U256;
+use alloy_primitives::U256;
 use lazy_static::lazy_static;
 
 lazy_static! {

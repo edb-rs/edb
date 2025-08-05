@@ -1,0 +1,217 @@
+//! Chain forking and transaction replay utilities
+//!
+//! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
+
+use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id};
+use alloy_primitives::{TxHash, TxKind, B256, U256};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types::{BlockNumberOrTag, Transaction, TransactionTrait};
+use indicatif::ProgressBar;
+use revm::{context::{ContextTr, TxEnv}, context_interface::block::BlobExcessGasAndPrice, database::{AlloyDB, CacheDB, StateBuilder}, Context, ExecuteCommitEvm, MainBuilder, MainContext};
+use eyre::Result;
+use std::{sync::Arc};
+use tracing::{info, debug, error};
+
+use revm::{
+    // Use re-exported primitives from revm
+    context::{
+        result::{ExecutionResult},
+    },
+    database_interface::WrapDatabaseAsync,
+    primitives::{hardfork::SpecId},
+};
+
+/// Fork configuration details
+#[derive(Debug, Clone)]
+pub struct ForkInfo {
+    /// Block number that was forked
+    pub block_number: u64,
+    /// Block hash
+    pub block_hash: B256,
+    /// Timestamp of the block
+    pub timestamp: u64,
+    /// Chain ID
+    pub chain_id: u64,
+    /// Spec ID for the hardfork
+    pub spec_id: SpecId,
+}
+
+/// Result of forking operation containing comprehensive replay information
+pub struct ForkResult<CTX> {
+    /// Fork information
+    pub fork_info: ForkInfo,
+    /// Revm context with executed state
+    pub context: CTX,
+    /// Transaction environment for the target transaction
+    pub target_tx_env: TxEnv,
+}
+
+/// Fork the chain and ACTUALLY EXECUTE preceding transactions with revm.transact_commit()
+/// 
+/// This function:
+/// 1. Creates revm database and environment
+/// 2. Actually executes each preceding transaction with revm
+/// 3. Commits each transaction
+/// 4. Returns forked state ready for target transaction
+pub async fn fork_and_prepare(
+    rpc_url: &String,
+    target_tx_hash: TxHash,
+) -> Result<ForkResult<impl ContextTr>> {
+    info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
+    
+    // Initialize provider
+    let provider = ProviderBuilder::new()
+        .connect(rpc_url)
+        .await?;
+
+    let chain_id = provider.get_chain_id().await.unwrap_or(1);
+    debug_assert_eq!(chain_id, 1, "Expected mainnet chain ID 1, got {}", chain_id);
+    
+    // Get the target transaction to find which block it's in
+    let target_tx = provider
+        .get_transaction_by_hash(target_tx_hash)
+        .await?
+        .ok_or_else(|| eyre::eyre!("Target transaction not found: {:?}", target_tx_hash))?;
+    
+    let target_block_number = target_tx
+        .block_number
+        .ok_or_else(|| eyre::eyre!("Target transaction not mined: {:?}", target_tx_hash))?;
+    
+    info!("Target transaction is in block {}", target_block_number);
+    
+    // Get the full block with transactions
+    let block = provider
+        .get_block_by_number(BlockNumberOrTag::Number(target_block_number))
+        .await?
+        .ok_or_else(|| eyre::eyre!("Block {} not found", target_block_number))?;
+    
+    // Get the transactions in the block
+    let transactions = block.transactions.as_transactions().unwrap_or_default();
+    
+    // Find target transaction index
+    let target_index = transactions
+        .iter()
+        .position(|tx| *tx.inner.hash() == target_tx_hash)
+        .ok_or_else(|| eyre::eyre!("Target transaction not found in block"))?;
+    
+    // Get all transactions before the target
+    let preceding_txs: Vec<TxHash> = transactions
+        .iter()
+        .take(target_index)
+        .map(|tx| *tx.inner.hash())
+        .collect();
+
+    // Get the spec ID for the block using our mainnet mapping
+    let spec_id = get_mainnet_spec_id(target_block_number);
+
+    // Create fork info
+    let fork_info = ForkInfo {
+        block_number: target_block_number,
+        block_hash: block.header.hash,
+        timestamp: block.header.timestamp,
+        chain_id: chain_id,
+        spec_id: spec_id,
+    };
+    
+    // Create revm database: we start with EmptyDB, will enhance with AlloyDB later
+    let state_db = WrapDatabaseAsync::new(AlloyDB::new(provider.clone(), (target_block_number - 1).into())).ok_or(eyre::eyre!("Failed to create AlloyDB"))?;
+    let cache_db: CacheDB<_> = CacheDB::new(state_db);
+    let state = StateBuilder::new_with_database(cache_db).build();
+
+    let ctx = Context::mainnet()
+        .with_db(state)
+        .modify_block_chained(|b| {
+            b.number = U256::from(target_block_number);
+            b.timestamp = U256::from(block.header.timestamp);
+            b.basefee = block.header.base_fee_per_gas.unwrap_or_default();
+            b.difficulty = block.header.difficulty;
+            b.gas_limit = block.header.gas_limit;
+            b.prevrandao = Some(block.header.mix_hash);
+            // Note: blob_excess_gas_and_price might not be available in older blocks
+            b.blob_excess_gas_and_price = block.header.excess_blob_gas.map(|g| BlobExcessGasAndPrice::new(
+            g,
+            get_blob_base_fee_update_fraction_by_spec_id(spec_id)))
+        })
+        .modify_cfg_chained(|c| {
+            c.chain_id = chain_id;
+            c.spec = spec_id.into();
+        });
+
+    let mut evm = ctx.build_mainnet();
+
+    debug!("Executing {} preceding transactions", preceding_txs.len());
+    
+    // Actually execute each transaction with revm
+    let console_bar = Arc::new(ProgressBar::new(preceding_txs.len() as u64));
+    for (i, tx_hash) in preceding_txs.iter().enumerate() {
+        debug!("Executing transaction {}/{}: {:?}", i + 1, preceding_txs.len(), tx_hash);
+        
+        // Get transaction details
+        let tx = provider
+            .get_transaction_by_hash(*tx_hash)
+            .await?
+            .ok_or_else(|| eyre::eyre!("Transaction not found: {:?}", tx_hash))?;
+        
+        let tx = get_tx_env_from_tx(&tx, chain_id)?;
+        
+        // Actually execute the transaction with commit
+        match evm.transact_commit(tx) {
+            Ok(result) => {
+                match result {
+                    ExecutionResult::Success { gas_used, .. } => {
+                        debug!("Transaction {} executed and committed successfully, gas used: {}", i + 1, gas_used);
+                    }
+                    ExecutionResult::Revert { gas_used, output } => {
+                        debug!("Transaction {} reverted but committed, gas used: {}, output: {:?}", i + 1, gas_used, output);
+                    }
+                    ExecutionResult::Halt { reason, gas_used } => {
+                        debug!("Transaction {} halted, gas used: {}, reason: {:?}", i + 1, gas_used, reason);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("💥 Failed to execute transaction {}: {:?}", i + 1, e);
+                return Err(eyre::eyre!("Transaction execution failed at index {}: {:?}", i, e));
+            }
+        }
+
+        console_bar.inc(1);
+    }
+
+    console_bar.finish_with_message(format!("Fork and prepare complete for {}.", target_tx_hash));
+    
+    // Get the target transaction environment
+    let target_tx_env = get_tx_env_from_tx(&target_tx, chain_id)?;
+    
+    // Extract the context from the EVM
+    let context = evm.ctx;
+    
+    Ok(ForkResult {
+        fork_info,
+        context,
+        target_tx_env,
+    })
+}
+
+
+pub fn get_tx_env_from_tx(
+    tx: &Transaction,
+    chain_id: u64,
+) -> Result<TxEnv> {
+    TxEnv::builder()
+        .caller(tx.inner.signer())
+        .gas_limit(tx.gas_limit())
+        .gas_price(tx.gas_price().unwrap_or(tx.inner.max_fee_per_gas()))
+        .value(tx.value())
+        .data(tx.input().to_owned())
+        .gas_priority_fee(tx.max_priority_fee_per_gas())
+        .chain_id(Some(chain_id))
+        .nonce(tx.nonce())
+        .access_list(tx.access_list().cloned().unwrap_or_default())
+        .kind(match tx.to() {
+            Some(to) => TxKind::Call(to),
+            None => TxKind::Create,
+        })
+        .build()
+        .map_err(|e| eyre::eyre!("Failed to build transaction environment: {:?}", e))
+}

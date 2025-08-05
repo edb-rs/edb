@@ -1,0 +1,55 @@
+[package]
+name = "edb-engine"
+description = "EDB's core analysis and instrumentation engine"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy - using individual crates like Foundry does
+alloy-primitives = { workspace = true }
+alloy-provider = { workspace = true }
+alloy-rpc-types = { workspace = true }
+alloy-contract = { workspace = true }
+alloy-network = { workspace = true }
+alloy-transport-http = { workspace = true }
+alloy-dyn-abi = { workspace = true }
+alloy-json-abi = { workspace = true }
+alloy-sol-types = { workspace = true }
+
+# foundry
+foundry-compilers = { workspace = true }
+foundry-block-explorers = { workspace = true }
+
+# revm
+revm = { workspace = true, features = ["std", "serde", "optional_eip3607", "optional_block_gas_limit", "optional_no_base_fee"] }
+
+# async
+tokio = { version = "1", features = ["full"] }
+
+# serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# web server
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+
+# misc
+eyre.workspace = true
+lazy_static.workspace = true
+paste.workspace = true
+hex.workspace = true
+tempfile.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
