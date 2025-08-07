@@ -85,8 +85,8 @@ async fn main() -> Result<()> {
     // Parse CLI arguments
     let cli = Cli::parse();
 
-    // Execute the command
-    let analysis_result = match &cli.command {
+    // Execute the command to get RPC server handle
+    let rpc_server_handle = match &cli.command {
         Commands::Replay { tx_hash } => {
             tracing::info!("Replaying transaction: {}", tx_hash);
             let tx_hash: TxHash = tx_hash.parse()?;
@@ -98,26 +98,29 @@ async fn main() -> Result<()> {
         }
     };
 
-    tracing::info!(
-        "Analysis complete. Found {} touched contracts",
-        analysis_result.touched_contracts.len()
-    );
+    tracing::info!("Engine preparation complete. RPC server is running on {}", rpc_server_handle.addr);
 
-    // Launch the selected UI
-    match cli.ui {
+    // Launch the selected UI concurrently with the RPC server
+    let ui_handle = match cli.ui {
         UiMode::Tui => {
             tracing::info!("Launching Terminal UI...");
             let tui_config = edb_tui::TuiConfig {
-                rpc_url: format!("http://localhost:{}", cli.port),
+                rpc_url: format!("http://{}", rpc_server_handle.addr),
                 ..Default::default()
             };
-            edb_tui::api::start_tui(tui_config).await?;
+            
+            // Spawn TUI in a separate task
+            tokio::spawn(async move {
+                if let Err(e) = edb_tui::api::start_tui(tui_config).await {
+                    tracing::error!("TUI failed: {}", e);
+                }
+            })
         }
         UiMode::Web => {
             tracing::info!("Launching Web UI...");
             let webui_config = edb_webui::WebUiConfig {
                 port: 3000,
-                engine_rpc_url: format!("http://localhost:{}", cli.port),
+                engine_rpc_url: format!("http://{}", rpc_server_handle.addr),
             };
 
             // Open browser
@@ -126,15 +129,44 @@ async fn main() -> Result<()> {
                 println!("Please open http://localhost:{} in your browser", webui_config.port);
             }
 
-            edb_webui::api::start_webui(webui_config).await?;
+            // Spawn Web UI in a separate task
+            tokio::spawn(async move {
+                if let Err(e) = edb_webui::api::start_webui(webui_config).await {
+                    tracing::error!("Web UI failed: {}", e);
+                }
+            })
         }
+    };
+
+    tracing::info!("Both RPC server and UI are running. Press Ctrl+C to exit.");
+
+    // Wait for either:
+    // 1. Ctrl+C signal
+    // 2. UI task completion
+    // 3. Any other termination signal
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Received Ctrl+C, shutting down...");
+        }
+        _ = ui_handle => {
+            tracing::info!("UI task completed, shutting down...");
+        }
+    }
+
+    tracing::info!("Shutting down EDB...");
+    
+    // Gracefully shutdown the RPC server
+    if let Err(e) = rpc_server_handle.shutdown() {
+        tracing::error!("Failed to shutdown RPC server: {}", e);
+    } else {
+        tracing::info!("RPC server shut down successfully");
     }
 
     Ok(())
 }
 
 /// Replay an existing transaction following the correct architecture
-async fn replay_transaction(tx_hash: TxHash, cli: &Cli) -> Result<edb_engine::AnalysisResult> {
+async fn replay_transaction(tx_hash: TxHash, cli: &Cli) -> Result<edb_engine::rpc::RpcServerHandle> {
     tracing::info!("Starting transaction replay workflow");
 
     // Step 1: Fork the chain and replay earlier transactions in the block
@@ -153,8 +185,8 @@ async fn replay_transaction(tx_hash: TxHash, cli: &Cli) -> Result<edb_engine::An
         quick: cli.quick,
     };
 
-    // Step 3: Call engine::analyze with forked database and EVM config
-    tracing::info!("Calling engine::analyze with prepared inputs");
+    // Step 3: Call engine::prepare with forked database and EVM config
+    tracing::info!("Calling engine::prepare with prepared inputs");
 
     // Convert utils types to engine placeholders
     // TODO: Once engine is updated to use real types, pass context and tx_env directly
@@ -170,13 +202,13 @@ async fn replay_transaction(tx_hash: TxHash, cli: &Cli) -> Result<edb_engine::An
     );
     let handler_cfg_placeholder = format!("handler_{:?}", fork_result.fork_info.spec_id);
 
-    // Create the engine and run analysis
+    // Create the engine and run preparation
     let engine = edb_engine::Engine::new(engine_config);
-    engine.analyze(tx_hash, database_placeholder, env_placeholder, handler_cfg_placeholder).await
+    engine.prepare(tx_hash, database_placeholder, env_placeholder, handler_cfg_placeholder).await
 }
 
 /// Debug a Foundry test case
-async fn debug_foundry_test(test_name: &str, cli: &Cli) -> Result<edb_engine::AnalysisResult> {
+async fn debug_foundry_test(test_name: &str, cli: &Cli) -> Result<edb_engine::rpc::RpcServerHandle> {
     tracing::info!("Starting Foundry test debug workflow");
 
     // Step 1: Find the transaction hash for the test

@@ -3,14 +3,17 @@
 //! This module provides a JSON-RPC interface for front-ends to control
 //! and inspect debugging sessions.
 
+use crate::analysis::AnalysisResult;
 use axum::{
     response::Json,
     routing::{get, post},
     Router,
 };
 use eyre::Result;
+use revm::database::CacheDB;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 /// Handle to the running RPC server
 #[derive(Debug)]
@@ -19,6 +22,16 @@ pub struct RpcServerHandle {
     pub addr: SocketAddr,
     /// Shutdown signal
     shutdown_tx: tokio::sync::oneshot::Sender<()>,
+}
+
+impl RpcServerHandle {
+    /// Gracefully shutdown the RPC server
+    pub fn shutdown(self) -> Result<()> {
+        if let Err(_) = self.shutdown_tx.send(()) {
+            tracing::warn!("RPC server already shut down");
+        }
+        Ok(())
+    }
 }
 
 /// RPC request structure
@@ -46,10 +59,34 @@ struct RpcError {
     message: String,
 }
 
-/// Start the JSON-RPC server
-pub async fn start_server(port: u16) -> Result<RpcServerHandle> {
-    let app =
-        Router::new().route("/", post(handle_rpc_request)).route("/health", get(health_check));
+/// State snapshots - a vector of CacheDB instances at different execution points
+pub type StateSnapshots<DB> = Vec<CacheDB<DB>>;
+
+/// Server state containing analysis results and state snapshots
+#[derive(Clone)]
+struct ServerState<DB> {
+    analysis_result: Arc<AnalysisResult>,
+    snapshots: Arc<StateSnapshots<DB>>,
+}
+
+/// Start the JSON-RPC server with analysis results and state snapshots
+pub async fn start_server<DB>(
+    port: u16,
+    analysis_result: AnalysisResult,
+    snapshots: StateSnapshots<DB>,
+) -> Result<RpcServerHandle>
+where
+    DB: Clone + Send + Sync + 'static,
+{
+    let state = ServerState {
+        analysis_result: Arc::new(analysis_result),
+        snapshots: Arc::new(snapshots),
+    };
+
+    let app = Router::new()
+        .route("/", post(handle_rpc_request))
+        .route("/health", get(health_check))
+        .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;

@@ -8,8 +8,9 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_primitives::{Address, TxHash, U256};
+use alloy_primitives::{Address, TxHash};
 use eyre::Result;
+use revm::database::CacheDB;
 use std::collections::HashMap;
 
 mod analysis;
@@ -55,7 +56,7 @@ impl Engine {
         Self::new(EngineConfig::default())
     }
 
-    /// Main analysis method for the engine
+    /// Main preparation method for the engine
     ///
     /// This method accepts a forked database and EVM configuration prepared by the edb binary.
     /// It focuses on the core debugging workflow:
@@ -64,15 +65,18 @@ impl Engine {
     /// 3. Instruments the source code with precompile calls
     /// 4. Recompiles and redeploys the instrumented contracts
     /// 5. Re-executes the transaction with state snapshots
-    /// 6. Starts a JSON-RPC server for debugging control
-    pub async fn analyze(
+    /// 6. Starts a JSON-RPC server with the analysis results and snapshots
+    pub async fn prepare<DB>(
         &self,
         tx_hash: TxHash,
-        mut _database: DatabasePlaceholder,
+        mut _database: DB,
         _env: EnvPlaceholder,
         _handler_cfg: HandlerCfgPlaceholder,
-    ) -> Result<AnalysisResult> {
-        tracing::info!("Starting engine analysis of transaction: {:?}", tx_hash);
+    ) -> Result<rpc::RpcServerHandle>
+    where
+        DB: Clone + Send + Sync + 'static,
+    {
+        tracing::info!("Starting engine preparation for transaction: {:?}", tx_hash);
 
         if self.config.quick {
             tracing::info!("Quick mode enabled - some analysis steps may be skipped");
@@ -120,55 +124,31 @@ impl Engine {
 
         // Step 6: Re-execute the transaction with snapshot collection
         tracing::info!("Re-executing transaction with snapshot collection");
-        let snapshots = if !self.config.quick {
-            execute_with_snapshots(tx_hash).await?
+        let snapshots: rpc::StateSnapshots<DB> = if !self.config.quick {
+            // TODO: Implement proper snapshot collection with CacheDB instances
+            tracing::warn!("Snapshot collection not yet implemented - using empty list");
+            vec![]
         } else {
-            tracing::info!("Quick mode - using minimal snapshots");
+            tracing::info!("Quick mode - skipping snapshot collection");
             vec![]
         };
         tracing::info!("Collected {} state snapshots", snapshots.len());
 
-        // Step 7: Start RPC server for UI communication
-        tracing::info!("Starting JSON-RPC server on port {}", self.config.rpc_port);
-        let rpc_handle = rpc::start_server(self.config.rpc_port).await?;
+        // Create analysis result from the collected data
+        let analysis_result = AnalysisResult {
+            tx_hash,
+            touched_contracts,
+            source_code,
+        };
 
-        Ok(AnalysisResult { tx_hash, touched_contracts, source_code, snapshots, rpc_handle })
+        // Step 7: Start RPC server with analysis results and snapshots
+        tracing::info!("Starting JSON-RPC server on port {}", self.config.rpc_port);
+        let rpc_handle = rpc::start_server(self.config.rpc_port, analysis_result, snapshots).await?;
+
+        Ok(rpc_handle)
     }
 }
 
-/// Main analysis result containing all debugging information
-#[derive(Debug)]
-pub struct AnalysisResult {
-    /// Transaction hash that was analyzed
-    pub tx_hash: TxHash,
-    /// All contract addresses touched during execution
-    pub touched_contracts: Vec<Address>,
-    /// Map of contract addresses to their source code
-    pub source_code: HashMap<Address, String>,
-    /// State snapshots at each instrumentation point
-    pub snapshots: Vec<StateSnapshot>,
-    /// RPC server handle
-    pub rpc_handle: rpc::RpcServerHandle,
-}
-
-/// State snapshot at a specific execution point
-#[derive(Debug, Clone)]
-pub struct StateSnapshot {
-    /// Step number in the execution
-    pub step: usize,
-    /// Contract address being executed
-    pub contract: Address,
-    /// Function selector being called
-    pub selector: [u8; 4],
-    /// Gas remaining
-    pub gas: U256,
-    /// Stack state
-    pub stack: Vec<U256>,
-    /// Memory state
-    pub memory: Vec<u8>,
-    /// Storage changes
-    pub storage: HashMap<U256, U256>,
-}
 
 /// Simplified database type for now
 /// TODO: Replace with proper revm::Database once API is stable
@@ -182,17 +162,20 @@ pub type EnvPlaceholder = String;
 /// TODO: Replace with proper revm::handler::HandlerCfg once API is stable  
 pub type HandlerCfgPlaceholder = String;
 
-/// Standalone analyze function for backward compatibility
-/// Creates an Engine with the provided config and runs analysis
-pub async fn analyze(
+/// Standalone prepare function for backward compatibility
+/// Creates an Engine with the provided config and runs preparation
+pub async fn prepare<DB>(
     tx_hash: TxHash,
-    database: DatabasePlaceholder,
+    database: DB,
     env: EnvPlaceholder,
     handler_cfg: HandlerCfgPlaceholder,
     config: EngineConfig,
-) -> Result<AnalysisResult> {
+) -> Result<rpc::RpcServerHandle>
+where
+    DB: Clone + Send + Sync + 'static,
+{
     let engine = Engine::new(config);
-    engine.analyze(tx_hash, database, env, handler_cfg).await
+    engine.prepare(tx_hash, database, env, handler_cfg).await
 }
 
 /// Replay transaction and collect all touched contract addresses
@@ -227,30 +210,3 @@ async fn replace_contract_bytecode(
     Ok(())
 }
 
-/// Execute transaction with snapshot collection at each instrumentation point
-async fn execute_with_snapshots(tx_hash: TxHash) -> Result<Vec<StateSnapshot>> {
-    tracing::debug!("Executing transaction {:?} with snapshot collection", tx_hash);
-
-    // TODO: Implement with revm and custom precompile handler
-    // 1. Execute the transaction with instrumented contracts
-    // 2. On each precompile call at 0x000...023333, create a state snapshot
-    // 3. Collect all snapshots during execution
-    // 4. Return the chain of state snapshots
-
-    tracing::warn!("Transaction execution with snapshots not yet implemented - using stub");
-
-    let snapshots = vec![
-        // Example snapshot
-        StateSnapshot {
-            step: 0,
-            contract: Address::ZERO,
-            selector: [0x00, 0x00, 0x00, 0x00],
-            gas: U256::from(21000),
-            stack: vec![],
-            memory: vec![],
-            storage: HashMap::new(),
-        },
-    ];
-
-    Ok(snapshots)
-}
