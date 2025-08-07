@@ -78,10 +78,8 @@ pub async fn start_server<DB>(
 where
     DB: Clone + Send + Sync + 'static,
 {
-    let state = ServerState {
-        analysis_result: Arc::new(analysis_result),
-        snapshots: Arc::new(snapshots),
-    };
+    let state =
+        ServerState { analysis_result: Arc::new(analysis_result), snapshots: Arc::new(snapshots) };
 
     let app = Router::new()
         .route("/", post(handle_rpc_request))

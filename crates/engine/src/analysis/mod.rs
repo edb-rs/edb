@@ -1,9 +1,6 @@
 mod common;
 pub use common::*;
 
-mod instrument;
-pub use instrument::*;
-
 mod scope;
 pub use scope::*;
 

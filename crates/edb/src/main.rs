@@ -98,7 +98,10 @@ async fn main() -> Result<()> {
         }
     };
 
-    tracing::info!("Engine preparation complete. RPC server is running on {}", rpc_server_handle.addr);
+    tracing::info!(
+        "Engine preparation complete. RPC server is running on {}",
+        rpc_server_handle.addr
+    );
 
     // Launch the selected UI concurrently with the RPC server
     let ui_handle = match cli.ui {
@@ -108,7 +111,7 @@ async fn main() -> Result<()> {
                 rpc_url: format!("http://{}", rpc_server_handle.addr),
                 ..Default::default()
             };
-            
+
             // Spawn TUI in a separate task
             tokio::spawn(async move {
                 if let Err(e) = edb_tui::api::start_tui(tui_config).await {
@@ -154,7 +157,7 @@ async fn main() -> Result<()> {
     }
 
     tracing::info!("Shutting down EDB...");
-    
+
     // Gracefully shutdown the RPC server
     if let Err(e) = rpc_server_handle.shutdown() {
         tracing::error!("Failed to shutdown RPC server: {}", e);
@@ -166,7 +169,10 @@ async fn main() -> Result<()> {
 }
 
 /// Replay an existing transaction following the correct architecture
-async fn replay_transaction(tx_hash: TxHash, cli: &Cli) -> Result<edb_engine::rpc::RpcServerHandle> {
+async fn replay_transaction(
+    tx_hash: TxHash,
+    cli: &Cli,
+) -> Result<edb_engine::rpc::RpcServerHandle> {
     tracing::info!("Starting transaction replay workflow");
 
     // Step 1: Fork the chain and replay earlier transactions in the block
@@ -188,27 +194,16 @@ async fn replay_transaction(tx_hash: TxHash, cli: &Cli) -> Result<edb_engine::rp
     // Step 3: Call engine::prepare with forked database and EVM config
     tracing::info!("Calling engine::prepare with prepared inputs");
 
-    // Convert utils types to engine placeholders
-    // TODO: Once engine is updated to use real types, pass context and tx_env directly
-    let database_placeholder = format!(
-        "forked_db_chain_{}_block_{}",
-        fork_result.fork_info.chain_id, fork_result.fork_info.block_number
-    );
-    let env_placeholder = format!(
-        "env_chain_{}_block_{}_spec_{:?}",
-        fork_result.fork_info.chain_id,
-        fork_result.fork_info.block_number,
-        fork_result.fork_info.spec_id
-    );
-    let handler_cfg_placeholder = format!("handler_{:?}", fork_result.fork_info.spec_id);
-
     // Create the engine and run preparation
     let engine = edb_engine::Engine::new(engine_config);
-    engine.prepare(tx_hash, database_placeholder, env_placeholder, handler_cfg_placeholder).await
+    engine.prepare(fork_result).await
 }
 
 /// Debug a Foundry test case
-async fn debug_foundry_test(test_name: &str, cli: &Cli) -> Result<edb_engine::rpc::RpcServerHandle> {
+async fn debug_foundry_test(
+    test_name: &str,
+    cli: &Cli,
+) -> Result<edb_engine::rpc::RpcServerHandle> {
     tracing::info!("Starting Foundry test debug workflow");
 
     // Step 1: Find the transaction hash for the test

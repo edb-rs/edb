@@ -1910,6 +1910,7 @@ dependencies = [
  "alloy-sol-types",
  "alloy-transport-http",
  "axum",
+ "edb-utils",
  "eyre",
  "foundry-block-explorers",
  "foundry-compilers",

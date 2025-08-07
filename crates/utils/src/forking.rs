@@ -47,6 +47,8 @@ pub struct ForkResult<CTX> {
     pub context: CTX,
     /// Transaction environment for the target transaction
     pub target_tx_env: TxEnv,
+    /// Target transaction hash
+    pub target_tx_hash: TxHash,
 }
 
 /// Fork the chain and ACTUALLY EXECUTE preceding transactions with revm.transact_commit()
@@ -188,7 +190,7 @@ pub async fn fork_and_prepare(
                     }
                 },
                 Err(e) => {
-                    error!("💥 Failed to execute transaction {}: {:?}", i + 1, e);
+                    error!("Failed to execute transaction {}: {:?}", i + 1, e);
                     return Err(eyre::eyre!(
                         "Transaction execution failed at index {}: {:?}",
                         i,
@@ -210,7 +212,7 @@ pub async fn fork_and_prepare(
     // Extract the context from the EVM
     let context = evm.ctx;
 
-    Ok(ForkResult { fork_info, context, target_tx_env })
+    Ok(ForkResult { fork_info, context, target_tx_env, target_tx_hash })
 }
 
 pub fn get_tx_env_from_tx(tx: &Transaction, chain_id: u64) -> Result<TxEnv> {
