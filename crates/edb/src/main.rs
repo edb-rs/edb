@@ -33,6 +33,10 @@ pub struct Cli {
     #[arg(long, env = "ETHERSCAN_API_KEY")]
     pub etherscan_api_key: Option<String>,
 
+    /// Quick mode - skip replaying preceding transactions in the block
+    #[arg(long)]
+    pub quick: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -130,15 +134,12 @@ async fn main() -> Result<()> {
 }
 
 /// Replay an existing transaction following the correct architecture
-async fn replay_transaction(
-    tx_hash: TxHash,
-    cli: &Cli,
-) -> Result<edb_engine::AnalysisResult> {
+async fn replay_transaction(tx_hash: TxHash, cli: &Cli) -> Result<edb_engine::AnalysisResult> {
     tracing::info!("Starting transaction replay workflow");
 
     // Step 1: Fork the chain and replay earlier transactions in the block
     // Fork and prepare the database/environment for the target transaction
-    let fork_result = edb_utils::fork_and_prepare(&cli.rpc_url, tx_hash).await?;
+    let fork_result = edb_utils::fork_and_prepare(&cli.rpc_url, tx_hash, cli.quick).await?;
 
     tracing::info!(
         "Forked chain and prepared database for transaction replay at block {}",
@@ -149,41 +150,33 @@ async fn replay_transaction(
     let engine_config = edb_engine::EngineConfig {
         rpc_port: cli.port,
         etherscan_api_key: cli.etherscan_api_key.clone(),
+        quick: cli.quick,
     };
 
     // Step 3: Call engine::analyze with forked database and EVM config
     tracing::info!("Calling engine::analyze with prepared inputs");
-    
+
     // Convert utils types to engine placeholders
     // TODO: Once engine is updated to use real types, pass context and tx_env directly
     let database_placeholder = format!(
-        "forked_db_chain_{}_block_{}", 
-        fork_result.fork_info.chain_id,
-        fork_result.fork_info.block_number
+        "forked_db_chain_{}_block_{}",
+        fork_result.fork_info.chain_id, fork_result.fork_info.block_number
     );
     let env_placeholder = format!(
-        "env_chain_{}_block_{}_spec_{:?}", 
+        "env_chain_{}_block_{}_spec_{:?}",
         fork_result.fork_info.chain_id,
         fork_result.fork_info.block_number,
         fork_result.fork_info.spec_id
     );
     let handler_cfg_placeholder = format!("handler_{:?}", fork_result.fork_info.spec_id);
-    
-    edb_engine::analyze(
-        tx_hash,
-        database_placeholder,
-        env_placeholder,
-        handler_cfg_placeholder,
-        engine_config,
-    )
-    .await
+
+    // Create the engine and run analysis
+    let engine = edb_engine::Engine::new(engine_config);
+    engine.analyze(tx_hash, database_placeholder, env_placeholder, handler_cfg_placeholder).await
 }
 
 /// Debug a Foundry test case
-async fn debug_foundry_test(
-    test_name: &str,
-    cli: &Cli,
-) -> Result<edb_engine::AnalysisResult> {
+async fn debug_foundry_test(test_name: &str, cli: &Cli) -> Result<edb_engine::AnalysisResult> {
     tracing::info!("Starting Foundry test debug workflow");
 
     // Step 1: Find the transaction hash for the test

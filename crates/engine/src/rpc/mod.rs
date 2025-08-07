@@ -48,9 +48,8 @@ struct RpcError {
 
 /// Start the JSON-RPC server
 pub async fn start_server(port: u16) -> Result<RpcServerHandle> {
-    let app = Router::new()
-        .route("/", post(handle_rpc_request))
-        .route("/health", get(health_check));
+    let app =
+        Router::new().route("/", post(handle_rpc_request)).route("/health", get(health_check));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -70,10 +69,7 @@ pub async fn start_server(port: u16) -> Result<RpcServerHandle> {
 
     tracing::info!("JSON-RPC server started on {}", actual_addr);
 
-    Ok(RpcServerHandle {
-        addr: actual_addr,
-        shutdown_tx,
-    })
+    Ok(RpcServerHandle { addr: actual_addr, shutdown_tx })
 }
 
 /// Handle RPC requests

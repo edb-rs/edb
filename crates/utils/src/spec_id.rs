@@ -3,7 +3,10 @@
 //! This module provides utilities to determine the correct SpecId (hardfork)
 //! based on block numbers for Ethereum mainnet.
 
-use revm::primitives::{eip4844::{BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE}, hardfork::SpecId};
+use revm::primitives::{
+    eip4844::{BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN, BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE},
+    hardfork::SpecId,
+};
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -33,7 +36,7 @@ static MAINNET_HARDFORKS: LazyLock<BTreeMap<u64, SpecId>> = LazyLock::new(|| {
 });
 
 /// Get the SpecId for a given block number on Ethereum mainnet
-/// 
+///
 /// This function uses a global BTreeMap to efficiently find the correct hardfork
 /// specification for any given block number. It handles the special case
 /// of Constantinople/Petersburg where Petersburg immediately replaced
@@ -78,22 +81,22 @@ mod tests {
         // Test genesis
         assert_eq!(get_mainnet_spec_id(0), SpecId::FRONTIER);
         assert_eq!(get_mainnet_spec_id(1), SpecId::FRONTIER);
-        
+
         // Test Homestead
         assert_eq!(get_mainnet_spec_id(1_149_999), SpecId::FRONTIER);
         assert_eq!(get_mainnet_spec_id(1_150_000), SpecId::HOMESTEAD);
         assert_eq!(get_mainnet_spec_id(1_150_001), SpecId::HOMESTEAD);
-        
+
         // Test Constantinople/Petersburg transition
         assert_eq!(get_mainnet_spec_id(7_279_999), SpecId::BYZANTIUM);
         assert_eq!(get_mainnet_spec_id(7_280_000), SpecId::PETERSBURG); // Petersburg, not Constantinople
         assert_eq!(get_mainnet_spec_id(7_280_001), SpecId::PETERSBURG);
-        
+
         // Test recent hardforks
         assert_eq!(get_mainnet_spec_id(15_537_394), SpecId::MERGE);
         assert_eq!(get_mainnet_spec_id(17_034_870), SpecId::SHANGHAI);
         assert_eq!(get_mainnet_spec_id(19_426_589), SpecId::CANCUN);
-        
+
         // Test future blocks
         assert_eq!(get_mainnet_spec_id(20_000_000), SpecId::CANCUN);
         assert_eq!(get_mainnet_spec_id(u64::MAX), SpecId::CANCUN);

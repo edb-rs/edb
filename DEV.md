@@ -12,10 +12,11 @@ This document provides comprehensive guidance for developing the Ethereum Debugg
 ### Dependencies
 EDB uses Foundry's exact dependency versions to ensure compatibility:
 - **alloy-primitives**: 1.3.0
-- **alloy-provider**: 1.0.23
+- **alloy-provider**: 1.0.23 (with `reqwest` feature)
 - **alloy-rpc-types**: 1.0.23
+- **alloy-transport-http**: 1.0.23 (with `reqwest` feature)
 - **revm**: 27.1.0
-- **foundry-compilers**: Latest from Foundry's Cargo.toml
+- **foundry-compilers**: 0.18.2
 
 ## Project Structure
 
@@ -34,18 +35,23 @@ EDB/
 │   │   │   ├── analysis/   # Analysis modules
 │   │   │   ├── instrumentation/ # Standalone directory
 │   │   │   └── rpc/        # JSON-RPC server (standalone)
+│   │   ├── tests/
+│   │   │   └── config_tests.rs # Configuration tests
 │   │   └── Cargo.toml
 │   ├── utils/              # Chain interaction utilities
 │   │   ├── src/
 │   │   │   ├── lib.rs      # Types and public interface
-│   │   │   └── forking.rs  # Chain forking implementation
+│   │   │   ├── forking.rs  # Chain forking with REVM execution
+│   │   │   └── spec_id.rs  # Ethereum hardfork mapping
+│   │   ├── tests/
+│   │   │   └── forking_tests.rs # Comprehensive forking tests
 │   │   └── Cargo.toml
 │   ├── tui/                # Terminal UI (skeleton)
 │   │   └── src/lib.rs
 │   └── webui/              # Web UI (skeleton)
 │       └── src/lib.rs
-├── arch.md                 # Architecture documentation
-├── dev.md                  # This file
+├── ARCH.md                 # Architecture documentation
+├── DEV.md                  # This file
 └── README.md               # User-facing documentation
 ```
 
@@ -59,8 +65,12 @@ Please ensure the following commands pass if you have changed the code:
 # Check compilation
 cargo check --all
 
-# Run tests (when implemented)
+# Run tests
 cargo test --all --all-features
+
+# Run specific test suites
+cargo test -p edb-utils --test forking_tests
+cargo test -p edb-engine --test config_tests
 
 # Format code
 cargo +nightly fmt -- --check
@@ -93,49 +103,72 @@ cargo run -- --rpc-url https://mainnet.infura.io/v3/YOUR_KEY replay 0x<transacti
 ```bash
 # Test with a known transaction (requires RPC access)
 RUST_LOG=debug cargo run -- replay 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
+
+# Run forking integration tests
+ETH_RPC_URL=https://eth.llamarpc.com cargo test -p edb-utils --test forking_tests -- --ignored
 ```
 
 ## Development Areas
 
 ### 1. Utils Crate (`crates/utils`)
 
-**Status: ✅ Complete**
+**Status: ✅ Complete with Tests**
 
-The utils crate handles all chain interaction:
-- `fork_and_prepare()`: Creates chain forks using Alloy provider
-- `replay_transaction()`: Analyzes transaction receipts
-- `analyze_block_transactions()`: Finds transaction dependencies
+The utils crate handles all chain interaction with actual REVM execution:
 
-**Key Implementation Details:**
-- Uses `ProviderBuilder::new().connect(&rpc_url).await?` for RPC connections
-- Accesses transaction fields via `tx.inner.hash()` API
-- Handles receipts with `receipt.logs()` method calls
-- Returns `ForkResult` with placeholder database/environment types
+#### Key Components:
+- **`fork_and_prepare()`**: Creates chain forks and executes preceding transactions
+  - Returns `ForkResult` with `context`, `fork_info`, and `target_tx_env`
+  - Uses REVM's `transact_commit()` for actual transaction execution
+  - Properly sets up block environment and chain configuration
+  
+- **`get_tx_env_from_tx()`**: Converts Alloy Transaction to REVM TxEnv
+  - Handles regular transactions, contract creation, and EIP-2930 access lists
+  - Properly converts all transaction fields including gas, value, and nonce
+
+- **`get_mainnet_spec_id()`**: Maps block numbers to Ethereum hardfork SpecIds
+  - Uses global `LazyLock<BTreeMap>` for efficient lookups
+  - Correctly handles Constantinople/Petersburg at same block height
+  - Covers all mainnet hardforks from Frontier to Cancun
+
+#### Implementation Details:
+- Uses `CacheDB` with `AlloyDB` backend for forked state
+- Executes transactions with `MainnetEvm::transact_commit()`
+- Tracks execution results (Success, Revert, Halt)
+- Progress bar integration for better UX during replay
+
+#### Test Coverage:
+- Unit tests for transaction conversion and SpecId mapping
+- Integration tests with real mainnet transactions
+- Tests for contract creation and EIP-2930 access lists
 
 ### 2. Engine Crate (`crates/engine`)
 
 **Status: 🚧 Partial Implementation**
 
 The engine accepts pre-forked inputs and performs analysis:
-- `analyze()` function signature is complete
-- Placeholder implementations for most modules
+
+#### Current State:
+- `EngineConfig` reduced to only `rpc_port` and `etherscan_api_key`
+- `analyze()` function uses placeholder types (to be replaced with real Context/TxEnv)
 - RPC server structure is in place
 
-**Areas for Development:**
+#### Areas for Development:
 - **Source Download** (`source.rs`): Implement Etherscan API integration
 - **Instrumentation** (`instrumentation/`): Solidity parsing and precompile injection
 - **Compiler** (`compiler.rs`): Contract recompilation with foundry-compilers
 - **Analysis** (`analysis/`): Complete visitor pattern implementation
+- **Inspector** (`inspector/`): Create custom REVM inspector for collecting visited addresses
 
 ### 3. EDB Binary (`crates/edb`)
 
-**Status: ✅ Complete**
+**Status: ✅ Updated for New API**
 
 The main binary orchestrates the workflow:
 - CLI parsing with clap
-- Calls utils for forking
-- Calls engine for analysis
-- Launches UI
+- Calls `fork_and_prepare()` directly with RPC URL
+- Extracts fork info to create placeholders for engine
+- Launches selected UI (TUI or Web)
 
 ### 4. UI Crates
 
@@ -144,6 +177,35 @@ The main binary orchestrates the workflow:
 Both TUI and WebUI crates have basic structure but need implementation.
 
 ## Key Development Patterns
+
+### REVM Transaction Execution
+```rust
+// Create context with database
+let ctx = Context::mainnet()
+    .with_db(state)
+    .modify_block_chained(|b| {
+        b.number = U256::from(block_number);
+        b.timestamp = U256::from(timestamp);
+        // ... other block setup
+    });
+
+// Build and execute EVM
+let mut evm = ctx.build_mainnet();
+match evm.transact_commit(tx_env) {
+    Ok(ExecutionResult::Success { gas_used, .. }) => {
+        info!("Transaction executed successfully");
+    }
+    Ok(ExecutionResult::Revert { output, .. }) => {
+        warn!("Transaction reverted: {:?}", output);
+    }
+    Ok(ExecutionResult::Halt { reason, .. }) => {
+        error!("Transaction halted: {:?}", reason);
+    }
+    Err(e) => {
+        error!("Transaction failed: {:?}", e);
+    }
+}
+```
 
 ### Error Handling
 ```rust
@@ -184,21 +246,48 @@ let tx = provider
 
 ## Common Issues and Solutions
 
-### 1. Alloy API Changes
+### 1. REVM v27 API Changes
+**Problem**: REVM v27 has significant API changes from earlier versions
+**Solution**: 
+- Use `Context` instead of separate `Env` and `Database`
+- Access EVM context via `evm.ctx` not `evm.into_context()`
+- Use `MainnetEvm` type alias for standard Ethereum setup
+
+### 2. Alloy Transport Features
+**Problem**: "No transports enabled" error when connecting to RPC
+**Solution**: Enable `reqwest` feature in alloy-provider and alloy-transport-http
+
+### 3. Transaction Field Access
 **Problem**: Transaction fields moved to `tx.inner.*`
-**Solution**: Access via `tx.inner.hash()`, `tx.inner.from()`, etc.
+**Solution**: 
+- Use trait methods like `tx.gas_limit()`, `tx.value()`, `tx.nonce()`
+- For signer, use `tx.inner.signer()`
 
-### 2. REVM Compatibility
-**Problem**: REVM types changed between versions
-**Solution**: Use placeholder types in utils crate, convert at engine boundary
+### 4. SpecId Variants
+**Problem**: SpecId enum variants are ALL_CAPS in revm v27
+**Solution**: Use `SpecId::LONDON` not `SpecId::London`
 
-### 3. Provider Methods
-**Problem**: `get_block_by_number` signature changed
-**Solution**: Only pass block number, not transaction kind
+### 5. Access List Structure
+**Problem**: AccessListItem fields changed
+**Solution**: Use `.address` and `.storage_keys` fields instead of tuple access
 
-### 4. Async Context
-**Problem**: All provider methods are async
-**Solution**: Ensure functions are `async` and use `.await?`
+## Testing Guidelines
+
+### Unit Tests
+- Test pure functions and type conversions
+- Mock external dependencies
+- Focus on edge cases and error conditions
+
+### Integration Tests
+- Use `#[ignore]` attribute for tests requiring RPC access
+- Provide ETH_RPC_URL environment variable for running
+- Test with known mainnet transactions for reproducibility
+
+Example:
+```bash
+# Run all tests including ignored integration tests
+ETH_RPC_URL=https://eth.llamarpc.com cargo test -- --ignored
+```
 
 ## Git Commit Guidelines
 
@@ -217,7 +306,8 @@ Use conventional commit messages:
 + **revert**: Reverting a previous commit
 
 Examples:
-- `feat: implement transaction replay in utils crate`
-- `fix: resolve alloy provider API compatibility issues`
-- `docs: update architecture documentation with utils crate`
-- `refactor: separate forking logic into utils crate`
+- `feat: implement REVM transaction execution in forking.rs`
+- `fix: correct SpecId mapping for Constantinople/Petersburg`
+- `test: add comprehensive forking tests with real transactions`
+- `refactor: use global BTreeMap for SpecId lookups`
+- `docs: update development guide with REVM v27 patterns`

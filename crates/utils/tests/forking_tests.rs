@@ -1,17 +1,17 @@
-use edb_utils::{fork_and_prepare, get_tx_env_from_tx, ForkInfo};
 use alloy_primitives::{address, b256, TxHash, U256};
 use alloy_rpc_types::Transaction;
+use edb_utils::{fork_and_prepare, get_tx_env_from_tx, ForkInfo};
 use revm::primitives::hardfork::SpecId;
 
 /// Test transaction hash from a known mainnet transaction
-/// This is the first USDC transfer transaction: https://etherscan.io/tx/0x523d98ca8f46fcd32517f30f62704c55dc4de5dccbbec7bbf7e11b7116f00eca
-const TEST_TX_HASH: &str = "0x523d98ca8f46fcd32517f30f62704c55dc4de5dccbbec7bbf7e11b7116f00eca";
+/// This is a random tx at Aug 7, 2025: https://etherscan.io/tx/0xc403cced1cf53cbeb72475be7271b731f846e91fcbd7b43f120b8bbd60d5473e
+const TEST_TX_HASH: &str = "0xc403cced1cf53cbeb72475be7271b731f846e91fcbd7b43f120b8bbd60d5473e";
 
 /// Another test transaction for testing multiple transactions in a block
 /// Random USDT transfer: https://etherscan.io/tx/0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
 const TEST_TX_HASH_2: &str = "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060";
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_info_creation() {
     let fork_info = ForkInfo {
         block_number: 12345678,
@@ -26,32 +26,32 @@ async fn test_fork_info_creation() {
     assert_eq!(fork_info.spec_id, SpecId::LONDON);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_and_prepare_with_real_transaction() {
     // Use a public RPC endpoint for testing (consider using env var in production)
-    let rpc_url = std::env::var("ETH_RPC_URL")
-        .unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
-    
+    let rpc_url =
+        std::env::var("ETH_RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
+
     let tx_hash: TxHash = TEST_TX_HASH.parse().expect("valid tx hash");
-    
-    let result = fork_and_prepare(&rpc_url, tx_hash).await;
-    
+
+    let result = fork_and_prepare(&rpc_url, tx_hash, false).await;
+
     match result {
         Ok(fork_result) => {
             // Verify fork info
             assert_eq!(fork_result.fork_info.chain_id, 1, "Should be mainnet");
             assert!(fork_result.fork_info.block_number > 0, "Block number should be positive");
-            
+
             // The test transaction is from block 4,060,175
             assert_eq!(fork_result.fork_info.block_number, 4060175, "Should match known block");
-            
+
             // Verify we have a valid context
             // The context should contain the forked state
-            
+
             // Verify target transaction environment
             assert_eq!(
-                fork_result.target_tx_env.chain_id, 
-                Some(1), 
+                fork_result.target_tx_env.chain_id,
+                Some(1),
                 "Target tx should have mainnet chain ID"
             );
         }
@@ -61,27 +61,27 @@ async fn test_fork_and_prepare_with_real_transaction() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_with_multiple_preceding_transactions() {
-    let rpc_url = std::env::var("ETH_RPC_URL")
-        .unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
-    
+    let rpc_url =
+        std::env::var("ETH_RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
+
     // Use a transaction that's not the first in its block
     let tx_hash: TxHash = TEST_TX_HASH_2.parse().expect("valid tx hash");
-    
-    let result = fork_and_prepare(&rpc_url, tx_hash).await;
-    
+
+    let result = fork_and_prepare(&rpc_url, tx_hash, false).await;
+
     match result {
         Ok(fork_result) => {
             // This transaction is in block 10,207,858
             assert_eq!(fork_result.fork_info.block_number, 10207858);
-            
+
             // The spec ID for this block should be Berlin (block 12,244,000 is after this)
             assert_eq!(fork_result.fork_info.spec_id, SpecId::BERLIN);
-            
-            println!("Successfully forked at block {} with spec {:?}", 
-                fork_result.fork_info.block_number,
-                fork_result.fork_info.spec_id
+
+            println!(
+                "Successfully forked at block {} with spec {:?}",
+                fork_result.fork_info.block_number, fork_result.fork_info.spec_id
             );
         }
         Err(e) => {
@@ -111,12 +111,12 @@ fn test_get_tx_env_from_tx() {
         "r": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
         "s": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
     }"#;
-    
+
     let tx: Transaction = serde_json::from_str(raw_tx).expect("valid transaction JSON");
     let chain_id = 1u64;
-    
+
     let result = get_tx_env_from_tx(&tx, chain_id);
-    
+
     match result {
         Ok(tx_env) => {
             assert_eq!(tx_env.chain_id, Some(chain_id));
@@ -152,12 +152,12 @@ fn test_get_tx_env_contract_creation() {
         "r": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
         "s": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
     }"#;
-    
+
     let tx: Transaction = serde_json::from_str(raw_tx).expect("valid transaction JSON");
     let chain_id = 1u64;
-    
+
     let result = get_tx_env_from_tx(&tx, chain_id);
-    
+
     match result {
         Ok(tx_env) => {
             // Verify it's a contract creation
@@ -205,17 +205,17 @@ fn test_get_tx_env_with_access_list() {
         "r": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
         "s": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
     }"#;
-    
+
     let tx: Transaction = serde_json::from_str(raw_tx).expect("valid transaction JSON");
     let chain_id = 1u64;
-    
+
     let result = get_tx_env_from_tx(&tx, chain_id);
-    
+
     match result {
         Ok(tx_env) => {
             assert_eq!(tx_env.chain_id, Some(chain_id));
             assert_eq!(tx_env.nonce, 2);
-            
+
             // Check that access list is properly converted
             let access_list = tx_env.access_list;
             assert_eq!(access_list.len(), 1);
@@ -231,11 +231,59 @@ fn test_get_tx_env_with_access_list() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn test_fork_and_prepare_quick_mode() {
+    // Test that quick mode skips replaying transactions
+    let rpc_url =
+        std::env::var("ETH_RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
+
+    // Use a transaction that's not the first in its block
+    let tx_hash: TxHash = TEST_TX_HASH_2.parse().expect("valid tx hash");
+
+    // Test with quick mode enabled (should be faster)
+    let result_quick = fork_and_prepare(&rpc_url, tx_hash, true).await;
+
+    match result_quick {
+        Ok(fork_result) => {
+            // Should still get correct fork info
+            assert_eq!(fork_result.fork_info.block_number, 46147);
+            assert_eq!(fork_result.fork_info.spec_id, SpecId::FRONTIER);
+
+            // The context should still be valid but without replayed state
+            println!(
+                "Quick mode fork completed successfully at block {}",
+                fork_result.fork_info.block_number
+            );
+        }
+        Err(e) => {
+            panic!("Failed to fork in quick mode: {:?}", e);
+        }
+    }
+
+    // Compare with normal mode (should have same fork info but different state)
+    let result_normal = fork_and_prepare(&rpc_url, tx_hash, false).await;
+
+    match result_normal {
+        Ok(fork_result) => {
+            assert_eq!(fork_result.fork_info.block_number, 46147);
+            assert_eq!(fork_result.fork_info.spec_id, SpecId::FRONTIER);
+
+            println!(
+                "Normal mode fork completed successfully at block {}",
+                fork_result.fork_info.block_number
+            );
+        }
+        Err(e) => {
+            panic!("Failed to fork in normal mode: {:?}", e);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_at_specific_hardfork_boundaries() {
-    let rpc_url = std::env::var("ETH_RPC_URL")
-        .unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
-    
+    let rpc_url =
+        std::env::var("ETH_RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
+
     // Test transactions at different hardfork boundaries
     struct HardforkTest {
         tx_hash: &'static str,
@@ -243,7 +291,7 @@ async fn test_fork_at_specific_hardfork_boundaries() {
         expected_spec: SpecId,
         description: &'static str,
     }
-    
+
     let tests = vec![
         HardforkTest {
             // Transaction from Homestead era
@@ -254,23 +302,21 @@ async fn test_fork_at_specific_hardfork_boundaries() {
         },
         // Add more test cases for different eras as needed
     ];
-    
+
     for test in tests {
         println!("Testing: {}", test.description);
         let tx_hash: TxHash = test.tx_hash.parse().expect("valid tx hash");
-        
-        match fork_and_prepare(&rpc_url, tx_hash).await {
+
+        match fork_and_prepare(&rpc_url, tx_hash, false).await {
             Ok(fork_result) => {
                 assert_eq!(
-                    fork_result.fork_info.block_number, 
-                    test.expected_block,
-                    "{}: Wrong block number", 
+                    fork_result.fork_info.block_number, test.expected_block,
+                    "{}: Wrong block number",
                     test.description
                 );
                 assert_eq!(
-                    fork_result.fork_info.spec_id, 
-                    test.expected_spec,
-                    "{}: Wrong spec ID", 
+                    fork_result.fork_info.spec_id, test.expected_spec,
+                    "{}: Wrong spec ID",
                     test.description
                 );
             }
