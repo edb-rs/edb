@@ -57,7 +57,7 @@ pub struct ForkResult<CTX> {
 /// 3. Commits each transaction
 /// 4. Returns forked state ready for target transaction
 pub async fn fork_and_prepare(
-    rpc_url: &String,
+    rpc_url: &str,
     target_tx_hash: TxHash,
     quick: bool,
 ) -> Result<ForkResult<impl ContextTr>> {
@@ -134,7 +134,7 @@ pub async fn fork_and_prepare(
         })
         .modify_cfg_chained(|c| {
             c.chain_id = chain_id;
-            c.spec = spec_id.into();
+            c.spec = spec_id;
         });
 
     let mut evm = ctx.build_mainnet();
@@ -158,7 +158,7 @@ pub async fn fork_and_prepare(
                 tx.inner.hash()
             );
 
-            let tx = get_tx_env_from_tx(&tx, chain_id)?;
+            let tx = get_tx_env_from_tx(tx, chain_id)?;
 
             // Actually execute the transaction with commit
             match evm.transact_commit(tx) {

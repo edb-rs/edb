@@ -72,6 +72,15 @@ pub fn get_hardfork_info(spec_id: SpecId) -> (&'static str, u64) {
     }
 }
 
+/// Returns the blob base fee update fraction based on the spec id.
+pub fn get_blob_base_fee_update_fraction_by_spec_id(spec: SpecId) -> u64 {
+    if spec >= SpecId::PRAGUE {
+        BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
+    } else {
+        BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,14 +109,5 @@ mod tests {
         // Test future blocks
         assert_eq!(get_mainnet_spec_id(20_000_000), SpecId::CANCUN);
         assert_eq!(get_mainnet_spec_id(u64::MAX), SpecId::CANCUN);
-    }
-}
-
-/// Returns the blob base fee update fraction based on the spec id.
-pub fn get_blob_base_fee_update_fraction_by_spec_id(spec: SpecId) -> u64 {
-    if spec >= SpecId::PRAGUE {
-        BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE
-    } else {
-        BLOB_BASE_FEE_UPDATE_FRACTION_CANCUN
     }
 }
