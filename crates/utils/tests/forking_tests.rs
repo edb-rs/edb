@@ -1,3 +1,5 @@
+//! Forking tests.
+
 use alloy_primitives::{address, b256, TxHash, U256};
 use alloy_rpc_types::Transaction;
 use edb_utils::{fork_and_prepare, get_tx_env_from_tx, ForkInfo};
@@ -56,7 +58,7 @@ async fn test_fork_and_prepare_with_real_transaction() {
             );
         }
         Err(e) => {
-            panic!("Failed to fork and prepare: {:?}", e);
+            panic!("Failed to fork and prepare: {e:?}");
         }
     }
 }
@@ -85,7 +87,7 @@ async fn test_fork_with_multiple_preceding_transactions() {
             );
         }
         Err(e) => {
-            panic!("Failed to fork and prepare: {:?}", e);
+            panic!("Failed to fork and prepare: {e:?}");
         }
     }
 }
@@ -126,7 +128,7 @@ fn test_get_tx_env_from_tx() {
             assert!(tx_env.data.is_empty());
         }
         Err(e) => {
-            panic!("Failed to convert transaction to TxEnv: {:?}", e);
+            panic!("Failed to convert transaction to TxEnv: {e:?}");
         }
     }
 }
@@ -168,7 +170,7 @@ fn test_get_tx_env_contract_creation() {
             assert!(!tx_env.data.is_empty()); // Contract bytecode
         }
         Err(e) => {
-            panic!("Failed to convert contract creation tx to TxEnv: {:?}", e);
+            panic!("Failed to convert contract creation tx to TxEnv: {e:?}");
         }
     }
 }
@@ -226,7 +228,7 @@ fn test_get_tx_env_with_access_list() {
             assert_eq!(access_list[0].storage_keys.len(), 2);
         }
         Err(e) => {
-            panic!("Failed to convert EIP-2930 tx to TxEnv: {:?}", e);
+            panic!("Failed to convert EIP-2930 tx to TxEnv: {e:?}");
         }
     }
 }
@@ -256,7 +258,7 @@ async fn test_fork_and_prepare_quick_mode() {
             );
         }
         Err(e) => {
-            panic!("Failed to fork in quick mode: {:?}", e);
+            panic!("Failed to fork in quick mode: {e:?}");
         }
     }
 
@@ -274,7 +276,7 @@ async fn test_fork_and_prepare_quick_mode() {
             );
         }
         Err(e) => {
-            panic!("Failed to fork in normal mode: {:?}", e);
+            panic!("Failed to fork in normal mode: {e:?}");
         }
     }
 }

@@ -69,7 +69,7 @@ pub async fn fork_and_prepare(
     let provider = ProviderBuilder::new().connect(rpc_url).await?;
 
     let chain_id = provider.get_chain_id().await.unwrap_or(1);
-    debug_assert_eq!(chain_id, 1, "Expected mainnet chain ID 1, got {}", chain_id);
+    debug_assert_eq!(chain_id, 1, "Expected mainnet chain ID 1, got {chain_id}");
 
     // Get the target transaction to find which block it's in
     let target_tx = provider
@@ -202,8 +202,7 @@ pub async fn fork_and_prepare(
             console_bar.inc(1);
         }
 
-        console_bar
-            .finish_with_message(format!("Fork and prepare complete for {}.", target_tx_hash));
+        console_bar.finish_with_message(format!("Fork and prepare complete for {target_tx_hash}."));
     }
 
     // Get the target transaction environment
@@ -215,6 +214,7 @@ pub async fn fork_and_prepare(
     Ok(ForkResult { fork_info, context, target_tx_env, target_tx_hash })
 }
 
+/// Get the transaction environment from the transaction.
 pub fn get_tx_env_from_tx(tx: &Transaction, chain_id: u64) -> Result<TxEnv> {
     TxEnv::builder()
         .caller(tx.inner.signer())

@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 # alloy
+alloy-chains.workspace = true
 alloy-evm.workspace = true
 alloy-network.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
@@ -22,8 +23,12 @@ alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types = { workspace = true, features = ["eth"] }
 alloy-transport-http = { workspace = true, features = ["reqwest"] }
 
+# foundry
+foundry-block-explorers = { workspace = true, features = ["foundry-compilers"] }
+foundry-compilers = { workspace = true, features = ["svm-solc"] }
+
 # revm
-revm = { workspace = true, features = ["std", "serde"] }
+revm = { workspace = true, features = ["std", "serde", "alloydb"] }
 
 # async
 futures.workspace = true
@@ -39,9 +44,12 @@ reqwest = { workspace = true, features = [
 ] }
 
 # misc
+chrono.workspace = true
+dirs-next.workspace = true
 eyre.workspace = true
 indicatif.workspace = true
+once_cell.workspace = true
+rand.workspace = true
 tracing.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
+serial_test.workspace = true
