@@ -26,28 +26,28 @@ edb-webui = { path = "../webui" }
 edb-utils = { path = "../utils" }
 
 # alloy - using individual crates like Foundry does
-alloy-primitives = { workspace = true }
-alloy-provider = { workspace = true }
-alloy-rpc-types = { workspace = true }
+alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-rpc-types = { workspace = true, features = ["eth"] }
 
 # revm
 revm = { workspace = true, features = ["std", "serde"] }
 
 # foundry
-foundry-compilers = { workspace = true }
+foundry-compilers.workspace = true
 
 # async
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
 
 # cli
-clap = { version = "4", features = ["derive", "env"] }
+clap = { workspace = true, features = ["default", "derive", "env"] }
 
 # misc
 eyre.workspace = true
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-dotenv = "0.15"
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+dotenv.workspace = true
 
 [dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.0"
+assert_cmd.workspace = true
+predicates.workspace = true

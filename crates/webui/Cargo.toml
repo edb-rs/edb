@@ -16,18 +16,22 @@ workspace = true
 
 [dependencies]
 # async
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
 
 # web server
-axum = { version = "0.7", features = ["ws"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+axum = { workspace = true, features = ["ws"] }
+tower.workspace = true
+tower-http = { workspace = true, features = ["cors", "fs"] }
 
 # rpc client
-jsonrpsee = { version = "0.24", features = ["client", "http-client", "ws-client"] }
+jsonrpsee = { workspace = true, features = [
+    "client",
+    "http-client",
+    "ws-client",
+] }
 
 # misc
 eyre.workspace = true
-tracing = "0.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+tracing.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

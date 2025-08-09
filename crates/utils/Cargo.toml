@@ -1,30 +1,43 @@
 [package]
 name = "edb-utils"
-version = "0.0.1"
-edition = "2021"
+
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
 # Core dependencies
-alloy-primitives = { workspace = true }
-alloy-provider = { workspace = true }
-alloy-rpc-types = { workspace = true }
-alloy-transport-http = { workspace = true }
-alloy-network = { workspace = true }
-alloy-evm = { workspace = true }
+alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-rpc-types = { workspace = true, features = ["eth"] }
+alloy-transport-http = { workspace = true, features = ["reqwest"] }
+alloy-network.workspace = true
+alloy-evm.workspace = true
 
 # REVM with required features
 revm = { workspace = true, features = ["std", "serde"] }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = [
+    "rustls-tls",
+    "rustls-tls-native-roots",
+] }
 
 # Async and utilities
-eyre = { workspace = true }
-tracing = { workspace = true }
-tokio = { workspace = true }
-serde = { workspace = true }
-futures = { workspace = true }
+eyre.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+futures.workspace = true
 
 # Misc
-indicatif = { workspace = true }
+indicatif.workspace = true
 
 [dev-dependencies]
-serde_json = "1.0"
+serde_json.workspace = true
