@@ -30,11 +30,11 @@ alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types = { workspace = true, features = ["eth"] }
 
-# revm
-revm = { workspace = true, features = ["std", "serde"] }
-
 # foundry
 foundry-compilers.workspace = true
+
+# revm
+revm = { workspace = true, features = ["std", "serde"] }
 
 # async
 tokio = { workspace = true, features = ["full"] }
@@ -43,10 +43,10 @@ tokio = { workspace = true, features = ["full"] }
 clap = { workspace = true, features = ["default", "derive", "env"] }
 
 # misc
+dotenv.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-dotenv.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

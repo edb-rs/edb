@@ -18,19 +18,19 @@ workspace = true
 edb-utils = { path = "../utils" }
 
 # alloy - using individual crates like Foundry does
+alloy-contract.workspace = true
+alloy-dyn-abi.workspace = true
+alloy-json-abi.workspace = true
+alloy-network.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types = { workspace = true, features = ["eth"] }
-alloy-contract.workspace = true
-alloy-network.workspace = true
-alloy-transport-http = { workspace = true, features = ["reqwest"] }
-alloy-dyn-abi.workspace = true
-alloy-json-abi.workspace = true
 alloy-sol-types.workspace = true
+alloy-transport-http = { workspace = true, features = ["reqwest"] }
 
 # foundry
-foundry-compilers.workspace = true
 foundry-block-explorers.workspace = true
+foundry-compilers.workspace = true
 
 # revm
 revm = { workspace = true, features = [
@@ -56,9 +56,9 @@ tower-http = { workspace = true, features = ["cors"] }
 
 # misc
 eyre.workspace = true
+hex.workspace = true
 lazy_static.workspace = true
 paste.workspace = true
-hex.workspace = true
 tempfile.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

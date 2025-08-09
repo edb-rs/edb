@@ -14,30 +14,34 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-# Core dependencies
+# alloy
+alloy-evm.workspace = true
+alloy-network.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types = { workspace = true, features = ["eth"] }
 alloy-transport-http = { workspace = true, features = ["reqwest"] }
-alloy-network.workspace = true
-alloy-evm.workspace = true
 
-# REVM with required features
+# revm
 revm = { workspace = true, features = ["std", "serde"] }
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["full"] }
+
+# serialization
+serde = { workspace = true, features = ["derive"] }
+
+# http client
 reqwest = { workspace = true, features = [
     "rustls-tls",
     "rustls-tls-native-roots",
 ] }
 
-# Async and utilities
+# misc
 eyre.workspace = true
-tracing.workspace = true
-tokio = { workspace = true, features = ["full"] }
-serde = { workspace = true, features = ["derive"] }
-futures.workspace = true
-
-# Misc
 indicatif.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

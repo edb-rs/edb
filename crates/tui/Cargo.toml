@@ -25,8 +25,10 @@ ratatui.workspace = true
 # rpc client
 jsonrpsee = { workspace = true, features = ["client", "http-client"] }
 
+# serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
 # misc
 eyre.workspace = true
 tracing.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true

@@ -30,8 +30,10 @@ jsonrpsee = { workspace = true, features = [
     "ws-client",
 ] }
 
+# serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
 # misc
 eyre.workspace = true
 tracing.workspace = true
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
