@@ -11,6 +11,9 @@ use tracing::{trace, warn};
 /// Set to 1 day since the source code of a contract is unlikely to change frequently.
 pub const DEFAULT_ETHERSCAN_CACHE_TTL: u64 = 86400;
 
+/// Default maximum cache items
+pub const DEFAULT_RPC_CACHE_ITEM: u32 = 100 * 1024; // 100MB assuming 1KB per item
+
 /// Trait for cache paths.
 pub trait CachePath {
     /// Returns the path to edb's cache dir: `~/.edb/cache` by default.
@@ -28,36 +31,6 @@ pub trait CachePath {
     /// Returns the path to edb chain's cache dir: `<cache_root>/rpc/<chain>`
     fn rpc_chain_cache_dir(&self, chain_id: impl Into<Chain>) -> Option<PathBuf> {
         Some(self.edb_rpc_cache_dir()?.join(chain_id.into().to_string()))
-    }
-
-    /// Returns the path to the cached block information on the `chain`:
-    /// `<cache_root>/rpc/<chain>/block`
-    fn rpc_block_cache_dir(&self, chain_id: impl Into<Chain>) -> Option<PathBuf> {
-        Some(self.rpc_chain_cache_dir(chain_id)?.join("block"))
-    }
-
-    /// Returns the path to the cached transaction information on the `chain`:
-    /// `<cache_root>/rpc/<chain>/txs`
-    fn rpc_tx_cache_dir(&self, chain_id: impl Into<Chain>) -> Option<PathBuf> {
-        Some(self.rpc_chain_cache_dir(chain_id)?.join("txs"))
-    }
-
-    /// Returns the path to the cached transaction receipt on the `chain`:
-    /// `<cache_root>/rpc/<chain>/receipts`
-    fn rpc_receipt_cache_dir(&self, chain_id: impl Into<Chain>) -> Option<PathBuf> {
-        Some(self.rpc_chain_cache_dir(chain_id)?.join("receipts"))
-    }
-
-    /// Returns the path to the cache dir of the `block` on the `chain`:
-    /// `<cache_root>/rpc/<chain>/storage`
-    fn rpc_storage_cache_dir(&self, chain_id: impl Into<Chain>) -> Option<PathBuf> {
-        Some(self.rpc_chain_cache_dir(chain_id)?.join("storage"))
-    }
-
-    /// Returns the path to the cache file of the `block` on the `chain`:
-    /// `<cache_root>/rpc/<chain>/<block>/storage.json`
-    fn rpc_storage_cache_file(&self, chain_id: impl Into<Chain>, block: u64) -> Option<PathBuf> {
-        Some(self.rpc_storage_cache_dir(chain_id)?.join(format!("{block}.json")))
     }
 
     /// Returns the path to edb's etherscan cache dir: `<cache_root>/etherscan`.
@@ -80,17 +53,6 @@ pub trait CachePath {
     /// `<cache_root>/solc/<chain>`
     fn compiler_chain_cache_dir(&self, chain_id: impl Into<Chain>) -> Option<PathBuf> {
         Some(self.compiler_cache_dir()?.join(chain_id.into().to_string()))
-    }
-
-    /// Returns the path to edb's backend cache dir: `<cache_root>/backend`.
-    fn backend_cache_dir(&self) -> Option<PathBuf> {
-        Some(self.edb_cache_dir()?.join("backend"))
-    }
-
-    /// Returns the path to edb's backend cache dir for `chain_id`:
-    /// `<cache_root>/backend/<chain>`
-    fn backend_chain_cache_dir(&self, chain_id: impl Into<Chain>) -> Option<PathBuf> {
-        Some(self.backend_cache_dir()?.join(chain_id.into().to_string()))
     }
 }
 

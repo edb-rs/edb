@@ -1,0 +1,63 @@
+[package]
+name = "edb-rpc-proxy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+description = "Caching RPC proxy server for EDB"
+
+[[bin]]
+name = "edb-rpc-proxy"
+path = "src/main.rs"
+
+[dependencies]
+# alloy
+alloy-json-rpc.workspace = true
+alloy-primitives.workspace = true
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-rpc-client.workspace = true
+alloy-rpc-types.workspace = true
+alloy-transport.workspace = true
+alloy-transport-http.workspace = true
+
+# async runtime
+tokio = { workspace = true, features = ["full"] }
+futures.workspace = true
+
+# web server
+axum.workspace = true
+tower.workspace = true
+tower-http = { workspace = true, features = ["cors", "trace"] }
+
+# rpc server
+jsonrpsee = { workspace = true, features = ["server", "client"] }
+
+# serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# cli
+clap = { workspace = true, features = ["derive"] }
+
+# utilities
+eyre.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+
+# http client
+reqwest = { workspace = true, features = ["json"] }
+
+# EDB internal
+edb-utils = { path = "../utils" }
+
+[dev-dependencies]
+tempfile = "3.0"
+wiremock = "0.5"
+
+[lints]
+workspace = true

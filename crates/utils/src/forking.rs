@@ -2,9 +2,14 @@
 //!
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
 
-use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id};
+use crate::{
+    get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, DEFAULT_RPC_CACHE_ITEM,
+};
 use alloy_primitives::{TxHash, TxKind, B256, U256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::{
+    layers::{CacheProvider, SharedCache},
+    Provider, ProviderBuilder,
+};
 use alloy_rpc_types::{BlockNumberOrTag, Transaction, TransactionTrait};
 use eyre::Result;
 use indicatif::ProgressBar;
@@ -51,6 +56,13 @@ pub struct ForkResult<CTX> {
     pub target_tx_hash: TxHash,
 }
 
+/// Get chain id by querying RPC
+pub async fn get_chain_id(rpc_url: &str) -> Result<u64> {
+    let provider = ProviderBuilder::new().connect(rpc_url).await?;
+    let chain_id = provider.get_chain_id().await?;
+    Ok(chain_id)
+}
+
 /// Fork the chain and ACTUALLY EXECUTE preceding transactions with revm.transact_commit()
 ///
 /// This function:
@@ -65,10 +77,12 @@ pub async fn fork_and_prepare(
 ) -> Result<ForkResult<impl ContextTr>> {
     info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
 
-    // Initialize provider
     let provider = ProviderBuilder::new().connect(rpc_url).await?;
 
-    let chain_id = provider.get_chain_id().await.unwrap_or(1);
+    let chain_id = provider
+        .get_chain_id()
+        .await
+        .map_err(|e| eyre::eyre!("Failed to get chain ID: {:?}", e))?;
     debug_assert_eq!(chain_id, 1, "Expected mainnet chain ID 1, got {chain_id}");
 
     // Get the target transaction to find which block it's in

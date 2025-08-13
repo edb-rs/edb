@@ -47,6 +47,8 @@ dotenv.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+serde_json.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 
 [dev-dependencies]
 assert_cmd.workspace = true

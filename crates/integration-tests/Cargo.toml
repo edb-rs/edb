@@ -1,0 +1,35 @@
+[package]
+name = "edb-integration-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+description = "Integration tests for EDB components"
+
+[lints]
+workspace = true
+
+[dependencies]
+# EDB internal crates
+edb-utils = { path = "../utils" }
+edb-rpc-proxy = { path = "../rpc-proxy" }
+
+# Test dependencies
+tokio = { workspace = true, features = ["full"] }
+serde_json.workspace = true
+chrono.workspace = true
+eyre.workspace = true
+tracing.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+
+# Alloy for blockchain types
+alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
+alloy-rpc-types = { workspace = true, features = ["eth"] }
+
+# REVM for hardfork specs
+revm = { workspace = true, features = ["std", "serde", "alloydb"] }

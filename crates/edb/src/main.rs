@@ -5,7 +5,8 @@
 use alloy_primitives::TxHash;
 use clap::{Parser, Subcommand, ValueEnum};
 use eyre::Result;
-use tracing_subscriber::EnvFilter;
+
+mod proxy;
 
 /// Command-line interface for EDB
 #[derive(Debug, Parser)]
@@ -29,6 +30,30 @@ pub struct Cli {
     #[arg(long, default_value = "8545")]
     pub port: u16,
 
+    /// Port for the RPC proxy server
+    #[arg(long, default_value = "8546")]
+    pub proxy_port: u16,
+
+    /// Disable RPC caching and connect directly to upstream RPC
+    #[arg(long)]
+    pub disable_cache: bool,
+
+    /// Grace period in seconds before proxy shutdown when no EDB instances
+    #[arg(long, default_value = "30")]
+    pub proxy_grace_period: u64,
+
+    /// Force starting a new proxy instance instead of reusing existing
+    #[arg(long)]
+    pub force_new_proxy: bool,
+
+    /// Heartbeat interval in seconds for EDB instance registration
+    #[arg(long, default_value = "10")]
+    pub proxy_heartbeat_interval: u64,
+
+    /// Cache directory for RPC proxy (default: ~/.edb/cache/rpc/1)
+    #[arg(long)]
+    pub cache_dir: Option<String>,
+
     /// Etherscan API key for source code download
     #[arg(long, env = "ETHERSCAN_API_KEY")]
     pub etherscan_api_key: Option<String>,
@@ -37,6 +62,7 @@ pub struct Cli {
     #[arg(long)]
     pub quick: bool,
 
+    /// Command to execute
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -70,31 +96,31 @@ async fn main() -> Result<()> {
     // Load environment variables
     dotenv::dotenv().ok();
 
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::from_default_env()
-                .add_directive("edb=debug".parse()?)
-                .add_directive("edb_engine=debug".parse()?)
-                .add_directive("edb_tui=debug".parse()?)
-                .add_directive("edb_webui=debug".parse()?)
-                .add_directive("edb_utils=debug".parse()?),
-        )
-        .init();
-
     // Parse CLI arguments
     let cli = Cli::parse();
+
+    // Set up RPC endpoint (proxy or direct)
+    let effective_rpc_url = if cli.disable_cache {
+        tracing::info!("Cache disabled, connecting directly to RPC");
+        cli.rpc_url.clone()
+    } else {
+        tracing::info!("Ensuring RPC proxy is running...");
+        proxy::ensure_proxy_running(&cli).await?;
+        format!("http://127.0.0.1:{}", cli.proxy_port)
+    };
+
+    tracing::info!("Using RPC endpoint: {}", effective_rpc_url);
 
     // Execute the command to get RPC server handle
     let rpc_server_handle = match &cli.command {
         Commands::Replay { tx_hash } => {
             tracing::info!("Replaying transaction: {}", tx_hash);
             let tx_hash: TxHash = tx_hash.parse()?;
-            replay_transaction(tx_hash, &cli).await?
+            replay_transaction(tx_hash, &cli, &effective_rpc_url).await?
         }
         Commands::Test { test_name } => {
             tracing::info!("Debugging test: {}", test_name);
-            debug_foundry_test(test_name, &cli).await?
+            debug_foundry_test(test_name, &cli, &effective_rpc_url).await?
         }
     };
 
@@ -172,12 +198,13 @@ async fn main() -> Result<()> {
 async fn replay_transaction(
     tx_hash: TxHash,
     cli: &Cli,
+    rpc_url: &str,
 ) -> Result<edb_engine::rpc::RpcServerHandle> {
     tracing::info!("Starting transaction replay workflow");
 
     // Step 1: Fork the chain and replay earlier transactions in the block
     // Fork and prepare the database/environment for the target transaction
-    let fork_result = edb_utils::fork_and_prepare(&cli.rpc_url, tx_hash, cli.quick).await?;
+    let fork_result = edb_utils::fork_and_prepare(rpc_url, tx_hash, cli.quick).await?;
 
     tracing::info!(
         "Forked chain and prepared database for transaction replay at block {}",
@@ -203,6 +230,7 @@ async fn replay_transaction(
 async fn debug_foundry_test(
     test_name: &str,
     cli: &Cli,
+    rpc_url: &str,
 ) -> Result<edb_engine::rpc::RpcServerHandle> {
     tracing::info!("Starting Foundry test debug workflow");
 
@@ -210,7 +238,7 @@ async fn debug_foundry_test(
     let tx_hash = find_test_transaction(test_name)?;
 
     // Step 2: Use the same replay workflow as regular transactions
-    replay_transaction(tx_hash, cli).await
+    replay_transaction(tx_hash, cli, rpc_url).await
 }
 
 /// Find the transaction hash for a Foundry test

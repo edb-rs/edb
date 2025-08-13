@@ -16,7 +16,6 @@ workspace = true
 [dependencies]
 # alloy
 alloy-chains.workspace = true
-alloy-evm.workspace = true
 alloy-network.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-provider = { workspace = true, features = ["reqwest"] }
@@ -54,3 +53,4 @@ tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 serde_json.workspace = true
 serial_test.workspace = true
+
