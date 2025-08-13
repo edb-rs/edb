@@ -11,10 +11,12 @@ use tracing::{info, warn};
 
 mod cache;
 mod health;
+mod providers;
 mod proxy;
 mod registry;
 mod rpc;
 
+use providers::DEFAULT_MAINNET_RPCS;
 use proxy::ProxyServer;
 
 #[derive(Parser, Debug)]
@@ -25,9 +27,10 @@ struct Args {
     #[arg(long, default_value = "8546")]
     port: u16,
 
-    /// Upstream RPC URL
+    /// Upstream RPC URLs (comma-separated, overrides defaults if provided)
+    /// Example: --rpc-urls "https://eth.llamarpc.com,https://rpc.ankr.com/eth"
     #[arg(long)]
-    rpc_url: String,
+    rpc_urls: Option<String>,
 
     /// Maximum number of cached items
     #[arg(long, default_value = "102400")]
@@ -44,22 +47,29 @@ struct Args {
     /// Heartbeat check interval in seconds
     #[arg(long, default_value = "10")]
     heartbeat_interval: u64,
+
+    /// Maximum consecutive failures before marking provider unhealthy
+    #[arg(long, default_value = "3")]
+    max_failures: u32,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    info!("Starting EDB RPC Proxy on port {} -> {}", args.port, args.rpc_url);
+    let rpc_urls = args.rpc_urls.map(|urls| {
+        urls.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>()
+    });
 
     // Create the proxy server
     let cache_dir = args.cache_dir.map(std::path::PathBuf::from);
     let proxy = ProxyServer::new(
-        args.rpc_url.clone(),
+        rpc_urls,
         args.max_cache_items,
         cache_dir,
         args.grace_period,
         args.heartbeat_interval,
+        args.max_failures,
     )
     .await?;
 

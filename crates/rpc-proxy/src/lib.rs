@@ -6,6 +6,7 @@
 
 pub mod cache;
 pub mod health;
+pub mod providers;
 pub mod proxy;
 pub mod registry;
 pub mod rpc;

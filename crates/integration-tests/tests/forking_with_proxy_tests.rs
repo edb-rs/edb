@@ -20,16 +20,13 @@ async fn setup_test_proxy_with_cache() -> Result<String, Box<dyn std::error::Err
     // Get the testdata cache directory
     let cache_dir = get_testdata_cache_dir();
 
-    // Create proxy with cache in testdata/cache/rpc
-    let upstream_url =
-        std::env::var("ETH_RPC_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".to_string());
-
     let proxy = ProxyServer::new(
-        upstream_url,
+        None,
         10000, // Large cache for tests
         Some(cache_dir.clone()),
         0,  // No auto-shutdown
         30, // 30 second heartbeat
+        3,  // max failed requests per provider
     )
     .await?;
 
@@ -226,6 +223,26 @@ async fn test_proxy_endpoints() {
     // Test cache stats
     let stats = get_cache_stats(&proxy_url).await.expect("Failed to get cache stats");
     assert!(stats["max_entries"].as_u64().unwrap() > 0);
+
+    // Test provider status endpoint
+    let providers_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "edb_providers",
+        "id": 1
+    });
+
+    let response = client
+        .post(&proxy_url)
+        .json(&providers_request)
+        .send()
+        .await
+        .expect("Failed to get provider status");
+    assert!(response.status().is_success());
+
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["result"]["providers"].is_array());
+    assert!(body["result"]["healthy_count"].is_number());
+    assert!(body["result"]["total_count"].is_number());
 
     println!("All proxy endpoints working correctly!");
 }

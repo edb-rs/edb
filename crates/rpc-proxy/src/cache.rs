@@ -5,9 +5,15 @@ use edb_utils::{
     forking,
 };
 use eyre::Result;
+use jsonrpsee::server::middleware::rpc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::PathBuf, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::PathBuf,
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
@@ -198,8 +204,22 @@ impl CacheManager {
     ///
     /// # Returns
     /// The full path to the cache file for this RPC endpoint
-    pub async fn get_cache_path(rpc_url: &str, cache_dir: Option<PathBuf>) -> Result<PathBuf> {
-        let chain_id = forking::get_chain_id(rpc_url).await?;
+    pub async fn get_cache_path(
+        rpc_urls: &Vec<String>,
+        cache_dir: Option<PathBuf>,
+    ) -> Result<PathBuf> {
+        let chain_ids: HashSet<_> =
+            futures::future::join_all(rpc_urls.iter().map(|url| forking::get_chain_id(url)))
+                .await
+                .into_iter()
+                .filter_map(Result::ok)
+                .collect();
+
+        if chain_ids.len() != 1 {
+            eyre::bail!("All RPC URLs must belong to the same chain. Found: {:?}", chain_ids);
+        }
+
+        let chain_id = *chain_ids.iter().next().unwrap();
 
         let cache_path = EDBCachePath::new(cache_dir)
             .rpc_chain_cache_dir(chain_id)

@@ -1,6 +1,12 @@
 //! Core proxy server implementation
 
-use crate::{cache::CacheManager, health::HealthService, registry::EDBRegistry, rpc::RpcHandler};
+use crate::{
+    cache::CacheManager,
+    health::HealthService,
+    providers::{ProviderManager, DEFAULT_MAINNET_RPCS},
+    registry::EDBRegistry,
+    rpc::RpcHandler,
+};
 use axum::{
     extract::State,
     http::{Method, StatusCode},
@@ -37,27 +43,43 @@ struct AppState {
 }
 
 impl ProxyServer {
-    /// Creates a new proxy server with the specified configuration
+    /// Creates a new proxy server with multiple RPC providers
     ///
     /// # Arguments
-    /// * `rpc_url` - Upstream RPC endpoint URL
+    /// * `rpc_urls` - List of upstream RPC endpoint URLs
     /// * `max_cache_items` - Maximum number of items to cache
     /// * `cache_dir` - Optional directory for cache persistence
     /// * `grace_period` - Seconds to wait before shutdown when no EDB instances
     /// * `heartbeat_interval` - Seconds between heartbeat checks
+    /// * `max_failures` - Maximum consecutive failures before marking provider unhealthy
     ///
     /// # Returns
     /// A new ProxyServer instance with background tasks started
     pub async fn new(
-        rpc_url: String,
+        rpc_urls: Option<Vec<String>>,
         max_cache_items: u32,
         cache_dir: Option<std::path::PathBuf>,
         grace_period: u64,
         heartbeat_interval: u64,
+        max_failures: u32,
     ) -> Result<Self> {
-        let cache_path = CacheManager::get_cache_path(&rpc_url, cache_dir).await?;
+        // Determine which RPC URLs to use
+        let rpc_urls =
+            rpc_urls.unwrap_or(DEFAULT_MAINNET_RPCS.iter().map(|s| s.to_string()).collect());
+        info!("Starting EDB RPC Proxy with {} providers", rpc_urls.len());
+        for url in &rpc_urls {
+            info!("  - {}", url);
+        }
+
+        // Use first URL for cache path (they all cache the same chain data)
+        let cache_path = CacheManager::get_cache_path(&rpc_urls, cache_dir).await?;
         let cache_manager = Arc::new(CacheManager::new(max_cache_items, cache_path)?);
-        let rpc_handler = Arc::new(RpcHandler::new(rpc_url, cache_manager)?);
+
+        // Create provider manager with all URLs
+        let provider_manager = Arc::new(ProviderManager::new(rpc_urls, max_failures).await?);
+
+        // Create RPC handler with provider manager
+        let rpc_handler = Arc::new(RpcHandler::new(provider_manager.clone(), cache_manager)?);
         let registry = Arc::new(EDBRegistry::new(grace_period));
         let health_service = Arc::new(HealthService::new());
 
@@ -65,6 +87,16 @@ impl ProxyServer {
         let registry_clone = Arc::clone(&registry);
         tokio::spawn(async move {
             registry_clone.start_heartbeat_monitor(heartbeat_interval).await;
+        });
+
+        // Start periodic health checks for providers
+        let provider_manager_clone = provider_manager.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                provider_manager_clone.health_check_all().await;
+            }
         });
 
         Ok(Self { rpc_handler, registry, health_service })
@@ -163,6 +195,22 @@ async fn handle_rpc(
                     "result": {
                         "active_instances": active_pids,
                         "count": active_pids.len()
+                    }
+                });
+                return Ok(Json(response));
+            }
+            "edb_providers" => {
+                let providers_info =
+                    state.proxy.rpc_handler.provider_manager().get_providers_info().await;
+                let healthy_count =
+                    state.proxy.rpc_handler.provider_manager().healthy_provider_count().await;
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": {
+                        "providers": providers_info,
+                        "healthy_count": healthy_count,
+                        "total_count": providers_info.len()
                     }
                 });
                 return Ok(Json(response));

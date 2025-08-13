@@ -14,9 +14,10 @@ mod proxy;
 #[command(about = "Ethereum Debugger - A step-by-step debugger for Ethereum transactions")]
 #[command(version)]
 pub struct Cli {
-    /// Ethereum RPC endpoint
-    #[arg(long, env = "ETH_RPC_URL", default_value = "http://localhost:8545")]
-    pub rpc_url: String,
+    /// Upstream RPC URLs (comma-separated, overrides defaults if provided)
+    /// Example: --rpc-urls "https://eth.llamarpc.com,https://rpc.ankr.com/eth"
+    #[arg(long)]
+    rpc_urls: Option<String>,
 
     /// User interface to use
     #[arg(long, value_enum, default_value = "tui")]
@@ -26,17 +27,9 @@ pub struct Cli {
     #[arg(long)]
     pub block: Option<u64>,
 
-    /// Port for the JSON-RPC server
-    #[arg(long, default_value = "8545")]
-    pub port: u16,
-
     /// Port for the RPC proxy server
     #[arg(long, default_value = "8546")]
     pub proxy_port: u16,
-
-    /// Disable RPC caching and connect directly to upstream RPC
-    #[arg(long)]
-    pub disable_cache: bool,
 
     /// Grace period in seconds before proxy shutdown when no EDB instances
     #[arg(long, default_value = "30")]
@@ -89,6 +82,8 @@ pub enum Commands {
         /// Test name to debug
         test_name: String,
     },
+    /// Show RPC proxy provider status
+    ProxyStatus,
 }
 
 #[tokio::main]
@@ -100,16 +95,18 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Set up RPC endpoint (proxy or direct)
-    let effective_rpc_url = if cli.disable_cache {
-        tracing::info!("Cache disabled, connecting directly to RPC");
-        cli.rpc_url.clone()
-    } else {
+    let effective_rpc_url = {
         tracing::info!("Ensuring RPC proxy is running...");
         proxy::ensure_proxy_running(&cli).await?;
         format!("http://127.0.0.1:{}", cli.proxy_port)
     };
 
     tracing::info!("Using RPC endpoint: {}", effective_rpc_url);
+
+    // Handle proxy status command separately (doesn't need engine)
+    if let Commands::ProxyStatus = &cli.command {
+        return show_proxy_status(&cli).await;
+    }
 
     // Execute the command to get RPC server handle
     let rpc_server_handle = match &cli.command {
@@ -122,6 +119,7 @@ async fn main() -> Result<()> {
             tracing::info!("Debugging test: {}", test_name);
             debug_foundry_test(test_name, &cli, &effective_rpc_url).await?
         }
+        Commands::ProxyStatus => unreachable!(), // Handled above
     };
 
     tracing::info!(
@@ -213,7 +211,7 @@ async fn replay_transaction(
 
     // Step 2: Build inputs for the engine
     let engine_config = edb_engine::EngineConfig {
-        rpc_port: cli.port,
+        rpc_port: cli.proxy_port,
         etherscan_api_key: cli.etherscan_api_key.clone(),
         quick: cli.quick,
     };
@@ -248,6 +246,95 @@ fn find_test_transaction(_test_name: &str) -> Result<TxHash> {
     // 1. Running the test with foundry
     // 2. Extracting the transaction hash from the test execution
     todo!("Test transaction discovery not yet implemented")
+}
+
+/// Show the status of RPC proxy providers
+async fn show_proxy_status(cli: &Cli) -> Result<()> {
+    use serde_json::json;
+    use std::time::Duration;
+
+    tracing::info!("Checking proxy status...");
+
+    // Query provider status
+    let client = reqwest::Client::new();
+    let request = json!({
+        "jsonrpc": "2.0",
+        "method": "edb_providers",
+        "params": [],
+        "id": 1
+    });
+
+    let response = client
+        .post(&format!("http://127.0.0.1:{}", cli.proxy_port))
+        .json(&request)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+
+    let response_json: serde_json::Value = response.json().await?;
+
+    if let Some(error) = response_json.get("error") {
+        println!("❌ Error getting proxy status: {}", error);
+        return Ok(());
+    }
+
+    if let Some(result) = response_json.get("result") {
+        let healthy_count = result["healthy_count"].as_u64().unwrap_or(0);
+        let total_count = result["total_count"].as_u64().unwrap_or(0);
+        let empty_providers = vec![];
+        let providers = result["providers"].as_array().unwrap_or(&empty_providers);
+
+        println!("🌐 EDB RPC Proxy Status");
+        println!("=====================");
+        println!("📊 Provider Summary: {}/{} healthy", healthy_count, total_count);
+        println!();
+
+        for (i, provider) in providers.iter().enumerate() {
+            let url = provider["url"].as_str().unwrap_or("unknown");
+            let is_healthy = provider["is_healthy"].as_bool().unwrap_or(false);
+            let response_time = provider["response_time_ms"].as_u64();
+            let failures = provider["consecutive_failures"].as_u64().unwrap_or(0);
+            let last_check = provider["last_health_check_seconds_ago"].as_u64();
+
+            let status_emoji = if is_healthy { "✅" } else { "❌" };
+            let status_text = if is_healthy { "Healthy" } else { "Unhealthy" };
+
+            println!("{}. {} {}", i + 1, status_emoji, status_text);
+            println!("   URL: {}", url);
+
+            if let Some(rt) = response_time {
+                println!("   Response Time: {}ms", rt);
+            }
+
+            if failures > 0 {
+                println!("   Failures: {}", failures);
+            }
+
+            if let Some(last) = last_check {
+                if last < 60 {
+                    println!("   Last Check: {}s ago", last);
+                } else if last < 3600 {
+                    println!("   Last Check: {}m ago", last / 60);
+                } else {
+                    println!("   Last Check: {}h ago", last / 3600);
+                }
+            }
+            println!();
+        }
+
+        if healthy_count == 0 {
+            println!("⚠️  Warning: No healthy providers available!");
+            println!("   The proxy will attempt to health-check providers automatically.");
+        } else if healthy_count < total_count {
+            println!("⚠️  Some providers are unhealthy but {} are still working.", healthy_count);
+        } else {
+            println!("✨ All providers are healthy!");
+        }
+    } else {
+        println!("❌ Unexpected response format from proxy");
+    }
+
+    Ok(())
 }
 
 /// Helper module for browser opening

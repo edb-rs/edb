@@ -1,10 +1,12 @@
 //! RPC request handling and caching logic
 
 use crate::cache::CacheManager;
+use crate::providers::ProviderManager;
 use eyre::Result;
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::{debug, info};
+use std::time::Instant;
+use tracing::{debug, warn};
 
 /// RPC methods that should be cached
 const CACHEABLE_METHODS: &[&str] = &[
@@ -27,25 +29,37 @@ const CACHEABLE_METHODS: &[&str] = &[
 /// non-deterministic requests (e.g., "latest" block parameters).
 pub struct RpcHandler {
     upstream_client: reqwest::Client,
-    upstream_url: String,
+    provider_manager: Arc<ProviderManager>,
     cache_manager: Arc<CacheManager>,
 }
 
 impl RpcHandler {
-    /// Creates a new RPC handler with the specified upstream URL and cache manager
+    /// Creates a new RPC handler with multiple providers and cache manager
     ///
     /// # Arguments
-    /// * `rpc_url` - The upstream RPC endpoint URL to forward requests to
+    /// * `provider_manager` - Manager for multiple RPC providers with load balancing
     /// * `cache_manager` - Shared cache manager for storing responses
     ///
     /// # Returns
     /// A new RpcHandler instance ready to process requests
-    pub fn new(rpc_url: String, cache_manager: Arc<CacheManager>) -> Result<Self> {
-        let upstream_client = reqwest::Client::new();
+    pub fn new(
+        provider_manager: Arc<ProviderManager>,
+        cache_manager: Arc<CacheManager>,
+    ) -> Result<Self> {
+        let upstream_client =
+            reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build()?;
 
-        info!("Connected to upstream RPC: {}", rpc_url);
+        Ok(Self { upstream_client, provider_manager, cache_manager })
+    }
 
-        Ok(Self { upstream_client, upstream_url: rpc_url, cache_manager })
+    /// Creates a new RPC handler with a single provider (backward compatibility)
+    pub fn new_single(rpc_url: String, cache_manager: Arc<CacheManager>) -> Result<Self> {
+        let provider_manager = Arc::new(tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(async { ProviderManager::new(vec![rpc_url], 3).await })
+        })?);
+
+        Self::new(provider_manager, cache_manager)
     }
 
     /// Returns a reference to the cache manager
@@ -54,6 +68,11 @@ impl RpcHandler {
     /// Reference to the underlying cache manager
     pub fn cache_manager(&self) -> &Arc<CacheManager> {
         &self.cache_manager
+    }
+
+    /// Returns a reference to the provider manager
+    pub fn provider_manager(&self) -> &Arc<ProviderManager> {
+        &self.provider_manager
     }
 
     /// Handles an RPC request with intelligent caching
@@ -109,18 +128,78 @@ impl RpcHandler {
     }
 
     async fn forward_request(&self, request: &Value) -> Result<Value> {
-        let response = self
-            .upstream_client
-            .post(&self.upstream_url)
-            .header("Content-Type", "application/json")
-            .json(request)
-            .send()
-            .await?;
+        const MAX_RETRIES: usize = 3;
+        let mut last_error = None;
 
-        let response_text = response.text().await?;
-        let response_json: Value = serde_json::from_str(&response_text)?;
+        for retry in 0..MAX_RETRIES {
+            // Get next available provider
+            let provider_url = match self.provider_manager.get_working_provider(3).await {
+                Some(url) => url,
+                None => {
+                    warn!("No healthy providers available");
+                    if retry < MAX_RETRIES - 1 {
+                        // Trigger health check and wait before retry
+                        self.provider_manager.health_check_all().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        continue;
+                    }
+                    return Err(eyre::eyre!("No healthy RPC providers available"));
+                }
+            };
 
-        Ok(response_json)
+            debug!("Forwarding request to provider: {} (attempt {})", provider_url, retry + 1);
+            let start = Instant::now();
+
+            match self
+                .upstream_client
+                .post(&provider_url)
+                .header("Content-Type", "application/json")
+                .json(request)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    let response_time = start.elapsed().as_millis() as u64;
+
+                    match response.text().await {
+                        Ok(response_text) => {
+                            match serde_json::from_str::<Value>(&response_text) {
+                                Ok(response_json) => {
+                                    // Mark provider as successful
+                                    self.provider_manager
+                                        .mark_provider_success(&provider_url, response_time)
+                                        .await;
+                                    return Ok(response_json);
+                                }
+                                Err(e) => {
+                                    warn!("Invalid JSON response from {}: {}", provider_url, e);
+                                    last_error = Some(e.into());
+                                    self.provider_manager.mark_provider_failed(&provider_url).await;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to read response from {}: {}", provider_url, e);
+                            last_error = Some(e.into());
+                            self.provider_manager.mark_provider_failed(&provider_url).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Request failed to {}: {}", provider_url, e);
+                    last_error = Some(e.into());
+                    self.provider_manager.mark_provider_failed(&provider_url).await;
+                }
+            }
+
+            // Wait before retry
+            if retry < MAX_RETRIES - 1 {
+                tokio::time::sleep(std::time::Duration::from_millis(100 * (retry as u64 + 1)))
+                    .await;
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| eyre::eyre!("All retry attempts failed")))
     }
 
     fn has_non_deterministic_block_params(&self, request: &Value) -> bool {
@@ -186,7 +265,7 @@ mod tests {
         let cache_path = temp_dir.path().join("test_cache.json");
 
         let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
-        let handler = RpcHandler::new(mock_server.uri(), cache_manager).unwrap();
+        let handler = RpcHandler::new_single(mock_server.uri(), cache_manager).unwrap();
 
         (handler, mock_server, temp_dir)
     }
@@ -347,7 +426,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("test.json");
         let cache_manager = Arc::new(CacheManager::new(10, cache_path).unwrap());
-        let handler = RpcHandler::new("http://example.com".to_string(), cache_manager).unwrap();
+        let handler =
+            RpcHandler::new_single("http://example.com".to_string(), cache_manager).unwrap();
 
         // Test various non-deterministic block parameters
         let test_cases = vec![

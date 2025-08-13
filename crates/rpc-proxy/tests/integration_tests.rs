@@ -17,11 +17,12 @@ async fn create_test_proxy(upstream_url: String, max_cache_items: u32) -> (Proxy
     let cache_dir = Some(temp_dir.path().to_path_buf());
 
     let proxy = ProxyServer::new(
-        upstream_url,
+        Some(vec![upstream_url]),
         max_cache_items,
         cache_dir,
         300, // grace_period: 5 minutes
         10,  // heartbeat_interval: 10 seconds
+        3,
     )
     .await
     .unwrap();
