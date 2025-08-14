@@ -50,7 +50,8 @@ indicatif.workspace = true
 once_cell.workspace = true
 rand.workspace = true
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "local-time"] }
+tracing-appender = "0.2"
 serde_json.workspace = true
 serial_test.workspace = true
 

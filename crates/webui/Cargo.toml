@@ -37,3 +37,6 @@ serde_json.workspace = true
 # misc
 eyre.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+edb-utils = { path = "../utils" }

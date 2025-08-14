@@ -8,25 +8,21 @@ use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
-pub async fn ensure_proxy_running(cli: &Cli) -> Result<()> {
-    if !cli.force_new_proxy {
-        // Check if proxy already exists and is healthy
-        match proxy_health_check(cli.proxy_port).await {
-            Ok(_) => {
-                info!("Found healthy proxy at port {}", cli.proxy_port);
-                register_with_proxy(cli.proxy_port).await?;
-                start_heartbeat_task(cli.proxy_port, cli.proxy_heartbeat_interval);
-                return Ok(());
-            }
-            Err(e) => {
-                debug!("Proxy health check failed: {}", e);
+const PROXY_HEARTBEAT_INTERVAL: u64 = 10;
+const PROXY_GRACE_PERIOD: u64 = 30;
 
-                // No healthy proxy found - spawn new one
-                info!("No healthy proxy found, spawning new instance");
-            }
+pub async fn ensure_proxy_running(cli: &Cli) -> Result<()> {
+    // Check if proxy already exists and is healthy
+    match proxy_health_check(cli.proxy_port).await {
+        Ok(_) => {
+            info!("Found healthy proxy at port {}", cli.proxy_port);
+            register_with_proxy(cli.proxy_port).await?;
+            start_heartbeat_task(cli.proxy_port, PROXY_HEARTBEAT_INTERVAL);
+            return Ok(());
         }
-    } else {
-        info!("Forcing new proxy instance");
+        Err(e) => {
+            debug!("Proxy health check failed: {}", e);
+        }
     }
 
     // Spawn new one
@@ -40,7 +36,7 @@ pub async fn ensure_proxy_running(cli: &Cli) -> Result<()> {
     register_with_proxy(cli.proxy_port).await?;
 
     // Start heartbeat task
-    start_heartbeat_task(cli.proxy_port, cli.proxy_heartbeat_interval);
+    start_heartbeat_task(cli.proxy_port, PROXY_HEARTBEAT_INTERVAL);
 
     Ok(())
 }
@@ -142,12 +138,10 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         let mut args = vec![
             "--port".to_string(),
             cli.proxy_port.to_string(),
-            "--max-cache-items".to_string(),
-            "102400".to_string(),
             "--grace-period".to_string(),
-            cli.proxy_grace_period.to_string(),
+            PROXY_GRACE_PERIOD.to_string(),
             "--heartbeat-interval".to_string(),
-            cli.proxy_heartbeat_interval.to_string(),
+            PROXY_HEARTBEAT_INTERVAL.to_string(),
             "--max-failures".to_string(),
             "3".to_string(),
         ];
@@ -156,11 +150,6 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         if let Some(rpc_urls) = &cli.rpc_urls {
             args.push("--rpc-urls".to_string());
             args.push(rpc_urls.clone());
-        }
-
-        if let Some(cache_dir) = &cli.cache_dir {
-            args.push("--cache-dir".to_string());
-            args.push(cache_dir.clone());
         }
 
         Command::new(&proxy_binary)

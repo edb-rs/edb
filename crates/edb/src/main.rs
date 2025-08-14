@@ -31,22 +31,6 @@ pub struct Cli {
     #[arg(long, default_value = "8546")]
     pub proxy_port: u16,
 
-    /// Grace period in seconds before proxy shutdown when no EDB instances
-    #[arg(long, default_value = "30")]
-    pub proxy_grace_period: u64,
-
-    /// Force starting a new proxy instance instead of reusing existing
-    #[arg(long)]
-    pub force_new_proxy: bool,
-
-    /// Heartbeat interval in seconds for EDB instance registration
-    #[arg(long, default_value = "10")]
-    pub proxy_heartbeat_interval: u64,
-
-    /// Cache directory for RPC proxy (default: ~/.edb/cache/rpc/1)
-    #[arg(long)]
-    pub cache_dir: Option<String>,
-
     /// Etherscan API key for source code download
     #[arg(long, env = "ETHERSCAN_API_KEY")]
     pub etherscan_api_key: Option<String>,
@@ -90,6 +74,9 @@ pub enum Commands {
 async fn main() -> Result<()> {
     // Load environment variables
     dotenv::dotenv().ok();
+
+    // Initialize logging
+    edb_utils::logging::init_logging("edb", true)?;
 
     // Parse CLI arguments
     let cli = Cli::parse();

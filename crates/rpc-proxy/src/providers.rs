@@ -11,39 +11,49 @@ use tracing::{debug, info, warn};
 /// Default Ethereum mainnet RPC endpoints
 /// These are free public endpoints from chainlist.org, sorted by latency
 pub const DEFAULT_MAINNET_RPCS: &[&str] = &[
-    "https://rpc.eth.gateway.fm",                           // 0.321s latency
-    "https://ethereum-rpc.publicnode.com",                  // 0.389s latency
-    "https://mainnet.gateway.tenderly.co",                  // 0.423s latency
-    "https://rpc.flashbots.net/fast",                       // 0.447s latency
-    "https://rpc.flashbots.net",                            // 0.516s latency
-    "https://gateway.tenderly.co/public/mainnet",           // 0.518s latency
-    "https://eth-mainnet.public.blastapi.io",               // 0.542s latency
-    "https://ethereum-mainnet.gateway.tatum.io",            // 0.640s latency
-    "https://eth.api.onfinality.io/public",                 // 0.653s latency
-    "https://eth.llamarpc.com",                             // 0.682s latency
-    "https://api.zan.top/eth-mainnet",                      // 0.688s latency
-    "https://eth.drpc.org",                                 // 0.772s latency
-    "https://endpoints.omniatech.io/v1/eth/mainnet/public", // 0.801s latency
-    "https://ethereum.rpc.subquery.network/public",         // 0.811s latency
+    "https://rpc.eth.gateway.fm",
+    "https://ethereum-rpc.publicnode.com",
+    "https://mainnet.gateway.tenderly.co",
+    "https://rpc.flashbots.net/fast",
+    "https://rpc.flashbots.net",
+    "https://gateway.tenderly.co/public/mainnet",
+    "https://eth-mainnet.public.blastapi.io",
+    "https://ethereum-mainnet.gateway.tatum.io",
+    "https://eth.api.onfinality.io/public",
+    "https://eth.llamarpc.com",
+    "https://api.zan.top/eth-mainnet",
+    "https://eth.drpc.org",
+    "https://endpoints.omniatech.io/v1/eth/mainnet/public",
+    "https://ethereum.rpc.subquery.network/public",
 ];
 
 /// Information about an RPC provider
 #[derive(Debug, Clone)]
 pub struct ProviderInfo {
+    /// The RPC endpoint URL
     pub url: String,
+    /// Whether the provider is currently healthy
     pub is_healthy: bool,
+    /// When the provider was last health checked
     pub last_health_check: Option<Instant>,
+    /// Response time in milliseconds for the last successful request
     pub response_time_ms: Option<u64>,
+    /// Number of consecutive failures (reset on success)
     pub consecutive_failures: u32,
 }
 
 /// Serializable version of ProviderInfo for API responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfoResponse {
+    /// The RPC endpoint URL
     pub url: String,
+    /// Whether the provider is currently healthy
     pub is_healthy: bool,
+    /// Seconds since the last health check
     pub last_health_check_seconds_ago: Option<u64>,
+    /// Response time in milliseconds for the last successful request
     pub response_time_ms: Option<u64>,
+    /// Number of consecutive failures (reset on success)
     pub consecutive_failures: u32,
 }
 
@@ -255,11 +265,15 @@ impl ProviderManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tracing::{debug, info};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn test_provider_initialization() {
+        edb_utils::logging::ensure_test_logging();
+        info!("Testing provider initialization with health checks");
+
         // Start mock servers
         let mock1 = MockServer::start().await;
         let mock2 = MockServer::start().await;
@@ -296,6 +310,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_round_robin_selection() {
+        edb_utils::logging::ensure_test_logging();
+        info!("Testing round-robin provider selection");
+
         // Start 3 healthy mock servers
         let mocks =
             vec![MockServer::start().await, MockServer::start().await, MockServer::start().await];
@@ -329,6 +346,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_provider_failure_handling() {
+        edb_utils::logging::ensure_test_logging();
+        debug!("Testing provider failure detection and handling");
+
         let mock = MockServer::start().await;
 
         // Initially healthy

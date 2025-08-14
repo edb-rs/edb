@@ -1,9 +1,9 @@
 //! Integration tests for the RPC proxy server
 
-use edb_rpc_proxy::proxy::ProxyServer;
+use edb_rpc_proxy::{cache::CacheEntry, proxy::ProxyServer};
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::{net::SocketAddr, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, time::Duration};
 use tempfile::TempDir;
 use tokio::time::sleep;
 use wiremock::{
@@ -12,12 +12,25 @@ use wiremock::{
 };
 
 /// Helper to create a test proxy server
-async fn create_test_proxy(upstream_url: String, max_cache_items: u32) -> (ProxyServer, TempDir) {
+async fn create_test_proxy(max_cache_items: u32) -> (ProxyServer, MockServer, TempDir) {
+    let mock_server = MockServer::start().await;
     let temp_dir = TempDir::new().unwrap();
     let cache_dir = Some(temp_dir.path().to_path_buf());
 
+    // Set up health check response that ProviderManager needs during initialization
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x1"  // eth_blockNumber/eth_chainid response for health check
+        })))
+        .up_to_n_times(2) // Only for the initial health check
+        .mount(&mock_server)
+        .await;
+
     let proxy = ProxyServer::new(
-        Some(vec![upstream_url]),
+        Some(vec![mock_server.uri()]),
         max_cache_items,
         cache_dir,
         300, // grace_period: 5 minutes
@@ -27,7 +40,7 @@ async fn create_test_proxy(upstream_url: String, max_cache_items: u32) -> (Proxy
     .await
     .unwrap();
 
-    (proxy, temp_dir)
+    (proxy, mock_server, temp_dir)
 }
 
 /// Start proxy server on a random port and return the address
@@ -46,9 +59,34 @@ async fn start_proxy_server(proxy: ProxyServer) -> SocketAddr {
     actual_addr
 }
 
+/// Helper function to collect cache data from a proxy server
+///
+/// This function retrieves all cached entries from the proxy server's cache manager
+/// for testing and verification purposes.
+///
+/// # Arguments
+/// * `proxy` - Reference to the ProxyServer instance
+///
+/// # Returns
+/// A HashMap containing all cache entries with their keys and values
+pub async fn collect_cache_data(proxy: &ProxyServer) -> HashMap<String, CacheEntry> {
+    proxy.cache_manager().get_all_entries().await
+}
+
+/// Helper function to get cache statistics from a proxy server
+///
+/// # Arguments  
+/// * `proxy` - Reference to the ProxyServer instance
+///
+/// # Returns
+/// A JSON Value containing detailed cache statistics
+pub async fn get_cache_stats(proxy: &ProxyServer) -> Value {
+    proxy.cache_manager().detailed_stats().await
+}
+
 #[tokio::test]
 async fn test_proxy_health_endpoints() {
-    let (_proxy, _temp_dir) = create_test_proxy("http://example.com".to_string(), 10).await;
+    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
@@ -65,7 +103,9 @@ async fn test_proxy_health_endpoints() {
 
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
-    assert_eq!(body["result"], "pong");
+    assert_eq!(body["result"]["status"], "ok");
+    assert_eq!(body["result"]["service"], "edb-rpc-proxy");
+    assert!(body["result"]["timestamp"].is_number());
 
     // Test edb_info
     let info_request = json!({
@@ -83,7 +123,7 @@ async fn test_proxy_health_endpoints() {
 
 #[tokio::test]
 async fn test_proxy_registry_endpoints() {
-    let (_proxy, _temp_dir) = create_test_proxy("http://example.com".to_string(), 10).await;
+    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
@@ -122,7 +162,7 @@ async fn test_proxy_registry_endpoints() {
 
 #[tokio::test]
 async fn test_proxy_cache_stats_endpoint() {
-    let (_proxy, _temp_dir) = create_test_proxy("http://example.com".to_string(), 100).await;
+    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(100).await;
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
@@ -150,21 +190,7 @@ async fn test_proxy_cache_stats_endpoint() {
 
 #[tokio::test]
 async fn test_proxy_active_instances_endpoint() {
-    // Set up mock upstream server for the proxy
-    let mock_server = MockServer::start().await;
-
-    // Mock the eth_chainId call that happens during cache path setup
-    Mock::given(method("POST"))
-        .and(path("/"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": "0x1"
-        })))
-        .mount(&mock_server)
-        .await;
-
-    let (_proxy, _temp_dir) = create_test_proxy(mock_server.uri(), 10).await;
+    let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
@@ -177,6 +203,17 @@ async fn test_proxy_active_instances_endpoint() {
         "params": [12345, 1234567890],
         "id": 1
     });
+
+    // Mock the eth_chainId call that happens during cache path setup
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x1"
+        })))
+        .mount(&mock_server)
+        .await;
 
     let register_request2 = json!({
         "jsonrpc": "2.0",
@@ -216,8 +253,11 @@ async fn test_proxy_active_instances_endpoint() {
 
 #[tokio::test]
 async fn test_proxy_rpc_forwarding_and_caching() {
-    // Set up mock upstream server
-    let mock_server = MockServer::start().await;
+    // Create proxy pointing to mock server
+    let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
+    let proxy_addr = start_proxy_server(_proxy).await;
+    let client = Client::new();
+    let proxy_url = format!("http://{}", proxy_addr);
 
     let response_data = json!({
         "jsonrpc": "2.0",
@@ -234,13 +274,6 @@ async fn test_proxy_rpc_forwarding_and_caching() {
         .expect(1) // Should only be called once due to caching
         .mount(&mock_server)
         .await;
-
-    // Create proxy pointing to mock server
-    let (_proxy, _temp_dir) = create_test_proxy(mock_server.uri(), 10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
-
-    let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
 
     let rpc_request = json!({
         "jsonrpc": "2.0",
@@ -268,8 +301,11 @@ async fn test_proxy_rpc_forwarding_and_caching() {
 
 #[tokio::test]
 async fn test_proxy_non_cacheable_forwarding() {
-    // Set up mock upstream server
-    let mock_server = MockServer::start().await;
+    // Create proxy pointing to mock server
+    let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
+    let proxy_addr = start_proxy_server(_proxy).await;
+    let client = Client::new();
+    let proxy_url = format!("http://{}", proxy_addr);
 
     let response_data = json!({
         "jsonrpc": "2.0",
@@ -283,13 +319,6 @@ async fn test_proxy_non_cacheable_forwarding() {
         .expect(2) // Should be called twice since not cacheable
         .mount(&mock_server)
         .await;
-
-    // Create proxy pointing to mock server
-    let (_proxy, _temp_dir) = create_test_proxy(mock_server.uri(), 10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
-
-    let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
 
     let rpc_request = json!({
         "jsonrpc": "2.0",
@@ -316,8 +345,9 @@ async fn test_proxy_non_cacheable_forwarding() {
 
 #[tokio::test]
 async fn test_proxy_non_deterministic_params_bypass_cache() {
-    // Set up mock upstream server
-    let mock_server = MockServer::start().await;
+    // Create proxy pointing to mock server
+    let (proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
+    let proxy_addr = start_proxy_server(proxy).await;
 
     let response_data = json!({
         "jsonrpc": "2.0",
@@ -334,10 +364,6 @@ async fn test_proxy_non_deterministic_params_bypass_cache() {
         .expect(2) // Should be called twice since "latest" bypasses cache
         .mount(&mock_server)
         .await;
-
-    // Create proxy pointing to mock server
-    let (_proxy, _temp_dir) = create_test_proxy(mock_server.uri(), 10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
     let proxy_url = format!("http://{}", proxy_addr);
@@ -366,8 +392,102 @@ async fn test_proxy_non_deterministic_params_bypass_cache() {
 }
 
 #[tokio::test]
+async fn test_proxy_cache_data_collection() {
+    // Create proxy pointing to mock server
+    let (proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
+    let proxy_addr = start_proxy_server(proxy.clone()).await;
+    let client = Client::new();
+    let proxy_url = format!("http://{}", proxy_addr);
+
+    let response_data = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "number": "0x1000000",
+            "hash": "0x1234567890abcdef"
+        }
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&response_data))
+        .expect(1) // Should only be called once due to caching
+        .mount(&mock_server)
+        .await;
+
+    // Initially cache should be empty
+    let initial_cache = collect_cache_data(&proxy).await;
+    assert_eq!(initial_cache.len(), 0);
+
+    let initial_stats = get_cache_stats(&proxy).await;
+    assert_eq!(initial_stats["total_entries"], 0);
+
+    let rpc_request = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getBlockByNumber",
+        "params": ["0x1000000", false],
+        "id": 1
+    });
+
+    // Make a cacheable request
+    let response = client.post(&proxy_url).json(&rpc_request).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+
+    // Now cache should contain one entry
+    let cache_after_request = collect_cache_data(&proxy).await;
+    assert_eq!(cache_after_request.len(), 1);
+
+    let stats_after_request = get_cache_stats(&proxy).await;
+    assert_eq!(stats_after_request["total_entries"], 1);
+
+    // Verify the cache contains the expected data
+    let cache_key = "eth_getBlockByNumber:[\"0x1000000\",false]";
+    assert!(cache_after_request.contains_key(cache_key));
+    assert_eq!(cache_after_request[cache_key].data, response_data);
+}
+
+#[tokio::test]
+async fn test_proxy_shutdown_endpoint() {
+    let (proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
+    let proxy_addr = start_proxy_server(proxy).await;
+
+    let client = Client::new();
+    let proxy_url = format!("http://{}", proxy_addr);
+
+    // Test edb_shutdown
+    let shutdown_request = json!({
+        "jsonrpc": "2.0",
+        "method": "edb_shutdown",
+        "params": [],
+        "id": 1
+    });
+
+    let response = client.post(&proxy_url).json(&shutdown_request).send().await.unwrap();
+
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["result"]["status"], "shutting_down");
+    assert_eq!(body["result"]["message"], "Server shutdown initiated");
+
+    // Give the server a moment to shut down
+    sleep(Duration::from_millis(500)).await;
+
+    // Subsequent requests should fail as server is shut down
+    let ping_request = json!({
+        "jsonrpc": "2.0",
+        "method": "edb_ping",
+        "params": [],
+        "id": 2
+    });
+
+    let result = client.post(&proxy_url).json(&ping_request).send().await;
+    // This should fail because the server has shut down
+    assert!(result.is_err());
+}
+
+#[tokio::test]
 async fn test_proxy_invalid_request_handling() {
-    let (_proxy, _temp_dir) = create_test_proxy("http://example.com".to_string(), 10).await;
+    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();

@@ -8,6 +8,7 @@ use edb_rpc_proxy::proxy::ProxyServer;
 use edb_utils::fork_and_prepare;
 use std::{path::PathBuf, time::Duration};
 use tokio::time::sleep;
+use tracing::{debug, info};
 
 /// Test transaction hash from a known mainnet transaction
 const TEST_TX_HASH: &str = "0xc403cced1cf53cbeb72475be7271b731f846e91fcbd7b43f120b8bbd60d5473e";
@@ -16,7 +17,9 @@ const TEST_TX_HASH: &str = "0xc403cced1cf53cbeb72475be7271b731f846e91fcbd7b43f12
 const TEST_TX_HASH_2: &str = "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060";
 
 /// Helper to set up a test proxy with caching in testdata directory
-async fn setup_test_proxy_with_cache() -> Result<String, Box<dyn std::error::Error>> {
+async fn setup_test_proxy_with_cache(
+    grace_period: u64,
+) -> Result<String, Box<dyn std::error::Error>> {
     // Get the testdata cache directory
     let cache_dir = get_testdata_cache_dir();
 
@@ -24,7 +27,7 @@ async fn setup_test_proxy_with_cache() -> Result<String, Box<dyn std::error::Err
         None,
         10000, // Large cache for tests
         Some(cache_dir.clone()),
-        0,  // No auto-shutdown
+        grace_period,
         30, // 30 second heartbeat
         3,  // max failed requests per provider
     )
@@ -109,7 +112,10 @@ async fn get_cache_stats(proxy_url: &str) -> Result<serde_json::Value, Box<dyn s
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_with_proxy_cache() {
-    let proxy_url = setup_test_proxy_with_cache().await.expect("Failed to setup test proxy");
+    edb_utils::logging::ensure_test_logging();
+    info!("Testing fork and prepare with proxy caching");
+
+    let proxy_url = setup_test_proxy_with_cache(3000).await.expect("Failed to setup test proxy");
 
     register_with_proxy(&proxy_url).await.ok();
 
@@ -121,7 +127,7 @@ async fn test_fork_with_proxy_cache() {
     let result = fork_and_prepare(&proxy_url, tx_hash, false).await;
 
     let duration = start.elapsed();
-    println!("⏱️  First fork took: {:?}", duration);
+    println!("First fork took: {:?}", duration);
 
     match result {
         Ok(fork_result) => {
@@ -133,7 +139,7 @@ async fn test_fork_with_proxy_cache() {
             let result2 = fork_and_prepare(&proxy_url, tx_hash, false).await;
             let duration2 = start2.elapsed();
 
-            println!("⏱️  Second fork took: {:?}", duration2);
+            println!("Second fork took: {:?}", duration2);
 
             assert!(result2.is_ok());
 
@@ -153,7 +159,10 @@ async fn test_fork_with_proxy_cache() {
 
 #[tokio::test]
 async fn test_multiple_transactions_with_cache() {
-    let proxy_url = setup_test_proxy_with_cache().await.expect("Failed to setup test proxy");
+    edb_utils::logging::ensure_test_logging();
+    info!("Testing multiple transactions with proxy caching");
+
+    let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
 
     register_with_proxy(&proxy_url).await.ok();
 
@@ -191,7 +200,10 @@ async fn test_multiple_transactions_with_cache() {
 
 #[tokio::test]
 async fn test_proxy_endpoints() {
-    let proxy_url = setup_test_proxy_with_cache().await.expect("Failed to setup test proxy");
+    edb_utils::logging::ensure_test_logging();
+    debug!("Testing proxy endpoint functionality");
+
+    let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
 
     let client = reqwest::Client::new();
 
@@ -224,33 +236,16 @@ async fn test_proxy_endpoints() {
     let stats = get_cache_stats(&proxy_url).await.expect("Failed to get cache stats");
     assert!(stats["max_entries"].as_u64().unwrap() > 0);
 
-    // Test provider status endpoint
-    let providers_request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "edb_providers",
-        "id": 1
-    });
-
-    let response = client
-        .post(&proxy_url)
-        .json(&providers_request)
-        .send()
-        .await
-        .expect("Failed to get provider status");
-    assert!(response.status().is_success());
-
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body["result"]["providers"].is_array());
-    assert!(body["result"]["healthy_count"].is_number());
-    assert!(body["result"]["total_count"].is_number());
-
     println!("All proxy endpoints working correctly!");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_and_prepare_quick_mode() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Testing fork and prepare in quick mode with caching");
+
     // Setup proxy with cache for more reliable testing
-    let proxy_url = setup_test_proxy_with_cache().await.expect("Failed to setup test proxy");
+    let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
 
     register_with_proxy(&proxy_url).await.ok();
 
@@ -317,8 +312,11 @@ async fn test_fork_and_prepare_quick_mode() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_at_specific_hardfork_boundaries() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Testing fork at different hardfork boundaries");
+
     // Setup proxy with cache for more reliable testing
-    let proxy_url = setup_test_proxy_with_cache().await.expect("Failed to setup test proxy");
+    let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
 
     register_with_proxy(&proxy_url).await.ok();
 

@@ -17,9 +17,9 @@ use axum::{
 use eyre::Result;
 use serde_json::Value;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::broadcast};
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Main proxy server that combines RPC handling, registry, and health services
 ///
@@ -35,6 +35,8 @@ pub struct ProxyServer {
     pub registry: Arc<EDBRegistry>,
     /// Health check service for monitoring
     pub health_service: Arc<HealthService>,
+    /// Shutdown signal sender
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 #[derive(Clone)]
@@ -82,6 +84,7 @@ impl ProxyServer {
         let rpc_handler = Arc::new(RpcHandler::new(provider_manager.clone(), cache_manager)?);
         let registry = Arc::new(EDBRegistry::new(grace_period));
         let health_service = Arc::new(HealthService::new());
+        let (shutdown_tx, _) = broadcast::channel(1);
 
         // Start background tasks
         let registry_clone = Arc::clone(&registry);
@@ -99,7 +102,7 @@ impl ProxyServer {
             }
         });
 
-        Ok(Self { rpc_handler, registry, health_service })
+        Ok(Self { rpc_handler, registry, health_service, shutdown_tx })
     }
 
     /// Returns a reference to the cache manager
@@ -122,6 +125,8 @@ impl ProxyServer {
     /// # Returns
     /// Result indicating server startup success or failure
     pub async fn serve(self, addr: SocketAddr) -> Result<()> {
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+
         let app = Router::new()
             .route("/", post(handle_rpc))
             .layer(
@@ -135,7 +140,13 @@ impl ProxyServer {
         let listener = TcpListener::bind(addr).await?;
         info!("EDB RPC Proxy listening on {}", addr);
 
-        axum::serve(listener, app).await?;
+        // Create the server with graceful shutdown
+        let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+            let _ = shutdown_rx.recv().await;
+            info!("Shutdown signal received, stopping server gracefully");
+        });
+
+        server.await?;
 
         Ok(())
     }
@@ -146,15 +157,16 @@ async fn handle_rpc(
     Json(request): Json<Value>,
 ) -> Result<Json<Value>, StatusCode> {
     // Handle special EDB health check methods
-    if let Some(method) = request.get("method").and_then(|m| m.as_str()) {
+    debug!("Received RPC request: {}", request);
+    let response = if let Some(method) = request.get("method").and_then(|m| m.as_str()) {
         match method {
             "edb_ping" => {
                 let response = state.proxy.health_service.ping().await;
-                return Ok(Json(response));
+                Ok(Json(response))
             }
             "edb_info" => {
                 let response = state.proxy.health_service.info().await;
-                return Ok(Json(response));
+                Ok(Json(response))
             }
             "edb_register" => {
                 if let Some(params) = request.get("params").and_then(|p| p.as_array()) {
@@ -164,19 +176,25 @@ async fn handle_rpc(
                     ) {
                         let response =
                             state.proxy.registry.register_edb_instance(pid as u32, timestamp).await;
-                        return Ok(Json(response));
+                        Ok(Json(response))
+                    } else {
+                        Err(StatusCode::BAD_REQUEST)
                     }
+                } else {
+                    Err(StatusCode::BAD_REQUEST)
                 }
-                return Err(StatusCode::BAD_REQUEST);
             }
             "edb_heartbeat" => {
                 if let Some(params) = request.get("params").and_then(|p| p.as_array()) {
                     if let Some(pid) = params.get(0).and_then(|v| v.as_u64()) {
                         let response = state.proxy.registry.heartbeat(pid as u32).await;
-                        return Ok(Json(response));
+                        Ok(Json(response))
+                    } else {
+                        Err(StatusCode::BAD_REQUEST)
                     }
+                } else {
+                    Err(StatusCode::BAD_REQUEST)
                 }
-                return Err(StatusCode::BAD_REQUEST);
             }
             "edb_cache_stats" => {
                 let stats = state.proxy.cache_manager().detailed_stats().await;
@@ -185,7 +203,7 @@ async fn handle_rpc(
                     "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
                     "result": stats
                 });
-                return Ok(Json(response));
+                Ok(Json(response))
             }
             "edb_active_instances" => {
                 let active_pids = state.proxy.registry.get_active_instances().await;
@@ -197,7 +215,7 @@ async fn handle_rpc(
                         "count": active_pids.len()
                     }
                 });
-                return Ok(Json(response));
+                Ok(Json(response))
             }
             "edb_providers" => {
                 let providers_info =
@@ -213,7 +231,23 @@ async fn handle_rpc(
                         "total_count": providers_info.len()
                     }
                 });
-                return Ok(Json(response));
+                Ok(Json(response))
+            }
+            "edb_shutdown" => {
+                info!("Shutdown request received");
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": {
+                        "status": "shutting_down",
+                        "message": "Server shutdown initiated"
+                    }
+                });
+
+                // Send shutdown signal (non-blocking)
+                let _ = state.proxy.shutdown_tx.send(());
+
+                Ok(Json(response))
             }
             _ => {
                 // Forward to RPC handler
@@ -227,6 +261,10 @@ async fn handle_rpc(
             }
         }
     } else {
+        warn!("Invalid RPC request: {}", request);
         Err(StatusCode::BAD_REQUEST)
-    }
+    };
+
+    debug!("RPC response: {:?}", response);
+    response
 }

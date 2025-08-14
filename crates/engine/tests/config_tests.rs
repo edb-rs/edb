@@ -1,7 +1,10 @@
 use edb_engine::EngineConfig;
+use tracing::{debug, info, warn};
 
 #[test]
 fn test_default_config() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Running test");
     let config = EngineConfig::default();
 
     assert_eq!(config.rpc_port, 8545);
@@ -11,6 +14,8 @@ fn test_default_config() {
 
 #[test]
 fn test_config_with_custom_values() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Running test");
     let config = EngineConfig {
         rpc_port: 9545,
         etherscan_api_key: Some("test_key".to_string()),
@@ -24,6 +29,8 @@ fn test_config_with_custom_values() {
 
 #[test]
 fn test_config_clone() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Running test");
     let config =
         EngineConfig { rpc_port: 8080, etherscan_api_key: Some("key".to_string()), quick: false };
 

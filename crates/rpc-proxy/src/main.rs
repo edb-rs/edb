@@ -16,7 +16,6 @@ mod proxy;
 mod registry;
 mod rpc;
 
-use providers::DEFAULT_MAINNET_RPCS;
 use proxy::ProxyServer;
 
 #[derive(Parser, Debug)]
@@ -36,12 +35,12 @@ struct Args {
     #[arg(long, default_value = "102400")]
     max_cache_items: u32,
 
-    /// Cache directory (default: ~/.edb/cache/rpc/1)
+    /// Cache directory (default: ~/.edb/cache/rpc/<chain_id>)
     #[arg(long)]
     cache_dir: Option<String>,
 
     /// Grace period in seconds before shutdown when no EDB instances (0 = no auto-shutdown)
-    #[arg(long, default_value = "30")]
+    #[arg(long, default_value = "0")]
     grace_period: u64,
 
     /// Heartbeat check interval in seconds
@@ -55,14 +54,18 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize logging
+    edb_utils::logging::init_logging("edb-rpc-proxy", true)?;
+
     let args = Args::parse();
 
     let rpc_urls = args.rpc_urls.map(|urls| {
         urls.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>()
     });
 
-    // Create the proxy server
     let cache_dir = args.cache_dir.map(std::path::PathBuf::from);
+
+    // Create the proxy server
     let proxy = ProxyServer::new(
         rpc_urls,
         args.max_cache_items,

@@ -1,9 +1,12 @@
 use alloy_primitives::Address;
 use edb_engine::instrumentation::{instrument_sources, INSTRUMENTATION_PRECOMPILE};
 use std::collections::HashMap;
+use tracing::{debug, info, warn};
 
 #[test]
 fn test_simple_function_instrumentation() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Running test");
     let source = r#"
 pragma solidity ^0.8.0;
 
@@ -40,6 +43,8 @@ contract SimpleContract {
 
 #[test]
 fn test_multiple_function_instrumentation() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Running test");
     let source = r#"
 contract MultiFunction {
     mapping(address => uint256) public balances;
@@ -74,6 +79,8 @@ contract MultiFunction {
 
 #[test]
 fn test_empty_source_handling() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Running test");
     let mut sources = HashMap::new();
     let addr = Address::ZERO;
     sources.insert(addr, "".to_string());
@@ -84,6 +91,8 @@ fn test_empty_source_handling() {
 
 #[test]
 fn test_contract_without_functions() {
+    edb_utils::logging::ensure_test_logging();
+    info!("Running test");
     let source = r#"
 pragma solidity ^0.8.0;
 

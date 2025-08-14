@@ -1,3 +1,127 @@
-/target
-/.vscode
-/testdata
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Rust workspace
+/crates/*/target/
+
+# IDE and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+.vim/
+.nvim/
+*.code-workspace
+
+# Testing
+/tmp/
+*.log
+test-results/
+coverage/
+*.profraw
+*.profdata
+/test_artifacts/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug.log
+*.stackdump
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+
+# Build artifacts
+/dist/
+/build/
+/out/
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Documentation
+/docs/_build/
+/docs/.doctrees/
+*.pdf
+
+# Python (if any Python scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+.venv/
+
+# Node (if any JS/TS)
+node_modules/
+.npm
+.yarn/
+.pnp.*
+
+# Logs
+logs/
+*.log
+*.log.*
+/edb-logs/
+
+# Local configuration
+/config/local.*
+*.local.toml
+*.local.yaml
+*.local.json
+
+# Temporary files
+/temp/
+/tmp/
+*.tmp
+*.temp
+.cache/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Keys and secrets
+*.key
+*.pem
+*.cert
+*.crt
+*.p12
+*.pfx
+/secrets/
+
+# Benchmarks
+/benches/target/
+/criterion/
+
+# CLAUDE.md should be tracked
+!CLAUDE.md

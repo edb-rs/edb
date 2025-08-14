@@ -5,7 +5,6 @@ use edb_utils::{
     forking,
 };
 use eyre::Result;
-use jsonrpsee::server::middleware::rpc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -194,6 +193,19 @@ impl CacheManager {
         })
     }
 
+    /// Returns all cache entries for testing purposes
+    ///
+    /// This method is primarily intended for testing and debugging.
+    /// In production, prefer using specific cache queries or statistics.
+    ///
+    /// # Returns
+    /// A HashMap containing all cache entries with their keys and values
+    #[allow(dead_code)]
+    pub async fn get_all_entries(&self) -> HashMap<String, CacheEntry> {
+        let cache = self.cache.read().await;
+        cache.clone()
+    }
+
     /// Generates a cache file path based on the RPC URL and optional cache directory
     ///
     /// Creates a chain-specific cache directory structure and ensures parent directories exist.
@@ -240,6 +252,7 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use tokio::time::{sleep, Duration};
+    use tracing::{debug, info};
 
     fn create_test_cache_manager(max_items: u32) -> (CacheManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
@@ -250,6 +263,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_get_set() {
+        edb_utils::logging::ensure_test_logging();
+        info!("Testing cache get/set operations");
+
         let (manager, _temp_dir) = create_test_cache_manager(10);
 
         // Test cache miss
@@ -265,6 +281,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_eviction() {
+        edb_utils::logging::ensure_test_logging();
+        info!("Testing cache eviction behavior");
+
         let (manager, _temp_dir) = create_test_cache_manager(3);
 
         // Fill cache to capacity with delays to ensure different timestamps
@@ -285,6 +304,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_eviction_order() {
+        edb_utils::logging::ensure_test_logging();
+        info!("Testing cache eviction order");
+
         let (manager, _temp_dir) = create_test_cache_manager(3);
 
         // Add items with delays to ensure different timestamps
@@ -309,6 +331,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_persistence() {
+        edb_utils::logging::ensure_test_logging();
+        info!("Testing cache persistence across restarts");
+
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("persist_test.json");
 
@@ -327,6 +352,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_detailed_stats() {
+        edb_utils::logging::ensure_test_logging();
+        info!("Testing detailed cache statistics");
+
         let (manager, _temp_dir) = create_test_cache_manager(100);
 
         // Test empty cache stats
@@ -355,6 +383,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_entry_timestamps() {
+        edb_utils::logging::ensure_test_logging();
+        debug!("Testing cache entry timestamp behavior");
+
         let entry1 = CacheEntry::new(serde_json::json!({"test": 1}));
         sleep(Duration::from_millis(10)).await;
         let entry2 = CacheEntry::new(serde_json::json!({"test": 2}));

@@ -52,16 +52,6 @@ impl RpcHandler {
         Ok(Self { upstream_client, provider_manager, cache_manager })
     }
 
-    /// Creates a new RPC handler with a single provider (backward compatibility)
-    pub fn new_single(rpc_url: String, cache_manager: Arc<CacheManager>) -> Result<Self> {
-        let provider_manager = Arc::new(tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { ProviderManager::new(vec![rpc_url], 3).await })
-        })?);
-
-        Self::new(provider_manager, cache_manager)
-    }
-
     /// Returns a reference to the cache manager
     ///
     /// # Returns
@@ -264,8 +254,28 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("test_cache.json");
 
+        // Set up health check response that ProviderManager needs during initialization
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": "0x1"  // eth_blockNumber/eth_chainid response for health check
+            })))
+            .up_to_n_times(1) // Only for the initial health check
+            .mount(&mock_server)
+            .await;
+
         let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
-        let handler = RpcHandler::new_single(mock_server.uri(), cache_manager).unwrap();
+
+        // Now create provider manager with mock server URL
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock_server.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
 
         (handler, mock_server, temp_dir)
     }
@@ -421,13 +431,9 @@ mod tests {
         handler.handle_request(specific_request).await.unwrap();
     }
 
-    #[test]
-    fn test_has_non_deterministic_block_params() {
-        let temp_dir = TempDir::new().unwrap();
-        let cache_path = temp_dir.path().join("test.json");
-        let cache_manager = Arc::new(CacheManager::new(10, cache_path).unwrap());
-        let handler =
-            RpcHandler::new_single("http://example.com".to_string(), cache_manager).unwrap();
+    #[tokio::test]
+    async fn test_has_non_deterministic_block_params() {
+        let (handler, _mock_server, _temp_dir) = create_test_rpc_handler().await;
 
         // Test various non-deterministic block parameters
         let test_cases = vec![
@@ -513,5 +519,194 @@ mod tests {
 
         let result2 = handler.handle_request(request).await.unwrap();
         assert_eq!(result2, error_response);
+    }
+
+    #[tokio::test]
+    async fn test_multi_provider_round_robin() {
+        // Create 3 mock servers for round-robin testing
+        let mock1 = MockServer::start().await;
+        let mock2 = MockServer::start().await;
+        let mock3 = MockServer::start().await;
+
+        // Setup health check responses for all providers
+        for mock_server in &[&mock1, &mock2, &mock3] {
+            Mock::given(method("POST"))
+                .and(path("/"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": "0x1234567"
+                })))
+                .up_to_n_times(1) // Health check
+                .mount(mock_server)
+                .await;
+        }
+
+        // Create cache and provider manager with all 3 mock servers
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock1.uri(), mock2.uri(), mock3.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+
+        // Setup different responses for each mock to verify round-robin
+        let response1 = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "response_from_server_1"
+        });
+
+        let response2 = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "response_from_server_2"
+        });
+
+        let response3 = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "response_from_server_3"
+        });
+
+        // Setup expectations for non-cacheable method (eth_blockNumber) to test round-robin
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response1))
+            .expect(3) // Each server should get exactly 3 requests
+            .mount(&mock1)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response2))
+            .expect(3)
+            .mount(&mock2)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response3))
+            .expect(3)
+            .mount(&mock3)
+            .await;
+
+        // Send 9 requests for non-cacheable method to verify round-robin distribution
+        let mut responses = Vec::new();
+        for i in 0..9 {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "eth_blockNumber", // Non-cacheable method
+                "params": [],
+                "id": i + 1
+            });
+
+            let response = handler.handle_request(request).await.unwrap();
+            responses.push(response["result"].as_str().unwrap().to_string());
+        }
+
+        // Verify that each server response appears exactly 3 times (round-robin)
+        let server1_count = responses.iter().filter(|r| *r == "response_from_server_1").count();
+        let server2_count = responses.iter().filter(|r| *r == "response_from_server_2").count();
+        let server3_count = responses.iter().filter(|r| *r == "response_from_server_3").count();
+
+        assert_eq!(server1_count, 3, "Server 1 should receive exactly 3 requests");
+        assert_eq!(server2_count, 3, "Server 2 should receive exactly 3 requests");
+        assert_eq!(server3_count, 3, "Server 3 should receive exactly 3 requests");
+
+        // Verify round-robin order: should cycle through servers 1,2,3,1,2,3,1,2,3
+        let expected_pattern = vec![
+            "response_from_server_1",
+            "response_from_server_2",
+            "response_from_server_3",
+            "response_from_server_1",
+            "response_from_server_2",
+            "response_from_server_3",
+            "response_from_server_1",
+            "response_from_server_2",
+            "response_from_server_3",
+        ];
+
+        assert_eq!(responses, expected_pattern, "Requests should follow round-robin pattern");
+    }
+
+    #[tokio::test]
+    async fn test_multi_provider_caching_behavior() {
+        // Create 2 mock servers
+        let mock1 = MockServer::start().await;
+        let mock2 = MockServer::start().await;
+
+        // Setup health check responses
+        for mock_server in &[&mock1, &mock2] {
+            Mock::given(method("POST"))
+                .and(path("/"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": "0x1234567"
+                })))
+                .up_to_n_times(1)
+                .mount(mock_server)
+                .await;
+        }
+
+        // Create provider manager
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock1.uri(), mock2.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+
+        let cacheable_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "number": "0x1000000",
+                "hash": "0x1234567890abcdef"
+            }
+        });
+
+        // Setup expectations: Only ONE server should be hit for cacheable requests
+        // Due to round-robin, the first request will go to mock1
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&cacheable_response))
+            .expect(1) // Should only be called once due to caching
+            .mount(&mock1)
+            .await;
+
+        // mock2 should not be called at all for the cached request
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&cacheable_response))
+            .expect(0) // Should not be called
+            .mount(&mock2)
+            .await;
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_getBlockByNumber", // Cacheable method
+            "params": ["0x1000000", false],
+            "id": 1
+        });
+
+        // Send the same cacheable request 3 times
+        for _ in 0..3 {
+            let response = handler.handle_request(request.clone()).await.unwrap();
+            assert_eq!(response, cacheable_response);
+        }
+
+        // The mock expectations will verify that only mock1 was called once
     }
 }
