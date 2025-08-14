@@ -5,7 +5,7 @@ use tracing::{debug, info, warn};
 
 #[test]
 fn test_simple_function_instrumentation() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let source = r#"
 pragma solidity ^0.8.0;
@@ -43,7 +43,7 @@ contract SimpleContract {
 
 #[test]
 fn test_multiple_function_instrumentation() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let source = r#"
 contract MultiFunction {
@@ -79,7 +79,7 @@ contract MultiFunction {
 
 #[test]
 fn test_empty_source_handling() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let mut sources = HashMap::new();
     let addr = Address::ZERO;
@@ -91,7 +91,7 @@ fn test_empty_source_handling() {
 
 #[test]
 fn test_contract_without_functions() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let source = r#"
 pragma solidity ^0.8.0;

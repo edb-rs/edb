@@ -263,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_get_set() {
-        edb_utils::logging::ensure_test_logging();
+        edb_utils::logging::ensure_test_logging(None);
         info!("Testing cache get/set operations");
 
         let (manager, _temp_dir) = create_test_cache_manager(10);
@@ -281,7 +281,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_eviction() {
-        edb_utils::logging::ensure_test_logging();
+        edb_utils::logging::ensure_test_logging(None);
         info!("Testing cache eviction behavior");
 
         let (manager, _temp_dir) = create_test_cache_manager(3);
@@ -304,7 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_eviction_order() {
-        edb_utils::logging::ensure_test_logging();
+        edb_utils::logging::ensure_test_logging(None);
         info!("Testing cache eviction order");
 
         let (manager, _temp_dir) = create_test_cache_manager(3);
@@ -331,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_persistence() {
-        edb_utils::logging::ensure_test_logging();
+        edb_utils::logging::ensure_test_logging(None);
         info!("Testing cache persistence across restarts");
 
         let temp_dir = TempDir::new().unwrap();
@@ -352,7 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detailed_stats() {
-        edb_utils::logging::ensure_test_logging();
+        edb_utils::logging::ensure_test_logging(None);
         info!("Testing detailed cache statistics");
 
         let (manager, _temp_dir) = create_test_cache_manager(100);
@@ -383,7 +383,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_entry_timestamps() {
-        edb_utils::logging::ensure_test_logging();
+        edb_utils::logging::ensure_test_logging(None);
         debug!("Testing cache entry timestamp behavior");
 
         let entry1 = CacheEntry::new(serde_json::json!({"test": 1}));

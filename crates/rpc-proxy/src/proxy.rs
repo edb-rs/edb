@@ -95,7 +95,7 @@ impl ProxyServer {
         // Start periodic health checks for providers
         let provider_manager_clone = provider_manager.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             loop {
                 interval.tick().await;
                 provider_manager_clone.health_check_all().await;
@@ -265,6 +265,6 @@ async fn handle_rpc(
         Err(StatusCode::BAD_REQUEST)
     };
 
-    debug!("RPC response: {:?}", response);
+    debug!("RPC response: {}", &format!("{:?}", response).chars().take(200).collect::<String>());
     response
 }

@@ -4,7 +4,7 @@ use tracing::{debug, info, warn};
 
 #[test]
 fn test_help_command() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Testing CLI help command");
 
     let mut cmd = Command::cargo_bin("edb").unwrap();
@@ -13,7 +13,7 @@ fn test_help_command() {
 
 #[test]
 fn test_version_command() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let mut cmd = Command::cargo_bin("edb").unwrap();
     cmd.arg("--version").assert().success().stdout(predicate::str::contains("edb"));
@@ -21,7 +21,7 @@ fn test_version_command() {
 
 #[test]
 fn test_replay_subcommand_help() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let mut cmd = Command::cargo_bin("edb").unwrap();
     cmd.arg("replay")
@@ -33,7 +33,7 @@ fn test_replay_subcommand_help() {
 
 #[test]
 fn test_test_subcommand_help() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let mut cmd = Command::cargo_bin("edb").unwrap();
     cmd.arg("test")
@@ -45,7 +45,7 @@ fn test_test_subcommand_help() {
 
 #[test]
 fn test_invalid_tx_hash() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let mut cmd = Command::cargo_bin("edb").unwrap();
     cmd.arg("replay").arg("invalid_hash").assert().failure();
@@ -53,7 +53,7 @@ fn test_invalid_tx_hash() {
 
 #[test]
 fn test_missing_subcommand() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let mut cmd = Command::cargo_bin("edb").unwrap();
     cmd.assert().failure().stderr(predicate::str::contains("Usage"));

@@ -210,11 +210,11 @@ static TEST_LOGGING_INIT: Once = Once::new();
 ///     // ... rest of test
 /// }
 /// ```
-pub fn ensure_test_logging() {
+pub fn ensure_test_logging(default_level: Option<Level>) {
     TEST_LOGGING_INIT.call_once(|| {
         // Initialize simple console-only logging for tests
         // Default to DEBUG but respect RUST_LOG if set
-        let default_level = Level::DEBUG;
+        let default_level = default_level.unwrap_or(Level::DEBUG);
         let _ = init_simple_logging(default_level);
         // Ignore any errors - if initialization fails, that's usually because
         // a subscriber is already set up, which is fine for tests
@@ -229,7 +229,7 @@ mod tests {
 
     // Use the public ensure_test_logging function
     fn init_test_logging() {
-        ensure_test_logging();
+        ensure_test_logging(None);
     }
 
     #[test]

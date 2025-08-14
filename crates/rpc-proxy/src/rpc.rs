@@ -3,10 +3,14 @@
 use crate::cache::CacheManager;
 use crate::providers::ProviderManager;
 use eyre::Result;
+use reqwest::StatusCode;
 use serde_json::Value;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// RPC methods that should be cached
 const CACHEABLE_METHODS: &[&str] = &[
@@ -20,6 +24,22 @@ const CACHEABLE_METHODS: &[&str] = &[
     "eth_getLogs",
     "eth_getProof",
     "eth_getBlockReceipts",
+    "eth_getBalance",
+];
+
+/// Common rate limit error patterns found in various RPC providers
+const RATE_LIMIT_PATTERNS: &[&str] = &[
+    "rate limit",
+    "rate-limit",
+    "ratelimit",
+    "too many requests",
+    "cu limit exceeded",
+    "compute units exceeded",
+    "quota exceeded",
+    "throttled",
+    "exceeded the allowed rps",
+    "request limit",
+    "max requests",
 ];
 
 /// RPC request handler with intelligent caching capabilities
@@ -95,7 +115,12 @@ impl RpcHandler {
 
             // Try to get from cache first
             if let Some(cached_response) = self.cache_manager.get(&cache_key).await {
-                debug!("Cache hit for {}: {}", method, cache_key);
+                debug!(
+                    "Cache hit for {}: {} ({})",
+                    method,
+                    cached_response.to_string().chars().take(200).collect::<String>(),
+                    cache_key
+                );
                 return Ok(cached_response);
             }
 
@@ -117,27 +142,176 @@ impl RpcHandler {
         }
     }
 
+    /// Detects if a response indicates rate limiting
+    ///
+    /// Checks HTTP status codes, response text patterns, and JSON error messages
+    /// to identify rate limiting from various providers
+    fn is_rate_limit_response(
+        &self,
+        status: StatusCode,
+        response_text: &str,
+        json_response: Option<&Value>,
+    ) -> bool {
+        // Check HTTP status code
+        if status == StatusCode::TOO_MANY_REQUESTS || status == StatusCode::SERVICE_UNAVAILABLE {
+            debug!("Rate limit response detected by status: {}", status);
+            return true;
+        }
+
+        // Check response text for rate limit patterns
+        let text_lower = response_text.to_lowercase();
+        if RATE_LIMIT_PATTERNS.iter().any(|pattern| text_lower.contains(pattern)) {
+            debug!(
+                "Rate limit response detected by response text: {}",
+                &text_lower.chars().take(200).collect::<String>()
+            );
+            return true;
+        }
+
+        // Check JSON error response
+        if let Some(json) = json_response {
+            if let Some(error) = json.get("error") {
+                // Check error message
+                if let Some(message) = error.get("message").and_then(|m| m.as_str()) {
+                    let msg_lower = message.to_lowercase();
+                    if RATE_LIMIT_PATTERNS.iter().any(|pattern| msg_lower.contains(pattern)) {
+                        debug!(
+                            "Rate limit response detected by error message: {}",
+                            &msg_lower.chars().take(200).collect::<String>()
+                        );
+                        return true;
+                    }
+                }
+
+                // Check error code (some providers use specific codes for rate limiting)
+                if let Some(code) = error.get("code").and_then(|c| c.as_i64()) {
+                    match code {
+                        429 | -32005 | -32098 | -32099 => {
+                            debug!("Rate limit response detected by error code: {}", code);
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Detects if an error is due to user's invalid request
+    ///
+    /// These errors should be returned immediately without trying other providers
+    fn is_user_error(&self, json_response: &Value) -> bool {
+        if let Some(error) = json_response.get("error") {
+            if let Some(code) = error.get("code").and_then(|c| c.as_i64()) {
+                match code {
+                    -32600 | -32601 | -32602 | -32700 => {
+                        debug!("Detected user error with code: {}", code);
+                        return true;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Also check for specific error messages that indicate user error
+            if let Some(message) = error.get("message").and_then(|m| m.as_str()) {
+                let msg_lower = message.to_lowercase();
+
+                // Common user error patterns
+                const USER_ERROR_PATTERNS: &[&str] = &[
+                    "invalid method",
+                    "method not found",
+                    "invalid params",
+                    "missing param",
+                    "invalid argument",
+                    "parse error",
+                    "invalid request",
+                    "unsupported method",
+                ];
+
+                if USER_ERROR_PATTERNS.iter().any(|pattern| msg_lower.contains(pattern)) {
+                    debug!("Detected user error from message: {}", message);
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Creates a hash-based signature for error deduplication
+    ///
+    /// Uses a stable hash of the error object to identify similar errors
+    fn create_error_signature(&self, error: &Value) -> u64 {
+        let mut hasher = DefaultHasher::new();
+
+        // Hash the error code if present
+        if let Some(code) = error.get("code").and_then(|c| c.as_i64()) {
+            code.hash(&mut hasher);
+        }
+
+        // Hash the error message if present (normalized to lowercase)
+        if let Some(message) = error.get("message").and_then(|m| m.as_str()) {
+            message.to_lowercase().hash(&mut hasher);
+        }
+
+        // Optionally hash error data if it's a simple type
+        if let Some(data) = error.get("data") {
+            match data {
+                Value::String(s) => s.hash(&mut hasher),
+                Value::Number(n) => n.to_string().hash(&mut hasher),
+                Value::Bool(b) => b.hash(&mut hasher),
+                _ => {} // Skip complex data structures
+            }
+        }
+
+        hasher.finish()
+    }
+
     async fn forward_request(&self, request: &Value) -> Result<Value> {
         const MAX_RETRIES: usize = 3;
-        let mut last_error = None;
+        const MAX_MULTIPLE_SAME_ERROR: usize = 3;
+
+        // Track errors from different providers using hash as key
+        let mut error_responses: HashMap<u64, (Value, usize)> = HashMap::new();
+        let mut last_network_error: Option<eyre::Error> = None;
+        let mut providers_tried = 0;
 
         for retry in 0..MAX_RETRIES {
             // Get next available provider
             let provider_url = match self.provider_manager.get_working_provider(3).await {
                 Some(url) => url,
                 None => {
-                    warn!("No healthy providers available");
+                    warn!("No healthy providers available (attempt {})", retry + 1);
                     if retry < MAX_RETRIES - 1 {
                         // Trigger health check and wait before retry
                         self.provider_manager.health_check_all().await;
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         continue;
                     }
-                    return Err(eyre::eyre!("No healthy RPC providers available"));
+
+                    // If we have any error responses, return the most common one
+                    if let Some((error_response, _)) =
+                        error_responses.values().max_by_key(|(_, count)| *count)
+                    {
+                        info!("All providers exhausted, returning most common error");
+                        return Ok(error_response.clone());
+                    }
+
+                    return Err(last_network_error
+                        .unwrap_or_else(|| eyre::eyre!("No healthy RPC providers available")));
                 }
             };
 
-            debug!("Forwarding request to provider: {} (attempt {})", provider_url, retry + 1);
+            providers_tried += 1;
+            debug!(
+                "Forwarding request to provider: {} (attempt {}/{})",
+                provider_url,
+                retry + 1,
+                MAX_RETRIES
+            );
+
             let start = Instant::now();
 
             match self
@@ -149,47 +323,138 @@ impl RpcHandler {
                 .await
             {
                 Ok(response) => {
+                    let status = response.status();
                     let response_time = start.elapsed().as_millis() as u64;
 
                     match response.text().await {
                         Ok(response_text) => {
-                            match serde_json::from_str::<Value>(&response_text) {
+                            // Try to parse as JSON
+                            let json_result = serde_json::from_str::<Value>(&response_text);
+
+                            // Check if it's a rate limit error
+                            if self.is_rate_limit_response(
+                                status,
+                                &response_text,
+                                json_result.as_ref().ok(),
+                            ) {
+                                warn!(
+                                    "Provider {} is rate limited (response: {}...)",
+                                    provider_url,
+                                    &response_text.chars().take(200).collect::<String>()
+                                );
+
+                                self.provider_manager.mark_provider_failed(&provider_url).await;
+
+                                // Continue to next provider without counting as error
+                                continue;
+                            }
+
+                            // Handle valid JSON response
+                            match json_result {
                                 Ok(response_json) => {
-                                    // Mark provider as successful
+                                    // Check if response contains an error
+                                    if let Some(error) = response_json.get("error") {
+                                        // Check if it's a user error (invalid request)
+                                        if self.is_user_error(&response_json) {
+                                            info!("Detected user error, returning immediately");
+                                            // Don't mark provider as failed - it's user's fault
+                                            self.provider_manager
+                                                .mark_provider_success(&provider_url, response_time)
+                                                .await;
+                                            return Ok(response_json);
+                                        }
+
+                                        // It's a provider/blockchain error
+                                        let error_hash = self.create_error_signature(error);
+
+                                        // Track this error
+                                        error_responses
+                                            .entry(error_hash)
+                                            .and_modify(|(_, count)| *count += 1)
+                                            .or_insert((response_json.clone(), 1));
+
+                                        debug!(
+                                            "Provider {} returned error (hash: {})",
+                                            provider_url, error_hash
+                                        );
+
+                                        // If multiple providers return the same error, it's likely legitimate
+                                        if let Some((_, count)) = error_responses.get(&error_hash) {
+                                            if *count >= MAX_MULTIPLE_SAME_ERROR {
+                                                info!(
+                                                    "Multiple providers ({}) returned same error, likely legitimate",
+                                                    count
+                                                );
+                                                return Ok(response_json);
+                                            }
+                                        }
+
+                                        // Mark provider as failed and continue
+                                        self.provider_manager
+                                            .mark_provider_failed(&provider_url)
+                                            .await;
+                                        continue;
+                                    }
+
+                                    // Success! No error in response
                                     self.provider_manager
                                         .mark_provider_success(&provider_url, response_time)
                                         .await;
+
+                                    debug!(
+                                        "Request successful via {} ({}ms)",
+                                        provider_url, response_time
+                                    );
                                     return Ok(response_json);
                                 }
-                                Err(e) => {
-                                    warn!("Invalid JSON response from {}: {}", provider_url, e);
-                                    last_error = Some(e.into());
+                                Err(parse_error) => {
+                                    // Response is not valid JSON
+                                    warn!(
+                                        "Invalid JSON response from {} (first 200 chars): {}...",
+                                        provider_url,
+                                        &response_text.chars().take(200).collect::<String>()
+                                    );
+
                                     self.provider_manager.mark_provider_failed(&provider_url).await;
+                                    last_network_error = Some(eyre::eyre!(
+                                        "Invalid JSON from provider: {}",
+                                        parse_error
+                                    ));
+                                    continue;
                                 }
                             }
                         }
                         Err(e) => {
-                            warn!("Failed to read response from {}: {}", provider_url, e);
-                            last_error = Some(e.into());
+                            warn!("Failed to read response body from {}: {}", provider_url, e);
                             self.provider_manager.mark_provider_failed(&provider_url).await;
+                            last_network_error = Some(e.into());
+                            continue;
                         }
                     }
                 }
                 Err(e) => {
                     warn!("Request failed to {}: {}", provider_url, e);
-                    last_error = Some(e.into());
                     self.provider_manager.mark_provider_failed(&provider_url).await;
+                    last_network_error = Some(e.into());
+                    continue;
                 }
-            }
-
-            // Wait before retry
-            if retry < MAX_RETRIES - 1 {
-                tokio::time::sleep(std::time::Duration::from_millis(100 * (retry as u64 + 1)))
-                    .await;
             }
         }
 
-        Err(last_error.unwrap_or_else(|| eyre::eyre!("All retry attempts failed")))
+        // All retries exhausted
+        info!("All {} retries exhausted after trying {} providers", MAX_RETRIES, providers_tried);
+
+        // Return the most common error if we have any
+        if !error_responses.is_empty() {
+            let (most_common_error, count) =
+                error_responses.values().max_by_key(|(_, count)| *count).unwrap();
+
+            info!("Returning most common error (seen {} times)", count);
+            return Ok(most_common_error.clone());
+        }
+
+        // Otherwise return the last network error
+        Err(last_network_error.unwrap_or_else(|| eyre::eyre!("429 Too Many Requests")))
     }
 
     fn has_non_deterministic_block_params(&self, request: &Value) -> bool {
@@ -708,5 +973,352 @@ mod tests {
         }
 
         // The mock expectations will verify that only mock1 was called once
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_detection() {
+        // Create test handler with minimal setup
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        // Mock server for testing (needed for provider manager init)
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": "0x1"
+            })))
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock_server.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+
+        // Test various rate limit responses
+        let test_cases = vec![
+            // HTTP 429 status
+            (StatusCode::TOO_MANY_REQUESTS, "{}", None, true),
+            // HTTP 503 status
+            (StatusCode::SERVICE_UNAVAILABLE, "{}", None, true),
+            // Text pattern "rate limit"
+            (StatusCode::OK, "rate limit exceeded", None, true),
+            // Text pattern "cu limit exceeded" (Zan RPC)
+            (StatusCode::OK, "cu limit exceeded; The current RPC traffic is too high", None, true),
+            // JSON error with rate limit message
+            (
+                StatusCode::OK,
+                "{}",
+                Some(serde_json::json!({
+                    "error": {
+                        "code": -32005,
+                        "message": "Too many requests"
+                    }
+                })),
+                true,
+            ),
+            // JSON error with rate limit code
+            (
+                StatusCode::OK,
+                "{}",
+                Some(serde_json::json!({
+                    "error": {
+                        "code": 429,
+                        "message": "Some error"
+                    }
+                })),
+                true,
+            ),
+            // Normal response (not rate limited)
+            (
+                StatusCode::OK,
+                "{}",
+                Some(serde_json::json!({
+                    "result": "0x1234"
+                })),
+                false,
+            ),
+            // Normal error (not rate limited)
+            (
+                StatusCode::OK,
+                "{}",
+                Some(serde_json::json!({
+                    "error": {
+                        "code": -32000,
+                        "message": "Execution reverted"
+                    }
+                })),
+                false,
+            ),
+        ];
+
+        for (status, text, json, expected) in test_cases {
+            let result = handler.is_rate_limit_response(status, text, json.as_ref());
+            assert_eq!(
+                result, expected,
+                "Failed for status: {:?}, text: {}, json: {:?}",
+                status, text, json
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_user_error_detection() {
+        // Similar minimal setup
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": "0x1"
+            })))
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock_server.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+
+        // Test various user error patterns
+        let test_cases = vec![
+            // Invalid Request
+            (
+                serde_json::json!({
+                    "error": {
+                        "code": -32600,
+                        "message": "Invalid Request"
+                    }
+                }),
+                true,
+            ),
+            // Method not found
+            (
+                serde_json::json!({
+                    "error": {
+                        "code": -32601,
+                        "message": "Method not found"
+                    }
+                }),
+                true,
+            ),
+            // Invalid params
+            (
+                serde_json::json!({
+                    "error": {
+                        "code": -32602,
+                        "message": "Invalid params"
+                    }
+                }),
+                true,
+            ),
+            // Parse error
+            (
+                serde_json::json!({
+                    "error": {
+                        "code": -32700,
+                        "message": "Parse error"
+                    }
+                }),
+                true,
+            ),
+            // Message-based detection
+            (
+                serde_json::json!({
+                    "error": {
+                        "code": -32000,
+                        "message": "Invalid method eth_fooBar"
+                    }
+                }),
+                true,
+            ),
+            // Blockchain execution error (not user error)
+            (
+                serde_json::json!({
+                    "error": {
+                        "code": -32000,
+                        "message": "Execution reverted"
+                    }
+                }),
+                false,
+            ),
+            // Rate limit error (not user error)
+            (
+                serde_json::json!({
+                    "error": {
+                        "code": 429,
+                        "message": "Too many requests"
+                    }
+                }),
+                false,
+            ),
+        ];
+
+        for (response, expected) in test_cases {
+            let result = handler.is_user_error(&response);
+            assert_eq!(result, expected, "Failed for response: {:?}", response);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_fallback_to_healthy_provider() {
+        // Create 2 mock servers - first returns rate limit, second succeeds
+        let mock1 = MockServer::start().await;
+        let mock2 = MockServer::start().await;
+
+        // Setup health check responses
+        for mock_server in &[&mock1, &mock2] {
+            Mock::given(method("POST"))
+                .and(path("/"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": "0x1"
+                })))
+                .up_to_n_times(1)
+                .mount(mock_server)
+                .await;
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock1.uri(), mock2.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+
+        // First provider returns rate limit error
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("Rate limit exceeded"))
+            .expect(1)
+            .mount(&mock1)
+            .await;
+
+        // Second provider returns success
+        let success_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x12345"
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&success_response))
+            .expect(1)
+            .mount(&mock2)
+            .await;
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_blockNumber",
+            "params": [],
+            "id": 1
+        });
+
+        // Should get success from second provider despite first being rate limited
+        let result = handler.handle_request(request).await.unwrap();
+        assert_eq!(result, success_response);
+    }
+
+    #[tokio::test]
+    async fn test_error_deduplication() {
+        // Create 3 mock servers that all return the same error
+        let mock1 = MockServer::start().await;
+        let mock2 = MockServer::start().await;
+        let mock3 = MockServer::start().await;
+
+        // Setup health checks
+        for mock_server in &[&mock1, &mock2, &mock3] {
+            Mock::given(method("POST"))
+                .and(path("/"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": "0x1"
+                })))
+                .up_to_n_times(1)
+                .mount(mock_server)
+                .await;
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock1.uri(), mock2.uri(), mock3.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+
+        // All providers return the same blockchain error
+        let error_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": -32000,
+                "message": "Execution reverted: insufficient balance"
+            }
+        });
+
+        // First provider
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
+            .expect(1)
+            .mount(&mock1)
+            .await;
+
+        // Second provider - same error should trigger early return
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
+            .expect(1)
+            .mount(&mock2)
+            .await;
+
+        // Third provider should NOT be called (2 matching errors is enough)
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
+            .expect(0)
+            .mount(&mock3)
+            .await;
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [{}, "latest"],
+            "id": 1
+        });
+
+        // Should return the error after 2 providers agree
+        let result = handler.handle_request(request).await.unwrap();
+        assert_eq!(result, error_response);
     }
 }

@@ -3,7 +3,7 @@ use tracing::{debug, info, warn};
 
 #[test]
 fn test_default_webui_config() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let config = WebUiConfig::default();
 
@@ -13,7 +13,7 @@ fn test_default_webui_config() {
 
 #[test]
 fn test_custom_webui_config() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let config = WebUiConfig { port: 8080, engine_rpc_url: "http://localhost:9545".to_string() };
 
@@ -23,7 +23,7 @@ fn test_custom_webui_config() {
 
 #[test]
 fn test_webui_config_clone() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let config = WebUiConfig { port: 4000, engine_rpc_url: "http://test:8545".to_string() };
 

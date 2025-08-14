@@ -4,7 +4,7 @@ use tracing::{debug, info, warn};
 
 #[test]
 fn test_default_tui_config() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let config = TuiConfig::default();
 
@@ -14,7 +14,7 @@ fn test_default_tui_config() {
 
 #[test]
 fn test_custom_tui_config() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let config = TuiConfig {
         rpc_url: "http://localhost:9545".to_string(),
@@ -27,7 +27,7 @@ fn test_custom_tui_config() {
 
 #[test]
 fn test_tui_config_clone() {
-    edb_utils::logging::ensure_test_logging();
+    edb_utils::logging::ensure_test_logging(None);
     info!("Running test");
     let config = TuiConfig {
         rpc_url: "http://test:8545".to_string(),
