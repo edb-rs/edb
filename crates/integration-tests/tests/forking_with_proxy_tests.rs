@@ -4,7 +4,7 @@
 //! blockchain data for more reliable and faster forking tests.
 
 use alloy_primitives::TxHash;
-use edb_rpc_proxy::proxy::ProxyServer;
+use edb_rpc_proxy::proxy::ProxyServerBuilder;
 use edb_utils::fork_and_prepare;
 use std::{path::PathBuf, time::Duration};
 use tokio::time::sleep;
@@ -23,15 +23,13 @@ async fn setup_test_proxy_with_cache(
     // Get the testdata cache directory
     let cache_dir = get_testdata_cache_dir();
 
-    let proxy = ProxyServer::new(
-        None,
-        10000, // Large cache for tests
-        Some(cache_dir.clone()),
-        grace_period,
-        30, // 30 second heartbeat
-        3,  // max failed requests per provider
-    )
-    .await?;
+    let proxy = ProxyServerBuilder::new()
+        .max_cache_items(20000)
+        .cache_dir(cache_dir.clone())
+        .grace_period(grace_period)
+        .heartbeat_interval(30)
+        .build()
+        .await?;
 
     // Find an available port
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -52,6 +50,37 @@ async fn setup_test_proxy_with_cache(
     println!("Test proxy started at {} with cache at {}", proxy_url, cache_dir.display());
 
     Ok(proxy_url)
+}
+
+/// Gracefully shutdown a test proxy using the edb_shutdown endpoint
+async fn shutdown_test_proxy(proxy_url: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let shutdown_request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "edb_shutdown",
+        "id": 1
+    });
+
+    match client.post(proxy_url).json(&shutdown_request).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                println!("Test proxy shutdown successfully");
+                // Give the server a moment to shutdown gracefully
+                sleep(Duration::from_millis(100)).await;
+            } else {
+                println!("Proxy shutdown request failed with status: {}", response.status());
+            }
+        }
+        Err(e) => {
+            // Connection refused is expected after shutdown
+            if e.is_connect() {
+                println!("Test proxy shutdown confirmed (connection refused)");
+            } else {
+                println!("Error during proxy shutdown: {}", e);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Get the testdata cache directory path
@@ -112,10 +141,10 @@ async fn get_cache_stats(proxy_url: &str) -> Result<serde_json::Value, Box<dyn s
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_with_proxy_cache() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_utils::logging::ensure_test_logging(Some(tracing::Level::INFO));
     info!("Testing fork and prepare with proxy caching");
 
-    let proxy_url = setup_test_proxy_with_cache(3000).await.expect("Failed to setup test proxy");
+    let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
 
     register_with_proxy(&proxy_url).await.ok();
 
@@ -125,36 +154,35 @@ async fn test_fork_with_proxy_cache() {
     let start = std::time::Instant::now();
 
     let result = fork_and_prepare(&proxy_url, tx_hash, false).await;
-
     let duration = start.elapsed();
+
+    assert!(result.is_ok(), "Fork failed: {:?}", result.err());
+
     println!("First fork took: {:?}", duration);
 
-    match result {
-        Ok(fork_result) => {
-            assert_eq!(fork_result.fork_info.chain_id, 1);
-            assert_eq!(fork_result.fork_info.block_number, 4060175);
+    if let Ok(fork_result) = result {
+        assert_eq!(fork_result.fork_info.chain_id, 1);
+        assert_eq!(fork_result.fork_info.block_number, 23087459);
 
-            // Test second fork (should be faster due to caching)
-            let start2 = std::time::Instant::now();
-            let result2 = fork_and_prepare(&proxy_url, tx_hash, false).await;
-            let duration2 = start2.elapsed();
+        // Test second fork (should be faster due to caching)
+        let start2 = std::time::Instant::now();
+        let result2 = fork_and_prepare(&proxy_url, tx_hash, false).await;
+        let duration2 = start2.elapsed();
 
-            println!("Second fork took: {:?}", duration2);
+        assert!(result2.is_ok(), "Fork failed: {:?}", result2.err());
 
-            assert!(result2.is_ok());
+        println!("Second fork took: {:?}", duration2);
 
-            // Print cache statistics
-            if let Ok(stats) = get_cache_stats(&proxy_url).await {
-                println!(
-                    "Cache stats: {}",
-                    serde_json::to_string_pretty(&stats).unwrap_or_default()
-                );
-            }
-
-            println!("Fork with proxy cache test passed!");
+        // Print cache statistics
+        if let Ok(stats) = get_cache_stats(&proxy_url).await {
+            println!("Cache stats: {}", serde_json::to_string_pretty(&stats).unwrap_or_default());
         }
-        Err(e) => panic!("Fork failed: {:?}", e),
+
+        println!("Fork with proxy cache test passed!");
     }
+
+    // Gracefully shutdown the test proxy to ensure cache is saved
+    shutdown_test_proxy(&proxy_url).await.ok();
 }
 
 #[tokio::test]
@@ -187,7 +215,7 @@ async fn test_multiple_transactions_with_cache() {
                 );
             }
             Err(e) => {
-                println!("Failed: {:?}", e);
+                panic!("Fork failed: {:?}", e);
             }
         }
     }
@@ -196,6 +224,9 @@ async fn test_multiple_transactions_with_cache() {
     if let Ok(stats) = get_cache_stats(&proxy_url).await {
         println!("Final cache stats: {}", serde_json::to_string_pretty(&stats).unwrap_or_default());
     }
+
+    // Gracefully shutdown the test proxy to ensure cache is saved
+    shutdown_test_proxy(&proxy_url).await.ok();
 }
 
 #[tokio::test]
@@ -237,6 +268,9 @@ async fn test_proxy_endpoints() {
     assert!(stats["max_entries"].as_u64().unwrap() > 0);
 
     println!("All proxy endpoints working correctly!");
+
+    // Gracefully shutdown the test proxy to ensure cache is saved
+    shutdown_test_proxy(&proxy_url).await.ok();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -250,7 +284,7 @@ async fn test_fork_and_prepare_quick_mode() {
     register_with_proxy(&proxy_url).await.ok();
 
     // Use a transaction that's not the first in its block
-    let tx_hash: TxHash = TEST_TX_HASH_2.parse().expect("valid tx hash");
+    let tx_hash: TxHash = TEST_TX_HASH.parse().expect("valid tx hash");
 
     println!("Testing quick mode fork with cached proxy...");
 
@@ -262,8 +296,8 @@ async fn test_fork_and_prepare_quick_mode() {
     match result_quick {
         Ok(fork_result) => {
             // Should still get correct fork info
-            assert_eq!(fork_result.fork_info.block_number, 46147);
-            assert_eq!(fork_result.fork_info.spec_id, revm::primitives::hardfork::SpecId::FRONTIER);
+            assert_eq!(fork_result.fork_info.block_number, 23087459);
+            assert_eq!(fork_result.fork_info.spec_id, revm::primitives::hardfork::SpecId::CANCUN);
 
             println!(
                 "Quick mode fork completed in {:?} at block {}",
@@ -282,8 +316,8 @@ async fn test_fork_and_prepare_quick_mode() {
 
     match result_normal {
         Ok(fork_result) => {
-            assert_eq!(fork_result.fork_info.block_number, 46147);
-            assert_eq!(fork_result.fork_info.spec_id, revm::primitives::hardfork::SpecId::FRONTIER);
+            assert_eq!(fork_result.fork_info.block_number, 23087459);
+            assert_eq!(fork_result.fork_info.spec_id, revm::primitives::hardfork::SpecId::CANCUN);
 
             println!(
                 "Normal mode fork completed in {:?} at block {}",
@@ -308,6 +342,9 @@ async fn test_fork_and_prepare_quick_mode() {
             serde_json::to_string_pretty(&stats).unwrap_or_default()
         );
     }
+
+    // Gracefully shutdown the test proxy to ensure cache is saved
+    shutdown_test_proxy(&proxy_url).await.ok();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -383,4 +420,7 @@ async fn test_fork_at_specific_hardfork_boundaries() {
             serde_json::to_string_pretty(&stats).unwrap_or_default()
         );
     }
+
+    // Gracefully shutdown the test proxy to ensure cache is saved
+    shutdown_test_proxy(&proxy_url).await.ok();
 }

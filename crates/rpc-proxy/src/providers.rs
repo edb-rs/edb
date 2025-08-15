@@ -23,7 +23,6 @@ pub const DEFAULT_MAINNET_RPCS: &[&str] = &[
     "https://eth.llamarpc.com",
     "https://api.zan.top/eth-mainnet",
     "https://eth.drpc.org",
-    "https://endpoints.omniatech.io/v1/eth/mainnet/public",
     "https://ethereum.rpc.subquery.network/public",
 ];
 

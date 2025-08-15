@@ -1,6 +1,9 @@
 //! Integration tests for the RPC proxy server
 
-use edb_rpc_proxy::{cache::CacheEntry, proxy::ProxyServer};
+use edb_rpc_proxy::{
+    cache::CacheEntry,
+    proxy::{ProxyServer, ProxyServerBuilder},
+};
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::{collections::HashMap, net::SocketAddr, time::Duration};
@@ -15,7 +18,6 @@ use wiremock::{
 async fn create_test_proxy(max_cache_items: u32) -> (ProxyServer, MockServer, TempDir) {
     let mock_server = MockServer::start().await;
     let temp_dir = TempDir::new().unwrap();
-    let cache_dir = Some(temp_dir.path().to_path_buf());
 
     // Set up health check response that ProviderManager needs during initialization
     Mock::given(method("POST"))
@@ -29,16 +31,18 @@ async fn create_test_proxy(max_cache_items: u32) -> (ProxyServer, MockServer, Te
         .mount(&mock_server)
         .await;
 
-    let proxy = ProxyServer::new(
-        Some(vec![mock_server.uri()]),
-        max_cache_items,
-        cache_dir,
-        300, // grace_period: 5 minutes
-        10,  // heartbeat_interval: 10 seconds
-        3,
-    )
-    .await
-    .unwrap();
+    let proxy = ProxyServerBuilder::new()
+        .rpc_urls(vec![mock_server.uri()])
+        .max_cache_items(max_cache_items)
+        .cache_dir(temp_dir.path())
+        .grace_period(300) // 5 minutes
+        .heartbeat_interval(10) // 10 seconds
+        .max_failures(3)
+        .health_check_interval(60) // 60 seconds
+        .cache_save_interval(5) // 5 minutes
+        .build()
+        .await
+        .unwrap();
 
     (proxy, mock_server, temp_dir)
 }
@@ -441,9 +445,17 @@ async fn test_proxy_cache_data_collection() {
     assert_eq!(stats_after_request["total_entries"], 1);
 
     // Verify the cache contains the expected data
-    let cache_key = "eth_getBlockByNumber:[\"0x1000000\",false]";
-    assert!(cache_after_request.contains_key(cache_key));
-    assert_eq!(cache_after_request[cache_key].data, response_data);
+    // Since cache keys are now hash-based, we'll verify that there's exactly one key starting with the method name
+    let method_keys: Vec<_> =
+        cache_after_request.keys().filter(|k| k.starts_with("eth_getBlockByNumber:")).collect();
+    assert_eq!(
+        method_keys.len(),
+        1,
+        "Should have exactly one cache entry for eth_getBlockByNumber"
+    );
+
+    let actual_cache_key = method_keys[0];
+    assert_eq!(cache_after_request[actual_cache_key].data, response_data);
 }
 
 #[tokio::test]

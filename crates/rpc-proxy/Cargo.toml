@@ -11,6 +11,10 @@ exclude.workspace = true
 
 description = "Caching RPC proxy server for EDB"
 
+[lib]
+name = "edb_rpc_proxy"
+path = "src/lib.rs"
+
 [[bin]]
 name = "edb-rpc-proxy"
 path = "src/main.rs"

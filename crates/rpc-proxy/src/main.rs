@@ -16,12 +16,13 @@ mod proxy;
 mod registry;
 mod rpc;
 
-use proxy::ProxyServer;
+use proxy::ProxyServerBuilder;
 
 #[derive(Parser, Debug)]
 #[command(name = "edb-rpc-proxy")]
 #[command(about = "EDB RPC Caching Proxy Server")]
 struct Args {
+    // ========== General Configuration ==========
     /// Port to listen on
     #[arg(long, default_value = "8546")]
     port: u16,
@@ -31,6 +32,7 @@ struct Args {
     #[arg(long)]
     rpc_urls: Option<String>,
 
+    // ========== Cache Configuration ==========
     /// Maximum number of cached items
     #[arg(long, default_value = "102400")]
     max_cache_items: u32,
@@ -39,6 +41,20 @@ struct Args {
     #[arg(long)]
     cache_dir: Option<String>,
 
+    /// Cache save interval in minutes (0 = save only on shutdown)
+    #[arg(long, default_value = "5")]
+    cache_save_interval: u64,
+
+    // ========== Provider Health Check Configuration ==========
+    /// Maximum consecutive failures before marking provider unhealthy
+    #[arg(long, default_value = "3")]
+    max_failures: u32,
+
+    /// Provider health check interval in seconds
+    #[arg(long, default_value = "60")]
+    health_check_interval: u64,
+
+    // ========== EDB Registry Configuration ==========
     /// Grace period in seconds before shutdown when no EDB instances (0 = no auto-shutdown)
     #[arg(long, default_value = "0")]
     grace_period: u64,
@@ -46,10 +62,6 @@ struct Args {
     /// Heartbeat check interval in seconds
     #[arg(long, default_value = "10")]
     heartbeat_interval: u64,
-
-    /// Maximum consecutive failures before marking provider unhealthy
-    #[arg(long, default_value = "3")]
-    max_failures: u32,
 }
 
 #[tokio::main]
@@ -59,22 +71,26 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let rpc_urls = args.rpc_urls.map(|urls| {
-        urls.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect::<Vec<_>>()
-    });
+    // Create the proxy server using builder pattern
+    let mut builder = ProxyServerBuilder::new()
+        .max_cache_items(args.max_cache_items)
+        .grace_period(args.grace_period)
+        .heartbeat_interval(args.heartbeat_interval)
+        .max_failures(args.max_failures)
+        .health_check_interval(args.health_check_interval)
+        .cache_save_interval(args.cache_save_interval);
 
-    let cache_dir = args.cache_dir.map(std::path::PathBuf::from);
+    // Set RPC URLs if provided
+    if let Some(urls) = args.rpc_urls {
+        builder = builder.rpc_urls_str(&urls);
+    }
 
-    // Create the proxy server
-    let proxy = ProxyServer::new(
-        rpc_urls,
-        args.max_cache_items,
-        cache_dir,
-        args.grace_period,
-        args.heartbeat_interval,
-        args.max_failures,
-    )
-    .await?;
+    // Set cache directory if provided
+    if let Some(cache_dir) = args.cache_dir {
+        builder = builder.cache_dir(cache_dir);
+    }
+
+    let proxy = builder.build().await?;
 
     // Set up graceful shutdown
     let cache_manager = proxy.cache_manager().clone();

@@ -10,21 +10,48 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
-/// RPC methods that should be cached
+/// RPC methods that can be cached (when using deterministic block parameters)
 const CACHEABLE_METHODS: &[&str] = &[
+    // State queries (require deterministic block param)
     "eth_getCode",
+    "eth_getBalance",
     "eth_getStorageAt",
+    "eth_getProof",
+    "eth_getTransactionCount",
+    "eth_call",
+    // Transaction data (always immutable)
     "eth_getTransactionByHash",
     "eth_getRawTransactionByHash",
     "eth_getTransactionReceipt",
+    "eth_getTransactionByBlockHashAndIndex",
+    "eth_getTransactionByBlockNumberAndIndex",
+    // Block data (immutable once finalized)
     "eth_getBlockByNumber",
     "eth_getBlockByHash",
-    "eth_getLogs",
-    "eth_getProof",
     "eth_getBlockReceipts",
-    "eth_getBalance",
+    "eth_getBlockTransactionCountByHash",
+    "eth_getBlockTransactionCountByNumber",
+    "eth_getUncleByBlockHashAndIndex",
+    "eth_getUncleByBlockNumberAndIndex",
+    "eth_getUncleCountByBlockHash",
+    "eth_getUncleCountByBlockNumber",
+    // Logs (require deterministic block range)
+    "eth_getLogs",
+    // Chain constants
+    "eth_chainId",
+    "net_version",
+    // Debug/trace methods (immutable traces, require deterministic blocks)
+    "debug_traceTransaction",
+    "debug_traceBlockByNumber",
+    "debug_traceBlockByHash",
+    "debug_traceCall",
+    "trace_transaction",
+    "trace_block",
+    "trace_replayTransaction",
+    "trace_replayBlockTransactions",
+    "trace_call",
 ];
 
 /// Common rate limit error patterns found in various RPC providers
@@ -41,6 +68,26 @@ const RATE_LIMIT_PATTERNS: &[&str] = &[
     "request limit",
     "max requests",
 ];
+
+/// Common user error patterns that indicate invalid requests
+const USER_ERROR_PATTERNS: &[&str] = &[
+    "invalid method",
+    "method not found",
+    "invalid params",
+    "missing param",
+    "invalid argument",
+    "parse error",
+    "invalid request",
+    "unsupported method",
+];
+
+/// Patterns indicating that debug/trace methods are not supported by provider
+const UNSUPPORTED_METHOD_PATTERNS: &[&str] =
+    &["not supported", "not available", "method not found", "unsupported", "not implemented"];
+
+/// Fields that indicate valid trace/debug response structure
+const TRACE_RESPONSE_FIELDS: &[&str] =
+    &["output", "trace", "stateDiff", "result", "structLogs", "gas", "returnValue"];
 
 /// RPC request handler with intelligent caching capabilities
 ///
@@ -91,6 +138,7 @@ impl RpcHandler {
     /// - Whether the method is cacheable (see CACHEABLE_METHODS)
     /// - Whether the request contains non-deterministic block parameters
     /// - Whether a cached response already exists
+    /// - Whether the response is valid (for debug/trace methods)
     ///
     /// # Arguments
     /// * `request` - The JSON-RPC request to handle
@@ -102,9 +150,10 @@ impl RpcHandler {
 
         debug!("Handling RPC request: {}", method);
 
-        // Check if this method should be cached
+        // Check if this method is cacheable
         if CACHEABLE_METHODS.contains(&method) {
-            // Check if request has non-deterministic block parameters
+            // ALL cacheable methods must pass the deterministic block check
+            // This applies uniformly to eth_call, eth_getBalance, etc.
             if self.has_non_deterministic_block_params(&request) {
                 debug!("Non-deterministic block params for {}, bypassing cache", method);
                 return self.forward_request(&request).await;
@@ -115,23 +164,29 @@ impl RpcHandler {
 
             // Try to get from cache first
             if let Some(cached_response) = self.cache_manager.get(&cache_key).await {
-                debug!(
-                    "Cache hit for {}: {} ({})",
-                    method,
-                    cached_response.to_string().chars().take(200).collect::<String>(),
-                    cache_key
-                );
+                debug!("Cache hit for {}: {}", method, cache_key);
                 return Ok(cached_response);
             }
 
             debug!("Cache miss for {}: {}", method, cache_key);
 
-            // Forward to upstream and cache the result
+            // Forward to upstream
             let response = self.forward_request(&request).await?;
 
             // Only cache successful responses
             if response.get("error").is_none() {
+                // Additional validation for debug/trace methods
+                if method.starts_with("debug_") || method.starts_with("trace_") {
+                    if !self.is_valid_debug_trace_response(&response) {
+                        debug!("Invalid debug/trace response for {}, not caching", method);
+                        return Ok(response);
+                    }
+                }
+
                 self.cache_manager.set(cache_key, response.clone()).await;
+                debug!("Cached response for {}", method);
+            } else {
+                debug!("Error response for {}, not caching", method);
             }
 
             Ok(response)
@@ -218,18 +273,6 @@ impl RpcHandler {
             if let Some(message) = error.get("message").and_then(|m| m.as_str()) {
                 let msg_lower = message.to_lowercase();
 
-                // Common user error patterns
-                const USER_ERROR_PATTERNS: &[&str] = &[
-                    "invalid method",
-                    "method not found",
-                    "invalid params",
-                    "missing param",
-                    "invalid argument",
-                    "parse error",
-                    "invalid request",
-                    "unsupported method",
-                ];
-
                 if USER_ERROR_PATTERNS.iter().any(|pattern| msg_lower.contains(pattern)) {
                     debug!("Detected user error from message: {}", message);
                     return true;
@@ -269,8 +312,51 @@ impl RpcHandler {
         hasher.finish()
     }
 
+    /// Validate debug/trace responses to ensure provider actually supports them
+    ///
+    /// Some providers don't support debug/trace methods and return errors
+    /// or invalid responses that shouldn't be cached
+    fn is_valid_debug_trace_response(&self, response: &Value) -> bool {
+        if let Some(result) = response.get("result") {
+            // Check for common "not supported" patterns in string responses
+            if let Value::String(s) = result {
+                let s_lower = s.to_lowercase();
+                if UNSUPPORTED_METHOD_PATTERNS.iter().any(|pattern| s_lower.contains(pattern)) {
+                    return false;
+                }
+            }
+
+            // For trace methods, ensure we have actual trace data
+            if let Value::Object(obj) = result {
+                // Should have some recognizable trace structure
+                let has_trace_fields =
+                    TRACE_RESPONSE_FIELDS.iter().any(|field| obj.contains_key(*field));
+
+                if !has_trace_fields {
+                    // Empty object or unrecognized structure
+                    return false;
+                }
+            }
+
+            // Arrays are valid (list of traces)
+            if let Value::Array(arr) = result {
+                // Empty arrays might indicate unsupported method
+                return !arr.is_empty();
+            }
+
+            // Null results indicate unsupported
+            if result.is_null() {
+                return false;
+            }
+
+            return true;
+        }
+
+        false
+    }
+
     async fn forward_request(&self, request: &Value) -> Result<Value> {
-        const MAX_RETRIES: usize = 3;
+        const MAX_RETRIES: usize = 5;
         const MAX_MULTIPLE_SAME_ERROR: usize = 3;
 
         // Track errors from different providers using hash as key
@@ -295,7 +381,7 @@ impl RpcHandler {
                     if let Some((error_response, _)) =
                         error_responses.values().max_by_key(|(_, count)| *count)
                     {
-                        info!("All providers exhausted, returning most common error");
+                        debug!("All providers exhausted, returning most common error");
                         return Ok(error_response.clone());
                     }
 
@@ -337,7 +423,7 @@ impl RpcHandler {
                                 &response_text,
                                 json_result.as_ref().ok(),
                             ) {
-                                warn!(
+                                debug!(
                                     "Provider {} is rate limited (response: {}...)",
                                     provider_url,
                                     &response_text.chars().take(200).collect::<String>()
@@ -356,7 +442,7 @@ impl RpcHandler {
                                     if let Some(error) = response_json.get("error") {
                                         // Check if it's a user error (invalid request)
                                         if self.is_user_error(&response_json) {
-                                            info!("Detected user error, returning immediately");
+                                            debug!("Detected user error, returning immediately");
                                             // Don't mark provider as failed - it's user's fault
                                             self.provider_manager
                                                 .mark_provider_success(&provider_url, response_time)
@@ -381,7 +467,7 @@ impl RpcHandler {
                                         // If multiple providers return the same error, it's likely legitimate
                                         if let Some((_, count)) = error_responses.get(&error_hash) {
                                             if *count >= MAX_MULTIPLE_SAME_ERROR {
-                                                info!(
+                                                debug!(
                                                     "Multiple providers ({}) returned same error, likely legitimate",
                                                     count
                                                 );
@@ -442,14 +528,17 @@ impl RpcHandler {
         }
 
         // All retries exhausted
-        info!("All {} retries exhausted after trying {} providers", MAX_RETRIES, providers_tried);
+        warn!(
+            "All {} retries exhausted after trying {} providers for request: {}",
+            MAX_RETRIES, providers_tried, request
+        );
 
         // Return the most common error if we have any
         if !error_responses.is_empty() {
             let (most_common_error, count) =
                 error_responses.values().max_by_key(|(_, count)| *count).unwrap();
 
-            info!("Returning most common error (seen {} times)", count);
+            debug!("Returning most common error (seen {} times)", count);
             return Ok(most_common_error.clone());
         }
 
@@ -494,13 +583,46 @@ impl RpcHandler {
     }
 
     fn generate_cache_key(&self, request: &Value) -> String {
-        // Create a deterministic cache key from method + params
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request.get("params").unwrap_or(&Value::Null);
 
-        // For simplicity, we'll use a hash of the method + params
-        // In production, you might want more sophisticated key generation
-        format!("{}:{}", method, serde_json::to_string(params).unwrap_or_default())
+        // Create a hasher for consistent key generation
+        let mut hasher = DefaultHasher::new();
+        method.hash(&mut hasher);
+
+        // Hash parameters in a consistent way
+        self.hash_json_value(&mut hasher, params);
+
+        format!("{}:{:x}", method, hasher.finish())
+    }
+
+    /// Hash a JSON value consistently for cache key generation
+    fn hash_json_value(&self, hasher: &mut DefaultHasher, value: &Value) {
+        use std::collections::BTreeMap;
+
+        match value {
+            Value::Null => "null".hash(hasher),
+            Value::Bool(b) => b.hash(hasher),
+            Value::Number(n) => n.to_string().hash(hasher),
+            Value::String(s) => s.hash(hasher),
+            Value::Array(arr) => {
+                "array".hash(hasher);
+                arr.len().hash(hasher);
+                for elem in arr {
+                    self.hash_json_value(hasher, elem);
+                }
+            }
+            Value::Object(obj) => {
+                "object".hash(hasher);
+                // Sort keys for consistent hashing
+                let sorted: BTreeMap<_, _> = obj.iter().collect();
+                sorted.len().hash(hasher);
+                for (key, val) in sorted {
+                    key.hash(hasher);
+                    self.hash_json_value(hasher, val);
+                }
+            }
+        }
     }
 }
 
@@ -1302,23 +1424,181 @@ mod tests {
             .mount(&mock2)
             .await;
 
-        // Third provider should NOT be called (2 matching errors is enough)
+        // Third provider WILL be called (need 3 matching errors now)
         Mock::given(method("POST"))
             .and(path("/"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
-            .expect(0)
+            .expect(1)
             .mount(&mock3)
             .await;
 
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "method": "eth_call",
-            "params": [{}, "latest"],
+            "params": [{}, "0x1000000"],
             "id": 1
         });
 
-        // Should return the error after 2 providers agree
+        // Should return the error after 3 providers agree
         let result = handler.handle_request(request).await.unwrap();
         assert_eq!(result, error_response);
+    }
+
+    #[tokio::test]
+    async fn test_eth_call_caching_with_deterministic_block() {
+        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+
+        let response_data = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_data))
+            .expect(1) // Should only be called once due to caching
+            .mount(&mock_server)
+            .await;
+
+        // eth_call with specific block number (should be cached)
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [
+                {
+                    "to": "0x1234567890123456789012345678901234567890",
+                    "data": "0x"
+                },
+                "0x1000000"  // Specific block number
+            ],
+            "id": 1
+        });
+
+        // First request - should hit upstream
+        let result1 = handler.handle_request(request.clone()).await.unwrap();
+        assert_eq!(result1, response_data);
+
+        // Second request - should hit cache
+        let result2 = handler.handle_request(request).await.unwrap();
+        assert_eq!(result2, response_data);
+
+        // Mock server should only be called once
+    }
+
+    #[tokio::test]
+    async fn test_eth_call_not_cached_with_latest() {
+        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+
+        let response_data = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        });
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&response_data))
+            .expect(2) // Should be called twice (no caching)
+            .mount(&mock_server)
+            .await;
+
+        // eth_call with "latest" (should NOT be cached)
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [
+                {
+                    "to": "0x1234567890123456789012345678901234567890",
+                    "data": "0x"
+                },
+                "latest"  // Non-deterministic
+            ],
+            "id": 1
+        });
+
+        // Both requests should hit upstream
+        let result1 = handler.handle_request(request.clone()).await.unwrap();
+        assert_eq!(result1, response_data);
+
+        let result2 = handler.handle_request(request).await.unwrap();
+        assert_eq!(result2, response_data);
+
+        // Mock server should be called twice
+    }
+
+    #[tokio::test]
+    async fn test_debug_trace_validation_with_unsupported_response() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": "0x1"
+            })))
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock_server.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+
+        // Test various unsupported responses
+        let test_cases = vec![
+            // String indicating not supported
+            (
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": "method not supported"
+                }),
+                false,
+            ),
+            // Valid trace response
+            (
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "output": "0x1234",
+                        "gas": 21000
+                    }
+                }),
+                true,
+            ),
+            // Empty object (invalid)
+            (
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {}
+                }),
+                false,
+            ),
+            // Valid array response
+            (
+                serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": [{"action": "call"}]
+                }),
+                true,
+            ),
+        ];
+
+        for (response, expected) in test_cases {
+            let result = handler.is_valid_debug_trace_response(&response);
+            assert_eq!(result, expected, "Failed for response: {:?}", response);
+        }
     }
 }

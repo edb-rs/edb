@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, info, warn};
 
 #[derive(Clone)]
@@ -45,6 +45,7 @@ pub struct EDBRegistry {
     instances: Arc<RwLock<HashMap<u32, EDBInstance>>>,
     grace_period: u64,
     grace_period_start: Arc<RwLock<Option<u64>>>,
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 impl EDBRegistry {
@@ -52,14 +53,16 @@ impl EDBRegistry {
     ///
     /// # Arguments
     /// * `grace_period` - Seconds to wait before auto-shutdown when no instances (0 = no auto-shutdown)
+    /// * `shutdown_tx` - Channel to send shutdown signals
     ///
     /// # Returns
     /// A new EDBRegistry instance
-    pub fn new(grace_period: u64) -> Self {
+    pub fn new(grace_period: u64, shutdown_tx: broadcast::Sender<()>) -> Self {
         Self {
             instances: Arc::new(RwLock::new(HashMap::new())),
             grace_period,
             grace_period_start: Arc::new(RwLock::new(None)),
+            shutdown_tx,
         }
     }
 
@@ -201,8 +204,8 @@ impl EDBRegistry {
                             .as_secs();
 
                         if (now - start_time) >= grace_period {
-                            warn!("Grace period expired - shutting down proxy");
-                            std::process::exit(0);
+                            warn!("Grace period expired - sending shutdown signal");
+                            let _ = self.shutdown_tx.send(());
                         }
                     }
                 }
