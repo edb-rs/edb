@@ -5,8 +5,8 @@
 //! - Cache statistics and hit rates
 //! - EDB instance registry
 //! - Request metrics and performance charts
+//! - Enhanced metrics (cache hit rates, provider usage analytics)
 
-use crate::proxy::ProxyServer;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -16,37 +16,21 @@ use eyre::Result;
 use ratatui::prelude::*;
 use std::{
     io,
-    net::SocketAddr,
     time::{Duration, Instant},
 };
 use tokio::time::sleep;
 
 mod app;
+pub mod remote;
 mod widgets;
 
 use app::App;
+use remote::RemoteProxyClient;
 
-/// Run the TUI interface for monitoring the proxy server
-pub async fn run_tui(proxy: ProxyServer, addr: SocketAddr) -> Result<()> {
-    // Setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    // Create app state
-    let mut app = App::new(proxy, addr);
-
-    // Run TUI loop
-    let result = run_tui_loop(&mut terminal, &mut app).await;
-
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-    terminal.show_cursor()?;
-
-    result
+/// Run the TUI interface for monitoring a local proxy server
+/// (Converts local proxy to remote monitoring automatically)
+pub async fn run_tui(proxy_url: String, refresh_interval: u64) -> Result<()> {
+    run_remote_tui(proxy_url, refresh_interval, 5).await
 }
 
 async fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
@@ -89,4 +73,41 @@ async fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> 
     }
 
     Ok(())
+}
+
+/// Run the TUI interface for monitoring a remote proxy server
+pub async fn run_remote_tui(proxy_url: String, refresh_interval: u64, timeout: u64) -> Result<()> {
+    // Create remote client
+    let client = RemoteProxyClient::new(proxy_url.clone(), timeout);
+    
+    // Test connection
+    match client.ping().await {
+        Ok(_) => {
+            tracing::info!("Successfully connected to proxy at {}", proxy_url);
+        }
+        Err(e) => {
+            tracing::error!("Failed to connect to proxy at {}: {}", proxy_url, e);
+            eyre::bail!("Cannot connect to proxy server. Make sure it's running and accessible.");
+        }
+    }
+
+    // Setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    // Create app state for remote monitoring
+    let mut app = App::new_remote(client, refresh_interval);
+
+    // Run TUI loop
+    let result = run_tui_loop(&mut terminal, &mut app).await;
+
+    // Restore terminal
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    terminal.show_cursor()?;
+
+    result
 }

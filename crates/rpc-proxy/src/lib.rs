@@ -6,6 +6,7 @@
 
 pub mod cache;
 mod health;
+pub mod metrics;
 mod providers;
 pub mod proxy;
 mod registry;

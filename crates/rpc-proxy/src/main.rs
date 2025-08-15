@@ -4,13 +4,14 @@
 //! Provides intelligent caching of immutable RPC responses to improve performance and reduce
 //! network overhead for multiple debugging sessions.
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use eyre::Result;
 use std::net::SocketAddr;
 use tracing::{info, warn};
 
 mod cache;
 mod health;
+mod metrics;
 mod providers;
 mod proxy;
 mod registry;
@@ -19,10 +20,27 @@ mod tui;
 
 use proxy::ProxyServerBuilder;
 
+/// EDB RPC Caching Proxy Server
 #[derive(Parser, Debug)]
 #[command(name = "edb-rpc-proxy")]
 #[command(about = "EDB RPC Caching Proxy Server")]
 struct Args {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+/// Available commands
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Start RPC proxy server
+    Server(ServerArgs),
+    /// Monitor existing proxy via TUI
+    Monitor(MonitorArgs),
+}
+
+/// Server mode arguments
+#[derive(Parser, Debug)]
+struct ServerArgs {
     // ========== General Configuration ==========
     /// Port to listen on
     #[arg(long, default_value = "8546")]
@@ -70,6 +88,21 @@ struct Args {
     tui: bool,
 }
 
+/// Monitor mode arguments
+#[derive(Parser, Debug)]
+struct MonitorArgs {
+    /// Proxy URL to monitor
+    proxy_url: String,
+
+    /// Refresh interval in seconds
+    #[arg(long, default_value = "1")]
+    refresh_interval: u64,
+
+    /// Connection timeout in seconds
+    #[arg(long, default_value = "5")]
+    timeout: u64,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -77,6 +110,18 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
+    match args.command {
+        Commands::Server(server_args) => {
+            run_server(server_args).await
+        }
+        Commands::Monitor(monitor_args) => {
+            run_monitor(monitor_args).await
+        }
+    }
+}
+
+/// Run the RPC proxy server
+async fn run_server(args: ServerArgs) -> Result<()> {
     // Create the proxy server using builder pattern
     let mut builder = ProxyServerBuilder::new()
         .max_cache_items(args.max_cache_items)
@@ -112,8 +157,12 @@ async fn main() -> Result<()> {
         let proxy_clone = proxy.clone();
         let server_handle = tokio::spawn(async move { proxy_clone.serve(addr).await });
 
-        // Start TUI interface
-        let tui_result = tui::run_tui(proxy, addr).await;
+        // Wait for server to start
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Start TUI interface (now remote-based)
+        let proxy_url = format!("http://{}", addr);
+        let tui_result = tui::run_tui(proxy_url, 1).await;
 
         // Cleanup
         server_handle.abort();
@@ -140,4 +189,16 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Run the TUI monitor for an existing proxy
+async fn run_monitor(args: MonitorArgs) -> Result<()> {
+    info!("Starting TUI monitor for proxy at {}", args.proxy_url);
+    
+    // Create a remote TUI client and run it
+    tui::run_remote_tui(
+        args.proxy_url,
+        args.refresh_interval,
+        args.timeout,
+    ).await
 }

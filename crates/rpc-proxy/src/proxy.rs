@@ -3,6 +3,7 @@
 use crate::{
     cache::CacheManager,
     health::HealthService,
+    metrics::MetricsCollector,
     providers::{ProviderManager, DEFAULT_MAINNET_RPCS},
     registry::EDBRegistry,
     rpc::RpcHandler,
@@ -170,6 +171,8 @@ pub struct ProxyServer {
     pub registry: Arc<EDBRegistry>,
     /// Health check service for monitoring
     pub health_service: Arc<HealthService>,
+    /// Metrics collector for performance tracking
+    pub metrics_collector: Arc<MetricsCollector>,
     /// Shutdown signal sender
     shutdown_tx: broadcast::Sender<()>,
 }
@@ -213,13 +216,14 @@ impl ProxyServer {
         }
 
         let cache_manager = Arc::new(CacheManager::new(max_cache_items, cache_path)?);
+        let metrics_collector = Arc::new(MetricsCollector::new());
 
         // Create provider manager with all URLs
         let provider_manager = Arc::new(ProviderManager::new(rpc_urls, max_failures).await?);
 
         // Create RPC handler with provider manager
         let rpc_handler =
-            Arc::new(RpcHandler::new(provider_manager.clone(), cache_manager.clone())?);
+            Arc::new(RpcHandler::new(provider_manager.clone(), cache_manager.clone(), metrics_collector.clone())?);
         let health_service = Arc::new(HealthService::new());
         let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -262,7 +266,34 @@ impl ProxyServer {
             });
         }
 
-        Ok(Self { rpc_handler, registry, health_service, shutdown_tx })
+        // Start background metrics collection task
+        let metrics_collector_clone = metrics_collector.clone();
+        let cache_manager_clone = cache_manager.clone();
+        let provider_manager_clone = provider_manager.clone();
+        let registry_clone = registry.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                
+                // Collect current metrics for historical tracking
+                let cache_stats = cache_manager_clone.detailed_stats().await;
+                let providers_info = provider_manager_clone.get_providers_info().await;
+                let healthy_providers = providers_info.iter().filter(|p| p.is_healthy).count() as u64;
+                let total_providers = providers_info.len() as u64;
+                let active_instances = registry_clone.get_active_instances().await.len();
+                
+                let total_entries = cache_stats.get("total_entries").and_then(|v| v.as_u64()).unwrap_or(0);
+                metrics_collector_clone.add_historical_point(
+                    total_entries,
+                    healthy_providers,
+                    total_providers,
+                    active_instances,
+                );
+            }
+        });
+
+        Ok(Self { rpc_handler, registry, health_service, metrics_collector, shutdown_tx })
     }
 
     /// Returns a reference to the cache manager
@@ -397,6 +428,128 @@ async fn handle_rpc(
                         "providers": providers_info,
                         "healthy_count": healthy_count,
                         "total_count": providers_info.len()
+                    }
+                });
+                Ok(Json(response))
+            }
+            "edb_cache_metrics" => {
+                let metrics = state.proxy.metrics_collector;
+                let method_stats = metrics.get_method_stats();
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": {
+                        "total_requests": metrics.total_requests.load(std::sync::atomic::Ordering::Relaxed),
+                        "cache_hits": metrics.cache_hits.load(std::sync::atomic::Ordering::Relaxed),
+                        "cache_misses": metrics.cache_misses.load(std::sync::atomic::Ordering::Relaxed),
+                        "hit_rate": format!("{:.1}%", metrics.cache_hit_rate()),
+                        "error_rate": format!("{:.1}%", metrics.error_rate()),
+                        "method_stats": method_stats,
+                        "total_errors": metrics.total_errors.load(std::sync::atomic::Ordering::Relaxed),
+                        "rate_limit_errors": metrics.rate_limit_errors.load(std::sync::atomic::Ordering::Relaxed),
+                        "user_errors": metrics.user_errors.load(std::sync::atomic::Ordering::Relaxed)
+                    }
+                });
+                Ok(Json(response))
+            }
+            "edb_provider_metrics" => {
+                let metrics = state.proxy.metrics_collector;
+                let provider_usage = metrics.get_provider_usage();
+                let total_requests = metrics.total_requests.load(std::sync::atomic::Ordering::Relaxed);
+                
+                let providers: Vec<serde_json::Value> = provider_usage.iter().map(|(url, usage)| {
+                    serde_json::json!({
+                        "url": url,
+                        "request_count": usage.request_count,
+                        "success_rate": format!("{:.1}%", usage.success_rate()),
+                        "avg_response_time_ms": usage.avg_response_time_ms(),
+                        "load_percentage": format!("{:.1}%", usage.load_percentage(total_requests)),
+                        "last_used_timestamp": usage.last_used_timestamp,
+                        "error_count": usage.error_count
+                    })
+                }).collect();
+
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": {
+                        "providers": providers,
+                        "total_requests": total_requests
+                    }
+                });
+                Ok(Json(response))
+            }
+            "edb_metrics_history" => {
+                let metrics = state.proxy.metrics_collector;
+                let history = metrics.get_metrics_history();
+                
+                let cache_history: Vec<serde_json::Value> = history.iter().map(|h| {
+                    serde_json::json!({
+                        "timestamp": h.timestamp,
+                        "cache_size": h.cache_size,
+                        "hit_rate": if h.cache_hits + h.cache_misses > 0 {
+                            (h.cache_hits as f64 / (h.cache_hits + h.cache_misses) as f64) * 100.0
+                        } else { 0.0 },
+                        "requests_per_minute": h.requests_per_minute
+                    })
+                }).collect();
+
+                let provider_history: Vec<serde_json::Value> = history.iter().map(|h| {
+                    serde_json::json!({
+                        "timestamp": h.timestamp,
+                        "healthy_providers": h.healthy_providers,
+                        "total_providers": h.total_providers,
+                        "avg_response_time_ms": h.avg_response_time_ms
+                    })
+                }).collect();
+
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": {
+                        "cache_history": cache_history,
+                        "provider_history": provider_history
+                    }
+                });
+                Ok(Json(response))
+            }
+            "edb_request_metrics" => {
+                let metrics = state.proxy.metrics_collector;
+                let recent_methods: Vec<String> = metrics.get_method_stats()
+                    .iter()
+                    .filter(|(_, stats)| stats.total_requests > 0)
+                    .take(10)
+                    .map(|(method, _)| method.clone())
+                    .collect();
+
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": {
+                        "requests_per_minute": metrics.requests_per_minute(),
+                        "active_requests": 0, // TODO: implement active request tracking
+                        "recent_methods": recent_methods,
+                        "error_rate": format!("{:.1}%", metrics.error_rate()),
+                        "peak_requests_per_minute": 0 // TODO: implement peak tracking
+                    }
+                });
+                Ok(Json(response))
+            }
+            "edb_system_metrics" => {
+                let uptime = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": {
+                        "uptime_seconds": uptime,
+                        "memory_usage_mb": 0, // TODO: implement memory tracking
+                        "cpu_usage_percent": 0.0, // TODO: implement CPU tracking
+                        "cache_disk_usage_mb": 0, // TODO: implement disk usage tracking
+                        "background_tasks": ["heartbeat_monitor", "cache_persistence", "health_checker", "metrics_collection"]
                     }
                 });
                 Ok(Json(response))

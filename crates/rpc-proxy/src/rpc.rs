@@ -1,6 +1,7 @@
 //! RPC request handling and caching logic
 
 use crate::cache::CacheManager;
+use crate::metrics::{ErrorType, MetricsCollector};
 use crate::providers::ProviderManager;
 use eyre::Result;
 use reqwest::StatusCode;
@@ -98,6 +99,7 @@ pub struct RpcHandler {
     upstream_client: reqwest::Client,
     provider_manager: Arc<ProviderManager>,
     cache_manager: Arc<CacheManager>,
+    metrics_collector: Arc<MetricsCollector>,
 }
 
 impl RpcHandler {
@@ -106,17 +108,19 @@ impl RpcHandler {
     /// # Arguments
     /// * `provider_manager` - Manager for multiple RPC providers with load balancing
     /// * `cache_manager` - Shared cache manager for storing responses
+    /// * `metrics_collector` - Metrics collector for performance tracking
     ///
     /// # Returns
     /// A new RpcHandler instance ready to process requests
     pub fn new(
         provider_manager: Arc<ProviderManager>,
         cache_manager: Arc<CacheManager>,
+        metrics_collector: Arc<MetricsCollector>,
     ) -> Result<Self> {
         let upstream_client =
             reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build()?;
 
-        Ok(Self { upstream_client, provider_manager, cache_manager })
+        Ok(Self { upstream_client, provider_manager, cache_manager, metrics_collector })
     }
 
     /// Returns a reference to the cache manager
@@ -130,6 +134,12 @@ impl RpcHandler {
     /// Returns a reference to the provider manager
     pub fn provider_manager(&self) -> &Arc<ProviderManager> {
         &self.provider_manager
+    }
+
+    /// Returns a reference to the metrics collector
+    #[allow(dead_code)]
+    pub fn metrics_collector(&self) -> &Arc<MetricsCollector> {
+        &self.metrics_collector
     }
 
     /// Handles an RPC request with intelligent caching
@@ -146,6 +156,7 @@ impl RpcHandler {
     /// # Returns
     /// The JSON-RPC response, either from cache or upstream
     pub async fn handle_request(&self, request: Value) -> Result<Value> {
+        let start_time = Instant::now();
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
 
         debug!("Handling RPC request: {}", method);
@@ -156,7 +167,23 @@ impl RpcHandler {
             // This applies uniformly to eth_call, eth_getBalance, etc.
             if self.has_non_deterministic_block_params(&request) {
                 debug!("Non-deterministic block params for {}, bypassing cache", method);
-                return self.forward_request(&request).await;
+                let response = self.forward_request(&request).await;
+                let response_time = start_time.elapsed().as_millis() as u64;
+                
+                match &response {
+                    Ok(resp) => {
+                        let success = resp.get("error").is_none();
+                        if let Some(provider_url) = self.get_last_used_provider().await {
+                            self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, success);
+                        }
+                    }
+                    Err(_) => {
+                        if let Some(provider_url) = self.get_last_used_provider().await {
+                            self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, false);
+                        }
+                    }
+                }
+                return response;
             }
 
             // Generate cache key from request
@@ -164,6 +191,8 @@ impl RpcHandler {
 
             // Try to get from cache first
             if let Some(cached_response) = self.cache_manager.get(&cache_key).await {
+                let response_time = start_time.elapsed().as_millis() as u64;
+                self.metrics_collector.record_cache_hit(method, response_time);
                 debug!("Cache hit for {}: {}", method, cache_key);
                 return Ok(cached_response);
             }
@@ -171,29 +200,73 @@ impl RpcHandler {
             debug!("Cache miss for {}: {}", method, cache_key);
 
             // Forward to upstream
-            let response = self.forward_request(&request).await?;
+            let response = self.forward_request(&request).await;
+            let response_time = start_time.elapsed().as_millis() as u64;
 
-            // Only cache successful responses
-            if response.get("error").is_none() {
-                // Additional validation for debug/trace methods
-                if method.starts_with("debug_") || method.starts_with("trace_") {
-                    if !self.is_valid_debug_trace_response(&response) {
-                        debug!("Invalid debug/trace response for {}, not caching", method);
-                        return Ok(response);
+            match &response {
+                Ok(resp) => {
+                    let success = resp.get("error").is_none();
+                    if let Some(provider_url) = self.get_last_used_provider().await {
+                        self.metrics_collector.record_cache_miss(method, &provider_url, response_time, success);
+                    }
+
+                    // Only cache successful responses
+                    if success {
+                        // Additional validation for debug/trace methods
+                        if method.starts_with("debug_") || method.starts_with("trace_") {
+                            if !self.is_valid_debug_trace_response(resp) {
+                                debug!("Invalid debug/trace response for {}, not caching", method);
+                                return Ok(resp.clone());
+                            }
+                        }
+
+                        self.cache_manager.set(cache_key, resp.clone()).await;
+                        debug!("Cached response for {}", method);
+                    } else {
+                        debug!("Error response for {}, not caching", method);
+                        // Classify error type for metrics
+                        if let Some(error_obj) = resp.get("error") {
+                            if let Some(error_msg) = error_obj.get("message").and_then(|m| m.as_str()) {
+                                let error_msg_lower = error_msg.to_lowercase();
+                                if RATE_LIMIT_PATTERNS.iter().any(|pattern| error_msg_lower.contains(pattern)) {
+                                    self.metrics_collector.record_error(ErrorType::RateLimit);
+                                } else if USER_ERROR_PATTERNS.iter().any(|pattern| error_msg_lower.contains(pattern)) {
+                                    self.metrics_collector.record_error(ErrorType::UserError);
+                                } else {
+                                    self.metrics_collector.record_error(ErrorType::Other);
+                                }
+                            }
+                        }
                     }
                 }
-
-                self.cache_manager.set(cache_key, response.clone()).await;
-                debug!("Cached response for {}", method);
-            } else {
-                debug!("Error response for {}, not caching", method);
+                Err(_) => {
+                    if let Some(provider_url) = self.get_last_used_provider().await {
+                        self.metrics_collector.record_cache_miss(method, &provider_url, response_time, false);
+                    }
+                }
             }
 
-            Ok(response)
+            response
         } else {
             // Non-cacheable request - forward directly
             debug!("Non-cacheable request: {}", method);
-            self.forward_request(&request).await
+            let response = self.forward_request(&request).await;
+            let response_time = start_time.elapsed().as_millis() as u64;
+            
+            match &response {
+                Ok(resp) => {
+                    let success = resp.get("error").is_none();
+                    if let Some(provider_url) = self.get_last_used_provider().await {
+                        self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, success);
+                    }
+                }
+                Err(_) => {
+                    if let Some(provider_url) = self.get_last_used_provider().await {
+                        self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, false);
+                    }
+                }
+            }
+            response
         }
     }
 
@@ -624,6 +697,14 @@ impl RpcHandler {
             }
         }
     }
+
+    /// Get the URL of the last used provider (for metrics tracking)
+    async fn get_last_used_provider(&self) -> Option<String> {
+        // XXX (ZZ): This is a simple implementation that returns the current selected
+        // provider. In a more sophisticated implementation, we might track the actual
+        // last used provider
+        self.provider_manager.get_current_provider().await
+    }
 }
 
 #[cfg(test)]
@@ -654,6 +735,7 @@ mod tests {
             .await;
 
         let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+        let metrics_collector = Arc::new(MetricsCollector::new());
 
         // Now create provider manager with mock server URL
         let provider_manager = Arc::new(
@@ -662,7 +744,7 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         (handler, mock_server, temp_dir)
     }
@@ -940,7 +1022,8 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         // Setup different responses for each mock to verify round-robin
         let response1 = serde_json::json!({
@@ -1053,7 +1136,8 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         let cacheable_response = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1123,7 +1207,8 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         // Test various rate limit responses
         let test_cases = vec![
@@ -1217,7 +1302,8 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         // Test various user error patterns
         let test_cases = vec![
@@ -1329,7 +1415,8 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         // First provider returns rate limit error
         Mock::given(method("POST"))
@@ -1396,7 +1483,8 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         // All providers return the same blockchain error
         let error_response = serde_json::json!({
@@ -1551,7 +1639,8 @@ mod tests {
                 .expect("Failed to create provider manager"),
         );
 
-        let handler = RpcHandler::new(provider_manager, cache_manager).unwrap();
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
         // Test various unsupported responses
         let test_cases = vec![

@@ -1,50 +1,25 @@
 //! TUI application state and logic
 
-use crate::proxy::ProxyServer;
+use super::remote::{RemoteProxyClient, RemoteDataFetcher, RemoteCacheStats, RemoteProviderStatus, RemoteMetricData};
 use ratatui::{prelude::*, widgets::*};
 use std::{
     collections::VecDeque,
-    net::SocketAddr,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 /// Maximum number of data points to keep in history
 const MAX_HISTORY: usize = 100;
 
-#[derive(Debug, Clone)]
-pub struct MetricData {
-    pub timestamp: u64,
-    pub cache_hits: u64,
-    pub cache_misses: u64,
-    pub cache_size: usize,
-    pub healthy_providers: usize,
-    pub total_providers: usize,
-    pub active_instances: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProviderStatus {
-    pub url: String,
-    pub is_healthy: bool,
-    pub response_time_ms: Option<u64>,
-    pub consecutive_failures: u32,
-    pub last_health_check_seconds_ago: Option<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CacheStats {
-    pub total_entries: u64,
-    pub max_entries: u64,
-    pub utilization: String,
-    pub oldest_entry_age_seconds: Option<u64>,
-    pub newest_entry_age_seconds: Option<u64>,
-    pub cache_file_path: String,
-}
+// Use remote types directly
+pub type MetricData = RemoteMetricData;
+pub type ProviderStatus = RemoteProviderStatus;
+pub type CacheStats = RemoteCacheStats;
 
 pub enum Tab {
     Overview,
     Providers,
     Cache,
+    Methods,
     Instances,
 }
 
@@ -54,14 +29,18 @@ impl Tab {
             Tab::Overview => "Overview",
             Tab::Providers => "Providers",
             Tab::Cache => "Cache",
+            Tab::Methods => "Methods",
             Tab::Instances => "EDB Instances",
         }
     }
 }
 
 pub struct App {
-    pub proxy: ProxyServer,
-    pub addr: SocketAddr,
+    // Remote data fetcher
+    pub fetcher: RemoteDataFetcher,
+    pub refresh_interval: u64,
+    
+    // UI state
     pub current_tab: Tab,
     pub show_help: bool,
 
@@ -70,6 +49,11 @@ pub struct App {
     pub providers: Vec<ProviderStatus>,
     pub cache_stats: Option<CacheStats>,
     pub active_instances: Vec<u32>,
+    
+    // Enhanced metrics data (JSON values from API)
+    pub cache_metrics: Option<serde_json::Value>,
+    pub provider_metrics: Option<serde_json::Value>,
+    pub request_metrics: Option<serde_json::Value>,
 
     // UI state
     pub selected_provider: usize,
@@ -81,16 +65,21 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(proxy: ProxyServer, addr: SocketAddr) -> Self {
+    /// Create a new app for remote proxy monitoring
+    pub fn new_remote(client: RemoteProxyClient, refresh_interval: u64) -> Self {
+        let fetcher = RemoteDataFetcher::new(client);
         Self {
-            proxy,
-            addr,
+            fetcher,
+            refresh_interval,
             current_tab: Tab::Overview,
             show_help: false,
             metrics_history: VecDeque::with_capacity(MAX_HISTORY),
             providers: Vec::new(),
             cache_stats: None,
             active_instances: Vec::new(),
+            cache_metrics: None,
+            provider_metrics: None,
+            request_metrics: None,
             selected_provider: 0,
             scroll_offset: 0,
             last_update: 0,
@@ -104,47 +93,64 @@ impl App {
         self.last_update = now;
         self.update_count += 1;
 
-        // Update providers
-        let providers_info = self.proxy.rpc_handler.provider_manager().get_providers_info().await;
-        self.providers = providers_info
-            .into_iter()
-            .map(|p| ProviderStatus {
-                url: p.url,
-                is_healthy: p.is_healthy,
-                response_time_ms: p.response_time_ms,
-                consecutive_failures: p.consecutive_failures,
-                last_health_check_seconds_ago: p.last_health_check_seconds_ago,
-            })
-            .collect();
+        // Fetch all data from remote proxy
+        match self.fetcher.fetch_all_data().await {
+            Ok(data) => {
+                // Update providers
+                self.providers = data.providers;
 
-        // Update cache stats
-        let cache_stats_json = self.proxy.cache_manager().detailed_stats().await;
-        self.cache_stats = Some(CacheStats {
-            total_entries: cache_stats_json["total_entries"].as_u64().unwrap_or(0),
-            max_entries: cache_stats_json["max_entries"].as_u64().unwrap_or(0),
-            utilization: cache_stats_json["utilization"].as_str().unwrap_or("0%").to_string(),
-            oldest_entry_age_seconds: cache_stats_json["oldest_entry_age_seconds"].as_u64(),
-            newest_entry_age_seconds: cache_stats_json["newest_entry_age_seconds"].as_u64(),
-            cache_file_path: cache_stats_json["cache_file_path"].as_str().unwrap_or("").to_string(),
-        });
+                // Update cache stats
+                self.cache_stats = data.cache_stats;
 
-        // Update active instances
-        self.active_instances = self.proxy.registry.get_active_instances().await;
+                // Update active instances
+                self.active_instances = data.active_instances;
+                
+                // Update enhanced metrics
+                self.cache_metrics = data.cache_metrics;
+                self.provider_metrics = data.provider_metrics;
+                self.request_metrics = data.request_metrics;
 
-        // Add to metrics history
-        let metric = MetricData {
-            timestamp: now,
-            cache_hits: 0,   // TODO: Add cache hit tracking
-            cache_misses: 0, // TODO: Add cache miss tracking
-            cache_size: self.cache_stats.as_ref().map(|s| s.total_entries as usize).unwrap_or(0),
-            healthy_providers: self.providers.iter().filter(|p| p.is_healthy).count(),
-            total_providers: self.providers.len(),
-            active_instances: self.active_instances.len(),
-        };
+                // Update metrics history from remote data
+                if !data.metrics_history.is_empty() {
+                    self.metrics_history = data.metrics_history.into();
+                } else {
+                    // If no remote history, create a current data point from enhanced metrics
+                    let cache_hits = self.cache_metrics.as_ref()
+                        .and_then(|m| m.get("cache_hits").and_then(|v| v.as_u64()))
+                        .unwrap_or(0);
+                    let cache_misses = self.cache_metrics.as_ref()
+                        .and_then(|m| m.get("cache_misses").and_then(|v| v.as_u64()))
+                        .unwrap_or(0);
+                    let requests_per_minute = self.request_metrics.as_ref()
+                        .and_then(|m| m.get("requests_per_minute").and_then(|v| v.as_u64()))
+                        .unwrap_or(0);
+                    let avg_response_time = self.providers.iter()
+                        .filter_map(|p| p.response_time_ms)
+                        .map(|ms| ms as f64)
+                        .sum::<f64>() / self.providers.len().max(1) as f64;
+                        
+                    let metric = MetricData {
+                        timestamp: now,
+                        cache_hits,
+                        cache_misses,
+                        cache_size: self.cache_stats.as_ref().map(|s| s.total_entries).unwrap_or(0),
+                        healthy_providers: self.providers.iter().filter(|p| p.is_healthy).count() as u64,
+                        total_providers: self.providers.len() as u64,
+                        requests_per_minute,
+                        avg_response_time_ms: avg_response_time,
+                        active_instances: self.active_instances.len(),
+                    };
 
-        self.metrics_history.push_back(metric);
-        if self.metrics_history.len() > MAX_HISTORY {
-            self.metrics_history.pop_front();
+                    self.metrics_history.push_back(metric);
+                    if self.metrics_history.len() > MAX_HISTORY {
+                        self.metrics_history.pop_front();
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to fetch remote data: {}", e);
+                // Continue with stale data
+            }
         }
 
         // Clamp selected provider
@@ -171,7 +177,8 @@ impl App {
         self.current_tab = match self.current_tab {
             Tab::Overview => Tab::Providers,
             Tab::Providers => Tab::Cache,
-            Tab::Cache => Tab::Instances,
+            Tab::Cache => Tab::Methods,
+            Tab::Methods => Tab::Instances,
             Tab::Instances => Tab::Overview,
         };
     }
@@ -181,7 +188,8 @@ impl App {
             Tab::Overview => Tab::Instances,
             Tab::Providers => Tab::Overview,
             Tab::Cache => Tab::Providers,
-            Tab::Instances => Tab::Cache,
+            Tab::Methods => Tab::Cache,
+            Tab::Instances => Tab::Methods,
         };
     }
 
@@ -209,7 +217,7 @@ impl App {
         }
     }
 
-    pub fn render(&mut self, f: &mut Frame) {
+    pub fn render(&mut self, f: &mut Frame<'_>) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
@@ -228,6 +236,7 @@ impl App {
             Tab::Overview => self.render_overview(f, chunks[1]),
             Tab::Providers => self.render_providers(f, chunks[1]),
             Tab::Cache => self.render_cache(f, chunks[1]),
+            Tab::Methods => self.render_methods(f, chunks[1]),
             Tab::Instances => self.render_instances(f, chunks[1]),
         }
 
@@ -240,11 +249,12 @@ impl App {
         }
     }
 
-    fn render_header(&self, f: &mut Frame, area: Rect) {
+    fn render_header(&self, f: &mut Frame<'_>, area: Rect) {
         let titles = vec![
             Tab::Overview.title(),
             Tab::Providers.title(),
             Tab::Cache.title(),
+            Tab::Methods.title(),
             Tab::Instances.title(),
         ];
 
@@ -252,7 +262,8 @@ impl App {
             Tab::Overview => 0,
             Tab::Providers => 1,
             Tab::Cache => 2,
-            Tab::Instances => 3,
+            Tab::Methods => 3,
+            Tab::Instances => 4,
         };
 
         let tabs = Tabs::new(titles)
@@ -264,16 +275,15 @@ impl App {
         f.render_widget(tabs, area);
     }
 
-    fn render_footer(&self, f: &mut Frame, area: Rect) {
+    fn render_footer(&self, f: &mut Frame<'_>, area: Rect) {
         let help_text = if self.show_help {
             "Press 'h' to hide help"
         } else {
-            "q:Quit | h:Help | r:Refresh | c:Clear Cache | Tab:Switch | ←→:Navigate"
+            "q:Quit | h:Help | r:Refresh | c:Clear Cache | Tab:Switch | ←→:Navigate Providers | ↑↓:Scroll Up/Down"
         };
 
         let status_text = format!(
-            "Listening: {} | Updates: {} | Last: {}s ago",
-            self.addr,
+            "Remote Monitor | Updates: {} | Last: {}s ago",
             self.update_count,
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -300,7 +310,7 @@ impl App {
         f.render_widget(status, chunks[1]);
     }
 
-    fn render_help(&self, f: &mut Frame) {
+    fn render_help(&self, f: &mut Frame<'_>) {
         let area = centered_rect(60, 50, f.area());
 
         let help_text = vec![

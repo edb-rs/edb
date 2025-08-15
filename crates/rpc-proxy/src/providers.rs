@@ -172,6 +172,21 @@ impl ProviderManager {
         Some(healthy_providers[index].url.clone())
     }
 
+    /// Get the current healthy provider using round-robin
+    pub async fn get_current_provider(&self) -> Option<String> {
+        let providers = self.providers.read().await;
+        let healthy_providers: Vec<_> = providers.iter().filter(|p| p.is_healthy).collect();
+
+        if healthy_providers.is_empty() {
+            return None;
+        }
+
+        // Round-robin selection
+        let index =
+            self.round_robin_counter.load(Ordering::Relaxed) % healthy_providers.len();
+        Some(healthy_providers[index].url.clone())
+    }
+
     /// Mark a provider as failed and update its health status
     pub async fn mark_provider_failed(&self, url: &str) {
         let mut providers = self.providers.write().await;

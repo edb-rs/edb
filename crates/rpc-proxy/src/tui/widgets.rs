@@ -4,7 +4,7 @@ use super::app::App;
 use ratatui::{prelude::*, widgets::*};
 
 impl App {
-    pub fn render_overview(&mut self, f: &mut Frame, area: Rect) {
+    pub fn render_overview(&mut self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -20,7 +20,7 @@ impl App {
         self.render_charts(f, chunks[1]);
     }
 
-    fn render_status_cards(&self, f: &mut Frame, area: Rect) {
+    fn render_status_cards(&self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -59,11 +59,17 @@ impl App {
 
         f.render_widget(provider_card, chunks[0]);
 
-        // Cache status card
+        // Enhanced Cache status card with hit rate
         let cache_stats = self.cache_stats.as_ref();
         let cache_utilization =
             cache_stats.map(|s| s.utilization.clone()).unwrap_or_else(|| "0%".to_string());
         let cache_entries = cache_stats.map(|s| s.total_entries).unwrap_or(0);
+        
+        // Extract cache hit rate from enhanced metrics
+        let hit_rate = self.cache_metrics.as_ref()
+            .and_then(|m| m.get("hit_rate").and_then(|v| v.as_f64()))
+            .map(|rate| format!("{:.1}%", rate * 100.0))
+            .unwrap_or_else(|| "N/A".to_string());
 
         let cache_color =
             if cache_utilization.trim_end_matches('%').parse::<f32>().unwrap_or(0.0) > 90.0 {
@@ -78,6 +84,7 @@ impl App {
             Line::from(vec![Span::styled("Cache", Style::default().add_modifier(Modifier::BOLD))]),
             Line::from(""),
             Line::from(vec![Span::styled(&cache_utilization, Style::default().fg(cache_color))]),
+            Line::from(format!("Hit Rate: {}", hit_rate)),
             Line::from(format!("{} entries", cache_entries)),
         ])
         .block(Block::default().borders(Borders::ALL).title("Cache Status"))
@@ -142,20 +149,20 @@ impl App {
         f.render_widget(perf_card, chunks[3]);
     }
 
-    fn render_charts(&self, f: &mut Frame, area: Rect) {
+    fn render_charts(&self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
-        // Cache size chart
-        self.render_cache_chart(f, chunks[0]);
+        // Enhanced cache metrics chart
+        self.render_enhanced_cache_chart(f, chunks[0]);
 
-        // Provider health chart
-        self.render_provider_chart(f, chunks[1]);
+        // Provider usage chart
+        self.render_provider_usage_chart(f, chunks[1]);
     }
 
-    fn render_cache_chart(&self, f: &mut Frame, area: Rect) {
+    fn render_enhanced_cache_chart(&self, f: &mut Frame<'_>, area: Rect) {
         if self.metrics_history.is_empty() {
             let empty = Paragraph::new("No data available")
                 .block(Block::default().borders(Borders::ALL).title("Cache Size"))
@@ -173,14 +180,45 @@ impl App {
 
         let max_size = data.iter().map(|(_, y)| *y).fold(0.0, f64::max).max(1.0);
 
-        let datasets = vec![Dataset::default()
-            .name("Cache Entries")
-            .marker(symbols::Marker::Braille)
-            .style(Style::default().fg(Color::Cyan))
-            .data(&data)];
+        // Add cache hits and misses data
+        let hits_data: Vec<(f64, f64)> = self
+            .metrics_history
+            .iter()
+            .enumerate()
+            .map(|(i, metric)| (i as f64, metric.cache_hits as f64))
+            .collect();
+
+        let misses_data: Vec<(f64, f64)> = self
+            .metrics_history
+            .iter()
+            .enumerate()
+            .map(|(i, metric)| (i as f64, metric.cache_misses as f64))
+            .collect();
+
+        let max_hits = hits_data.iter().map(|(_, y)| *y).fold(0.0, f64::max);
+        let max_misses = misses_data.iter().map(|(_, y)| *y).fold(0.0, f64::max);
+        let max_y = max_hits.max(max_misses).max(max_size).max(1.0);
+
+        let datasets = vec![
+            Dataset::default()
+                .name("Cache Entries")
+                .marker(symbols::Marker::Braille)
+                .style(Style::default().fg(Color::Cyan))
+                .data(&data),
+            Dataset::default()
+                .name("Cache Hits")
+                .marker(symbols::Marker::Dot)
+                .style(Style::default().fg(Color::Green))
+                .data(&hits_data),
+            Dataset::default()
+                .name("Cache Misses")
+                .marker(symbols::Marker::Dot)
+                .style(Style::default().fg(Color::Red))
+                .data(&misses_data),
+        ];
 
         let chart = Chart::new(datasets)
-            .block(Block::default().borders(Borders::ALL).title("Cache Size Over Time"))
+            .block(Block::default().borders(Borders::ALL).title("Cache Metrics Over Time"))
             .x_axis(
                 Axis::default()
                     .title("Time")
@@ -189,15 +227,15 @@ impl App {
             )
             .y_axis(
                 Axis::default()
-                    .title("Entries")
+                    .title("Count")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([0.0, max_size]),
+                    .bounds([0.0, max_y]),
             );
 
         f.render_widget(chart, area);
     }
 
-    fn render_provider_chart(&self, f: &mut Frame, area: Rect) {
+    fn render_provider_usage_chart(&self, f: &mut Frame<'_>, area: Rect) {
         if self.metrics_history.is_empty() {
             let empty = Paragraph::new("No data available")
                 .block(Block::default().borders(Borders::ALL).title("Provider Health"))
@@ -222,21 +260,37 @@ impl App {
 
         let max_providers = total_data.iter().map(|(_, y)| *y).fold(0.0, f64::max).max(1.0);
 
+        // Add requests per minute data
+        let requests_data: Vec<(f64, f64)> = self
+            .metrics_history
+            .iter()
+            .enumerate()
+            .map(|(i, metric)| (i as f64, metric.requests_per_minute as f64))
+            .collect();
+
+        let max_requests = requests_data.iter().map(|(_, y)| *y).fold(0.0, f64::max);
+        let max_combined = max_providers.max(max_requests).max(1.0);
+
         let datasets = vec![
             Dataset::default()
-                .name("Total")
+                .name("Total Providers")
                 .marker(symbols::Marker::Braille)
                 .style(Style::default().fg(Color::Gray))
                 .data(&total_data),
             Dataset::default()
-                .name("Healthy")
+                .name("Healthy Providers")
                 .marker(symbols::Marker::Braille)
                 .style(Style::default().fg(Color::Green))
                 .data(&healthy_data),
+            Dataset::default()
+                .name("Requests/Min")
+                .marker(symbols::Marker::Dot)
+                .style(Style::default().fg(Color::Blue))
+                .data(&requests_data),
         ];
 
         let chart = Chart::new(datasets)
-            .block(Block::default().borders(Borders::ALL).title("Provider Health Over Time"))
+            .block(Block::default().borders(Borders::ALL).title("Provider Usage & Requests"))
             .x_axis(
                 Axis::default()
                     .title("Time")
@@ -245,15 +299,15 @@ impl App {
             )
             .y_axis(
                 Axis::default()
-                    .title("Providers")
+                    .title("Count")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([0.0, max_providers]),
+                    .bounds([0.0, max_combined]),
             );
 
         f.render_widget(chart, area);
     }
 
-    pub fn render_providers(&mut self, f: &mut Frame, area: Rect) {
+    pub fn render_providers(&mut self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
@@ -266,8 +320,8 @@ impl App {
         self.render_provider_details(f, chunks[1]);
     }
 
-    fn render_provider_list(&self, f: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = self
+    fn render_provider_list(&self, f: &mut Frame<'_>, area: Rect) {
+        let items: Vec<ListItem<'_>> = self
             .providers
             .iter()
             .enumerate()
@@ -306,7 +360,7 @@ impl App {
         f.render_stateful_widget(list, area, &mut state);
     }
 
-    fn render_provider_details(&self, f: &mut Frame, area: Rect) {
+    fn render_provider_details(&self, f: &mut Frame<'_>, area: Rect) {
         if let Some(provider) = self.providers.get(self.selected_provider) {
             let details = vec![
                 Line::from(vec![
@@ -362,7 +416,7 @@ impl App {
         }
     }
 
-    pub fn render_cache(&mut self, f: &mut Frame, area: Rect) {
+    pub fn render_cache(&mut self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -374,11 +428,11 @@ impl App {
         // Cache statistics
         self.render_cache_stats(f, chunks[0]);
 
-        // Cache utilization details
-        self.render_cache_details(f, chunks[1]);
+        // Enhanced cache details with hit/miss analytics
+        self.render_enhanced_cache_details(f, chunks[1]);
     }
 
-    fn render_cache_stats(&self, f: &mut Frame, area: Rect) {
+    fn render_cache_stats(&self, f: &mut Frame<'_>, area: Rect) {
         if let Some(stats) = &self.cache_stats {
             let chunks = Layout::default()
                 .direction(Direction::Horizontal)
@@ -478,9 +532,62 @@ impl App {
         }
     }
 
-    fn render_cache_details(&self, f: &mut Frame, area: Rect) {
+    fn render_enhanced_cache_details(&self, f: &mut Frame<'_>, area: Rect) {
         if let Some(stats) = &self.cache_stats {
-            let details = vec![
+            // Extract enhanced cache metrics
+            let cache_hits = self.cache_metrics.as_ref()
+                .and_then(|m| m.get("cache_hits").and_then(|v| v.as_u64()))
+                .unwrap_or(0);
+            let cache_misses = self.cache_metrics.as_ref()
+                .and_then(|m| m.get("cache_misses").and_then(|v| v.as_u64()))
+                .unwrap_or(0);
+            let total_requests = cache_hits + cache_misses;
+            let hit_rate = if total_requests > 0 {
+                cache_hits as f64 / total_requests as f64 * 100.0
+            } else {
+                0.0
+            };
+            
+            // Extract method statistics if available
+            let method_stats_lines = if let Some(metrics) = &self.cache_metrics {
+                if let Some(method_stats) = metrics.get("method_stats").and_then(|v| v.as_object()) {
+                    let mut lines = vec![
+                        Line::from(vec![Span::styled(
+                            "Top Methods by Cache Usage:",
+                            Style::default().add_modifier(Modifier::BOLD),
+                        )]),
+                    ];
+                    
+                    // Sort methods by hit count and take top 5
+                    let mut methods: Vec<_> = method_stats.iter().collect();
+                    methods.sort_by(|a, b| {
+                        let hits_a = a.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let hits_b = b.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+                        hits_b.cmp(&hits_a)
+                    });
+                    
+                    for (method, stats) in methods.iter().take(5) {
+                        let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let method_hit_rate = if hits + misses > 0 {
+                            hits as f64 / (hits + misses) as f64 * 100.0
+                        } else {
+                            0.0
+                        };
+                        lines.push(Line::from(format!(
+                            "• {}: {} hits, {:.1}% hit rate",
+                            method, hits, method_hit_rate
+                        )));
+                    }
+                    lines
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            };
+            
+            let mut details = vec![
                 Line::from(vec![Span::styled(
                     "Cache File Path:",
                     Style::default().add_modifier(Modifier::BOLD),
@@ -494,6 +601,27 @@ impl App {
                 Line::from(format!("• Total entries: {}", stats.total_entries)),
                 Line::from(format!("• Maximum capacity: {}", stats.max_entries)),
                 Line::from(format!("• Current utilization: {}", stats.utilization)),
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "Cache Performance:",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(vec![
+                    Span::raw("• Hit Rate: "),
+                    Span::styled(
+                        format!("{:.1}%", hit_rate),
+                        if hit_rate > 80.0 {
+                            Style::default().fg(Color::Green)
+                        } else if hit_rate > 50.0 {
+                            Style::default().fg(Color::Yellow)
+                        } else {
+                            Style::default().fg(Color::Red)
+                        },
+                    ),
+                ]),
+                Line::from(format!("• Cache Hits: {}", cache_hits)),
+                Line::from(format!("• Cache Misses: {}", cache_misses)),
+                Line::from(format!("• Total Requests: {}", total_requests)),
                 Line::from(""),
                 Line::from(vec![Span::styled(
                     "Entry Age Range:",
@@ -513,20 +641,27 @@ impl App {
                         .map(|s| format!("{}s ago", s))
                         .unwrap_or_else(|| "N/A".to_string())
                 )),
-                Line::from(""),
-                Line::from(vec![
-                    Span::styled(
-                        "Note:",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(
-                        " Cache automatically evicts oldest entries when capacity is reached.",
-                    ),
-                ]),
             ];
+            
+            // Add method statistics if available
+            if !method_stats_lines.is_empty() {
+                details.push(Line::from(""));
+                details.extend(method_stats_lines);
+            }
+            
+            details.push(Line::from(""));
+            details.push(Line::from(vec![
+                Span::styled(
+                    "Note:",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(
+                    " Cache automatically evicts oldest entries when capacity is reached.",
+                ),
+            ]));
 
             let details_widget = Paragraph::new(details)
-                .block(Block::default().borders(Borders::ALL).title("Cache Details"))
+                .block(Block::default().borders(Borders::ALL).title("Enhanced Cache Analytics"))
                 .wrap(Wrap { trim: true })
                 .scroll((self.scroll_offset as u16, 0));
 
@@ -539,7 +674,244 @@ impl App {
         }
     }
 
-    pub fn render_instances(&mut self, f: &mut Frame, area: Rect) {
+    pub fn render_methods(&mut self, f: &mut Frame<'_>, area: Rect) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(8), // Method statistics summary
+                Constraint::Min(0),    // Method details
+            ])
+            .split(area);
+
+        // Method statistics summary
+        self.render_method_stats_summary(f, chunks[0]);
+
+        // Method details
+        self.render_method_details(f, chunks[1]);
+    }
+
+    fn render_method_stats_summary(&self, f: &mut Frame<'_>, area: Rect) {
+        if let Some(metrics) = &self.cache_metrics {
+            if let Some(method_stats) = metrics.get("method_stats").and_then(|v| v.as_object()) {
+                let chunks = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                        Constraint::Percentage(25),
+                    ])
+                    .split(area);
+
+                // Total unique methods
+                let method_count = method_stats.len();
+                let methods_widget = Paragraph::new(vec![
+                    Line::from(vec![Span::styled(
+                        "Total Methods",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]),
+                    Line::from(""),
+                    Line::from(format!("{}", method_count)),
+                    Line::from("tracked"),
+                ])
+                .block(Block::default().borders(Borders::ALL))
+                .alignment(Alignment::Center);
+
+                // Most used method
+                let most_used = method_stats.iter()
+                    .max_by_key(|(_, stats)| {
+                        stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0) +
+                        stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0)
+                    })
+                    .map(|(method, _)| method.as_str())
+                    .unwrap_or("N/A");
+
+                let most_used_widget = Paragraph::new(vec![
+                    Line::from(vec![Span::styled(
+                        "Most Used",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]),
+                    Line::from(""),
+                    Line::from(most_used.chars().take(12).collect::<String>()),
+                    Line::from("method"),
+                ])
+                .block(Block::default().borders(Borders::ALL))
+                .alignment(Alignment::Center);
+
+                // Best hit rate method
+                let best_hit_rate = method_stats.iter()
+                    .filter_map(|(method, stats)| {
+                        let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let total = hits + misses;
+                        if total > 0 {
+                            Some((method.as_str(), hits as f64 / total as f64))
+                        } else {
+                            None
+                        }
+                    })
+                    .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(method, rate)| (method.chars().take(12).collect::<String>(), rate * 100.0))
+                    .unwrap_or_else(|| ("N/A".to_string(), 0.0));
+
+                let best_rate_widget = Paragraph::new(vec![
+                    Line::from(vec![Span::styled(
+                        "Best Hit Rate",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]),
+                    Line::from(""),
+                    Line::from(best_hit_rate.0),
+                    Line::from(format!("{:.1}%", best_hit_rate.1)),
+                ])
+                .block(Block::default().borders(Borders::ALL))
+                .alignment(Alignment::Center);
+
+                // Total method requests
+                let total_requests: u64 = method_stats.values()
+                    .map(|stats| {
+                        let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                        hits + misses
+                    })
+                    .sum();
+
+                let total_widget = Paragraph::new(vec![
+                    Line::from(vec![Span::styled(
+                        "Total Requests",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]),
+                    Line::from(""),
+                    Line::from(format!("{}", total_requests)),
+                    Line::from("processed"),
+                ])
+                .block(Block::default().borders(Borders::ALL))
+                .alignment(Alignment::Center);
+
+                f.render_widget(methods_widget, chunks[0]);
+                f.render_widget(most_used_widget, chunks[1]);
+                f.render_widget(best_rate_widget, chunks[2]);
+                f.render_widget(total_widget, chunks[3]);
+            } else {
+                let empty = Paragraph::new("No method statistics available")
+                    .block(Block::default().borders(Borders::ALL).title("Method Statistics"))
+                    .alignment(Alignment::Center);
+                f.render_widget(empty, area);
+            }
+        } else {
+            let empty = Paragraph::new("Loading method statistics...")
+                .block(Block::default().borders(Borders::ALL).title("Method Statistics"))
+                .alignment(Alignment::Center);
+            f.render_widget(empty, area);
+        }
+    }
+
+    fn render_method_details(&self, f: &mut Frame<'_>, area: Rect) {
+        if let Some(metrics) = &self.cache_metrics {
+            if let Some(method_stats) = metrics.get("method_stats").and_then(|v| v.as_object()) {
+                // Sort methods by total requests (hits + misses) descending
+                let mut method_list: Vec<_> = method_stats.iter().collect();
+                method_list.sort_by(|a, b| {
+                    let requests_a = a.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0) +
+                                     a.1.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let requests_b = b.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0) +
+                                     b.1.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                    requests_b.cmp(&requests_a)
+                });
+
+                let mut details = vec![
+                    Line::from(vec![Span::styled(
+                        "Method-Level Cache Statistics",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("Method", Style::default().add_modifier(Modifier::BOLD)),
+                        Span::raw("                 "),
+                        Span::styled("Requests", Style::default().add_modifier(Modifier::BOLD)),
+                        Span::raw("  "),
+                        Span::styled("Hits", Style::default().add_modifier(Modifier::BOLD)),
+                        Span::raw("     "),
+                        Span::styled("Misses", Style::default().add_modifier(Modifier::BOLD)),
+                        Span::raw("   "),
+                        Span::styled("Hit Rate", Style::default().add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from("─".repeat(80)),
+                ];
+
+                for (method, stats) in method_list.iter().take(15) {
+                    let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let total = hits + misses;
+                    let hit_rate = if total > 0 {
+                        hits as f64 / total as f64 * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    let method_display = if method.len() > 25 {
+                        format!("{}...", &method[..22])
+                    } else {
+                        method.to_string()
+                    };
+
+                    let hit_rate_color = if hit_rate > 80.0 {
+                        Color::Green
+                    } else if hit_rate > 50.0 {
+                        Color::Yellow
+                    } else {
+                        Color::Red
+                    };
+
+                    details.push(Line::from(vec![
+                        Span::raw(format!("{:<25}", method_display)),
+                        Span::raw(format!("{:>8}", total)),
+                        Span::raw(format!("{:>8}", hits)),
+                        Span::raw(format!("{:>8}", misses)),
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{:>6.1}%", hit_rate),
+                            Style::default().fg(hit_rate_color),
+                        ),
+                    ]));
+                }
+
+                if method_list.len() > 15 {
+                    details.push(Line::from(""));
+                    details.push(Line::from(vec![
+                        Span::styled(
+                            format!("... and {} more methods (scroll to see all)", 
+                                   method_list.len() - 15),
+                            Style::default().fg(Color::Gray),
+                        ),
+                    ]));
+                }
+
+                let details_widget = Paragraph::new(details)
+                    .block(Block::default().borders(Borders::ALL).title("Method Performance Details"))
+                    .wrap(Wrap { trim: false })
+                    .scroll((self.scroll_offset as u16, 0));
+
+                f.render_widget(details_widget, area);
+            } else {
+                let empty = Paragraph::new(vec![
+                    Line::from("No detailed method statistics available."),
+                    Line::from(""),
+                    Line::from("Method-level cache statistics will appear here"),
+                    Line::from("once RPC requests have been processed."),
+                ])
+                .block(Block::default().borders(Borders::ALL).title("Method Performance Details"))
+                .alignment(Alignment::Center);
+                f.render_widget(empty, area);
+            }
+        } else {
+            let empty = Paragraph::new("Loading method details...")
+                .block(Block::default().borders(Borders::ALL).title("Method Performance Details"))
+                .alignment(Alignment::Center);
+            f.render_widget(empty, area);
+        }
+    }
+
+    pub fn render_instances(&mut self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -555,7 +927,7 @@ impl App {
         self.render_instance_list(f, chunks[1]);
     }
 
-    fn render_instance_summary(&self, f: &mut Frame, area: Rect) {
+    fn render_instance_summary(&self, f: &mut Frame<'_>, area: Rect) {
         let instance_count = self.active_instances.len();
         let status_text = if instance_count > 0 {
             format!(
@@ -581,7 +953,7 @@ impl App {
         f.render_widget(summary, area);
     }
 
-    fn render_instance_list(&self, f: &mut Frame, area: Rect) {
+    fn render_instance_list(&self, f: &mut Frame<'_>, area: Rect) {
         if self.active_instances.is_empty() {
             let empty = Paragraph::new(vec![
                 Line::from("No EDB instances are currently registered."),
@@ -603,7 +975,7 @@ impl App {
 
             f.render_widget(empty, area);
         } else {
-            let items: Vec<ListItem> = self
+            let items: Vec<ListItem<'_>> = self
                 .active_instances
                 .iter()
                 .map(|&pid| {
