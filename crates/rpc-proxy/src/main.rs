@@ -15,6 +15,7 @@ mod providers;
 mod proxy;
 mod registry;
 mod rpc;
+mod tui;
 
 use proxy::ProxyServerBuilder;
 
@@ -62,6 +63,11 @@ struct Args {
     /// Heartbeat check interval in seconds
     #[arg(long, default_value = "10")]
     heartbeat_interval: u64,
+
+    // ========== UI Configuration ==========
+    /// Enable TUI monitoring interface
+    #[arg(long)]
+    tui: bool,
 }
 
 #[tokio::main]
@@ -98,13 +104,33 @@ async fn main() -> Result<()> {
     // Start the server
     let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
 
-    // Set up shutdown signal handling
-    tokio::select! {
-        result = proxy.serve(addr) => {
-            result?;
-        }
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received shutdown signal");
+    if args.tui {
+        // TUI mode - start TUI interface
+        info!("Starting TUI monitoring interface...");
+
+        // Start proxy server in background
+        let proxy_clone = proxy.clone();
+        let server_handle = tokio::spawn(async move { proxy_clone.serve(addr).await });
+
+        // Start TUI interface
+        let tui_result = tui::run_tui(proxy, addr).await;
+
+        // Cleanup
+        server_handle.abort();
+
+        tui_result?;
+    } else {
+        // Standard mode - run as daemon
+        info!("Starting EDB RPC Proxy on {}", addr);
+
+        // Set up shutdown signal handling
+        tokio::select! {
+            result = proxy.serve(addr) => {
+                result?;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received shutdown signal");
+            }
         }
     }
 

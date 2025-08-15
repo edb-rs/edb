@@ -30,6 +30,7 @@ async fn setup_test_proxy_with_cache(
         .heartbeat_interval(30)
         .build()
         .await?;
+    info!("Starting test proxy with cache at {}", cache_dir.display());
 
     // Find an available port
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
@@ -141,7 +142,7 @@ async fn get_cache_stats(proxy_url: &str) -> Result<serde_json::Value, Box<dyn s
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_with_proxy_cache() {
-    edb_utils::logging::ensure_test_logging(Some(tracing::Level::INFO));
+    edb_utils::logging::ensure_test_logging(None);
     info!("Testing fork and prepare with proxy caching");
 
     let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
@@ -185,7 +186,7 @@ async fn test_fork_with_proxy_cache() {
     shutdown_test_proxy(&proxy_url).await.ok();
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_multiple_transactions_with_cache() {
     edb_utils::logging::ensure_test_logging(None);
     info!("Testing multiple transactions with proxy caching");

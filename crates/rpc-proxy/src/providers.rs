@@ -181,7 +181,7 @@ impl ProviderManager {
 
             if provider.consecutive_failures >= self.max_failures {
                 provider.is_healthy = false;
-                warn!("Provider {} marked as unhealthy after {} failures", url, self.max_failures);
+                debug!("Provider {} marked as unhealthy after {} failures", url, self.max_failures);
             }
         }
     }

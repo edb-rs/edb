@@ -56,6 +56,10 @@ chrono.workspace = true
 # http client
 reqwest = { workspace = true, features = ["json"] }
 
+# TUI
+crossterm.workspace = true
+ratatui.workspace = true
+
 # EDB internal
 edb-utils = { path = "../utils" }
 

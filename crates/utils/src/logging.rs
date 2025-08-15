@@ -40,7 +40,7 @@ use tracing_subscriber::{
 /// #[tokio::main]
 /// async fn main() -> eyre::Result<()> {
 ///     // Initialize logging for the main EDB binary
-///     logging::init_fancy_logging("edb", true)?;
+///     logging::init_logging("edb", true)?;
 ///     
 ///     tracing::info!("Application started");
 ///     Ok(())
@@ -213,8 +213,8 @@ static TEST_LOGGING_INIT: Once = Once::new();
 pub fn ensure_test_logging(default_level: Option<Level>) {
     TEST_LOGGING_INIT.call_once(|| {
         // Initialize simple console-only logging for tests
-        // Default to DEBUG but respect RUST_LOG if set
-        let default_level = default_level.unwrap_or(Level::DEBUG);
+        // Default to INFO but respect RUST_LOG if set
+        let default_level = default_level.unwrap_or(Level::INFO);
         let _ = init_simple_logging(default_level);
         // Ignore any errors - if initialization fails, that's usually because
         // a subscriber is already set up, which is fine for tests
