@@ -1978,6 +1978,7 @@ dependencies = [
 name = "edb-engine"
 version = "0.0.1"
 dependencies = [
+ "alloy-chains",
  "alloy-contract",
  "alloy-dyn-abi",
  "alloy-json-abi",
@@ -1996,6 +1997,7 @@ dependencies = [
  "lazy_static",
  "paste",
  "revm",
+ "semver 1.0.26",
  "serde",
  "serde_json",
  "tempfile",

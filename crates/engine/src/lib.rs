@@ -25,6 +25,7 @@ pub mod compiler;
 pub mod instrumentation;
 pub mod rpc;
 pub mod source;
+pub mod utils;
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
 #[derive(Debug, Clone)]
