@@ -2,22 +2,27 @@
 
 use super::app::App;
 use ratatui::{prelude::*, widgets::*};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 impl App {
     pub fn render_overview(&mut self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(7), // Status cards
-                Constraint::Min(8),    // Charts
+                Constraint::Length(7),  // Status cards
+                Constraint::Length(10), // Metrics table with trends
+                Constraint::Min(8),     // Charts
             ])
             .split(area);
 
         // Render status cards
         self.render_status_cards(f, chunks[0]);
+        
+        // Render metrics table with trends
+        self.render_metrics_table(f, chunks[1]);
 
-        // Render charts
-        self.render_charts(f, chunks[1]);
+        // Render simplified charts
+        self.render_charts(f, chunks[2]);
     }
 
     fn render_status_cards(&self, f: &mut Frame<'_>, area: Rect) {
@@ -155,169 +160,482 @@ impl App {
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
-        // Enhanced cache metrics chart
-        self.render_enhanced_cache_chart(f, chunks[0]);
+        // Cache hit rate percentage chart (simplified)
+        self.render_cache_hit_rate_chart(f, chunks[0]);
 
-        // Provider usage chart
-        self.render_provider_usage_chart(f, chunks[1]);
+        // Response time trend chart
+        self.render_response_time_chart(f, chunks[1]);
     }
 
-    fn render_enhanced_cache_chart(&self, f: &mut Frame<'_>, area: Rect) {
+    fn render_metrics_table(&self, f: &mut Frame<'_>, area: Rect) {
+        // Calculate trends from historical data
+        let (hit_rate_trend, rpm_trend, response_trend) = self.calculate_trends();
+        
+        // Current metrics
+        let cache_hits = self.cache_metrics.as_ref()
+            .and_then(|m| m.get("cache_hits").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+        let cache_misses = self.cache_metrics.as_ref()
+            .and_then(|m| m.get("cache_misses").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+        let total_requests = cache_hits + cache_misses;
+        let hit_rate = if total_requests > 0 {
+            cache_hits as f64 / total_requests as f64 * 100.0
+        } else {
+            0.0
+        };
+        
+        let rpm = self.request_metrics.as_ref()
+            .and_then(|m| m.get("requests_per_minute").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+        
+        let avg_response = self.metrics_history.back()
+            .map(|m| m.avg_response_time_ms)
+            .unwrap_or(0.0);
+        
+        // Create table rows with trend indicators
+        let rows = vec![
+            Row::new(vec![
+                Cell::from("Cache Hit Rate"),
+                Cell::from(format!("{:.1}%", hit_rate))
+                    .style(self.get_metric_color(hit_rate, 80.0, 50.0)),
+                Cell::from(self.format_trend(hit_rate_trend, true))
+                    .style(self.get_trend_color(hit_rate_trend)),
+                Cell::from(self.create_mini_sparkline(&self.get_hit_rate_history(), 10)),
+            ]),
+            Row::new(vec![
+                Cell::from("Requests/Min"),
+                Cell::from(format!("{}", rpm)),
+                Cell::from(self.format_trend(rpm_trend, false))
+                    .style(self.get_trend_color(rpm_trend)),
+                Cell::from(self.create_mini_sparkline(&self.get_rpm_history(), 10)),
+            ]),
+            Row::new(vec![
+                Cell::from("Avg Response"),
+                Cell::from(format!("{:.0}ms", avg_response))
+                    .style(self.get_response_color(avg_response)),
+                Cell::from(self.format_trend(response_trend, false))
+                    .style(self.get_trend_color(-response_trend)), // Invert for response time
+                Cell::from(self.create_mini_sparkline(&self.get_response_history(), 10)),
+            ]),
+            Row::new(vec![
+                Cell::from("Active Instances"),
+                Cell::from(format!("{}", self.active_instances.len())),
+                Cell::from(""),
+                Cell::from(""),
+            ]),
+        ];
+        
+        let table = Table::new(
+            rows,
+            vec![
+                Constraint::Length(15),
+                Constraint::Length(12),
+                Constraint::Length(10),
+                Constraint::Min(20),
+            ],
+        )
+        .header(
+            Row::new(vec!["Metric", "Current", "Trend", "History"])
+                .style(Style::default().add_modifier(Modifier::BOLD))
+        )
+        .block(Block::default().borders(Borders::ALL).title("Real-time Metrics"))
+        .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        
+        f.render_widget(table, area);
+    }
+    
+    fn calculate_trends(&self) -> (f64, f64, f64) {
+        if self.metrics_history.len() < 2 {
+            return (0.0, 0.0, 0.0);
+        }
+        
+        let recent = self.metrics_history.back().unwrap();
+        let previous = self.metrics_history.get(self.metrics_history.len().saturating_sub(10))
+            .unwrap_or(self.metrics_history.front().unwrap());
+        
+        let recent_hit_rate = if recent.cache_hits + recent.cache_misses > 0 {
+            recent.cache_hits as f64 / (recent.cache_hits + recent.cache_misses) as f64 * 100.0
+        } else {
+            0.0
+        };
+        
+        let previous_hit_rate = if previous.cache_hits + previous.cache_misses > 0 {
+            previous.cache_hits as f64 / (previous.cache_hits + previous.cache_misses) as f64 * 100.0
+        } else {
+            0.0
+        };
+        
+        let hit_rate_trend = recent_hit_rate - previous_hit_rate;
+        let rpm_trend = recent.requests_per_minute as f64 - previous.requests_per_minute as f64;
+        let response_trend = recent.avg_response_time_ms - previous.avg_response_time_ms;
+        
+        (hit_rate_trend, rpm_trend, response_trend)
+    }
+    
+    fn format_trend(&self, trend: f64, is_percentage: bool) -> String {
+        if trend.abs() < 0.1 {
+            "→".to_string()
+        } else if trend > 0.0 {
+            if is_percentage {
+                format!("↑ {:.1}%", trend.abs())
+            } else {
+                format!("↑ {:.0}", trend.abs())
+            }
+        } else {
+            if is_percentage {
+                format!("↓ {:.1}%", trend.abs())
+            } else {
+                format!("↓ {:.0}", trend.abs())
+            }
+        }
+    }
+    
+    fn get_trend_color(&self, trend: f64) -> Style {
+        if trend > 0.0 {
+            Style::default().fg(Color::Green)
+        } else if trend < 0.0 {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(Color::Gray)
+        }
+    }
+    
+    fn get_metric_color(&self, value: f64, good_threshold: f64, bad_threshold: f64) -> Style {
+        if value >= good_threshold {
+            Style::default().fg(Color::Green)
+        } else if value >= bad_threshold {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Red)
+        }
+    }
+    
+    fn get_response_color(&self, ms: f64) -> Style {
+        if ms < 100.0 {
+            Style::default().fg(Color::Green)
+        } else if ms < 500.0 {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::Red)
+        }
+    }
+    
+    fn create_mini_sparkline(&self, data: &[f64], width: usize) -> String {
+        if data.is_empty() {
+            return "—".repeat(width);
+        }
+        
+        let chars = vec!['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        let min = data.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let max = data.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        let range = max - min;
+        
+        // Take last `width` points
+        let start = data.len().saturating_sub(width);
+        data[start..]
+            .iter()
+            .map(|&v| {
+                if range == 0.0 {
+                    chars[chars.len() / 2]
+                } else {
+                    let index = ((v - min) / range * (chars.len() - 1) as f64) as usize;
+                    chars[index.min(chars.len() - 1)]
+                }
+            })
+            .collect()
+    }
+    
+    fn get_hit_rate_history(&self) -> Vec<f64> {
+        self.metrics_history
+            .iter()
+            .map(|m| {
+                if m.cache_hits + m.cache_misses > 0 {
+                    m.cache_hits as f64 / (m.cache_hits + m.cache_misses) as f64 * 100.0
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+    
+    fn get_rpm_history(&self) -> Vec<f64> {
+        self.metrics_history
+            .iter()
+            .map(|m| m.requests_per_minute as f64)
+            .collect()
+    }
+    
+    fn get_response_history(&self) -> Vec<f64> {
+        self.metrics_history
+            .iter()
+            .map(|m| m.avg_response_time_ms)
+            .collect()
+    }
+
+    fn render_cache_hit_rate_chart(&self, f: &mut Frame<'_>, area: Rect) {
         if self.metrics_history.is_empty() {
             let empty = Paragraph::new("No data available")
-                .block(Block::default().borders(Borders::ALL).title("Cache Size"))
+                .block(Block::default().borders(Borders::ALL).title("Cache Hit Rate"))
                 .alignment(Alignment::Center);
             f.render_widget(empty, area);
             return;
         }
 
+        // Calculate hit rate percentage for each point
         let data: Vec<(f64, f64)> = self
             .metrics_history
             .iter()
             .enumerate()
-            .map(|(i, metric)| (i as f64, metric.cache_size as f64))
+            .map(|(i, metric)| {
+                let hit_rate = if metric.cache_hits + metric.cache_misses > 0 {
+                    (metric.cache_hits as f64 / (metric.cache_hits + metric.cache_misses) as f64) * 100.0
+                } else {
+                    0.0
+                };
+                (i as f64, hit_rate)
+            })
             .collect();
 
-        let max_size = data.iter().map(|(_, y)| *y).fold(0.0, f64::max).max(1.0);
+        // Create time labels for X-axis
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let x_labels = if self.metrics_history.len() > 1 {
+            let oldest_time = self.metrics_history.front().map(|m| m.timestamp).unwrap_or(now);
+            let time_range = now - oldest_time;
+            
+            if time_range < 300 { // Less than 5 minutes
+                vec![
+                    format!("{}s ago", time_range),
+                    format!("{}s ago", time_range / 2),
+                    "now".to_string(),
+                ]
+            } else {
+                vec![
+                    format!("{}m ago", time_range / 60),
+                    format!("{}m ago", time_range / 120),
+                    "now".to_string(),
+                ]
+            }
+        } else {
+            vec!["".to_string()]
+        };
 
-        // Add cache hits and misses data
-        let hits_data: Vec<(f64, f64)> = self
-            .metrics_history
-            .iter()
-            .enumerate()
-            .map(|(i, metric)| (i as f64, metric.cache_hits as f64))
-            .collect();
-
-        let misses_data: Vec<(f64, f64)> = self
-            .metrics_history
-            .iter()
-            .enumerate()
-            .map(|(i, metric)| (i as f64, metric.cache_misses as f64))
-            .collect();
-
-        let max_hits = hits_data.iter().map(|(_, y)| *y).fold(0.0, f64::max);
-        let max_misses = misses_data.iter().map(|(_, y)| *y).fold(0.0, f64::max);
-        let max_y = max_hits.max(max_misses).max(max_size).max(1.0);
-
-        let datasets = vec![
-            Dataset::default()
-                .name("Cache Entries")
-                .marker(symbols::Marker::Braille)
-                .style(Style::default().fg(Color::Cyan))
-                .data(&data),
-            Dataset::default()
-                .name("Cache Hits")
-                .marker(symbols::Marker::Dot)
-                .style(Style::default().fg(Color::Green))
-                .data(&hits_data),
-            Dataset::default()
-                .name("Cache Misses")
-                .marker(symbols::Marker::Dot)
-                .style(Style::default().fg(Color::Red))
-                .data(&misses_data),
-        ];
+        let datasets = vec![Dataset::default()
+            .name("Hit Rate %")
+            .marker(symbols::Marker::Braille)
+            .style(Style::default().fg(Color::Green))
+            .data(&data)];
 
         let chart = Chart::new(datasets)
-            .block(Block::default().borders(Borders::ALL).title("Cache Metrics Over Time"))
+            .block(Block::default().borders(Borders::ALL).title("Cache Hit Rate (%)"))
             .x_axis(
                 Axis::default()
                     .title("Time")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([0.0, self.metrics_history.len().max(1) as f64]),
+                    .bounds([0.0, self.metrics_history.len().max(1) as f64 - 1.0])
+                    .labels(x_labels),
             )
             .y_axis(
                 Axis::default()
-                    .title("Count")
+                    .title("Hit Rate %")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([0.0, max_y]),
+                    .bounds([0.0, 100.0])
+                    .labels(vec!["0%", "50%", "100%"]),
             );
 
         f.render_widget(chart, area);
     }
 
-    fn render_provider_usage_chart(&self, f: &mut Frame<'_>, area: Rect) {
+    fn render_response_time_chart(&self, f: &mut Frame<'_>, area: Rect) {
         if self.metrics_history.is_empty() {
             let empty = Paragraph::new("No data available")
-                .block(Block::default().borders(Borders::ALL).title("Provider Health"))
+                .block(Block::default().borders(Borders::ALL).title("Response Time Trend"))
                 .alignment(Alignment::Center);
             f.render_widget(empty, area);
             return;
         }
 
-        let healthy_data: Vec<(f64, f64)> = self
+        // Get response time data
+        let data: Vec<(f64, f64)> = self
             .metrics_history
             .iter()
             .enumerate()
-            .map(|(i, metric)| (i as f64, metric.healthy_providers as f64))
+            .map(|(i, metric)| (i as f64, metric.avg_response_time_ms))
             .collect();
 
-        let total_data: Vec<(f64, f64)> = self
-            .metrics_history
-            .iter()
-            .enumerate()
-            .map(|(i, metric)| (i as f64, metric.total_providers as f64))
-            .collect();
+        let max_response = data.iter().map(|(_, y)| *y).fold(0.0, f64::max).max(100.0);
 
-        let max_providers = total_data.iter().map(|(_, y)| *y).fold(0.0, f64::max).max(1.0);
+        // Create time labels for X-axis (reuse logic from hit rate chart)
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let x_labels = if self.metrics_history.len() > 1 {
+            let oldest_time = self.metrics_history.front().map(|m| m.timestamp).unwrap_or(now);
+            let time_range = now - oldest_time;
+            
+            if time_range < 300 { // Less than 5 minutes
+                vec![
+                    format!("{}s ago", time_range),
+                    format!("{}s ago", time_range / 2),
+                    "now".to_string(),
+                ]
+            } else {
+                vec![
+                    format!("{}m ago", time_range / 60),
+                    format!("{}m ago", time_range / 120),
+                    "now".to_string(),
+                ]
+            }
+        } else {
+            vec!["".to_string()]
+        };
 
-        // Add requests per minute data
-        let requests_data: Vec<(f64, f64)> = self
-            .metrics_history
-            .iter()
-            .enumerate()
-            .map(|(i, metric)| (i as f64, metric.requests_per_minute as f64))
-            .collect();
-
-        let max_requests = requests_data.iter().map(|(_, y)| *y).fold(0.0, f64::max);
-        let max_combined = max_providers.max(max_requests).max(1.0);
-
-        let datasets = vec![
-            Dataset::default()
-                .name("Total Providers")
-                .marker(symbols::Marker::Braille)
-                .style(Style::default().fg(Color::Gray))
-                .data(&total_data),
-            Dataset::default()
-                .name("Healthy Providers")
-                .marker(symbols::Marker::Braille)
-                .style(Style::default().fg(Color::Green))
-                .data(&healthy_data),
-            Dataset::default()
-                .name("Requests/Min")
-                .marker(symbols::Marker::Dot)
-                .style(Style::default().fg(Color::Blue))
-                .data(&requests_data),
-        ];
+        let datasets = vec![Dataset::default()
+            .name("Avg Response Time")
+            .marker(symbols::Marker::Braille)
+            .style(Style::default().fg(Color::Cyan))
+            .data(&data)];
 
         let chart = Chart::new(datasets)
-            .block(Block::default().borders(Borders::ALL).title("Provider Usage & Requests"))
+            .block(Block::default().borders(Borders::ALL).title("Response Time (ms)"))
             .x_axis(
                 Axis::default()
                     .title("Time")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([0.0, self.metrics_history.len().max(1) as f64]),
+                    .bounds([0.0, self.metrics_history.len().max(1) as f64 - 1.0])
+                    .labels(x_labels),
             )
             .y_axis(
                 Axis::default()
-                    .title("Count")
+                    .title("Response (ms)")
                     .style(Style::default().fg(Color::Gray))
-                    .bounds([0.0, max_combined]),
+                    .bounds([0.0, max_response])
+                    .labels(vec![
+                        "0ms".to_string(),
+                        format!("{}ms", (max_response / 2.0) as u64),
+                        format!("{}ms", max_response as u64),
+                    ]),
             );
 
         f.render_widget(chart, area);
     }
 
+
     pub fn render_providers(&mut self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(10), // Provider statistics table
+                Constraint::Min(10),    // Provider list and details
+            ])
             .split(area);
 
-        // Provider list
-        self.render_provider_list(f, chunks[0]);
+        // Provider statistics table
+        self.render_provider_statistics(f, chunks[0]);
+        
+        // Provider list and details
+        let provider_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+            .split(chunks[1]);
 
-        // Selected provider details
-        self.render_provider_details(f, chunks[1]);
+        self.render_provider_list(f, provider_chunks[0]);
+        self.render_provider_details(f, provider_chunks[1]);
+    }
+    
+    fn render_provider_statistics(&self, f: &mut Frame<'_>, area: Rect) {
+        // Extract provider metrics from enhanced data
+        let provider_metrics = self.provider_metrics.as_ref()
+            .and_then(|m| m.as_object())
+            .map(|obj| obj.clone())
+            .unwrap_or_default();
+        
+        let mut provider_rows: Vec<Row<'_>> = Vec::new();
+        
+        // Add header-like summary row
+        let total_healthy = self.providers.iter().filter(|p| p.is_healthy).count();
+        let total_providers = self.providers.len();
+        let avg_response = self.providers.iter()
+            .filter_map(|p| p.response_time_ms)
+            .map(|ms| ms as f64)
+            .sum::<f64>() / self.providers.iter().filter(|p| p.response_time_ms.is_some()).count().max(1) as f64;
+        
+        // Create rows for each provider with usage metrics
+        for provider in &self.providers {
+            let url_short = if provider.url.len() > 30 {
+                format!("...{}", &provider.url[provider.url.len() - 27..])
+            } else {
+                provider.url.clone()
+            };
+            
+            // Get usage metrics from provider_metrics if available
+            let usage_data = provider_metrics.get(&provider.url)
+                .and_then(|v| v.as_object());
+            
+            let request_count = usage_data
+                .and_then(|d| d.get("request_count").and_then(|v| v.as_u64()))
+                .unwrap_or(0);
+            
+            let success_rate = usage_data
+                .and_then(|d| d.get("success_rate").and_then(|v| v.as_f64()))
+                .unwrap_or(0.0);
+            
+            let load_percent = usage_data
+                .and_then(|d| d.get("load_percentage").and_then(|v| v.as_f64()))
+                .unwrap_or(0.0);
+            
+            provider_rows.push(Row::new(vec![
+                Cell::from(url_short),
+                Cell::from(if provider.is_healthy { "✓" } else { "✗" })
+                    .style(if provider.is_healthy { 
+                        Style::default().fg(Color::Green) 
+                    } else { 
+                        Style::default().fg(Color::Red) 
+                    }),
+                Cell::from(format!("{}", request_count)),
+                Cell::from(format!("{:.1}%", success_rate))
+                    .style(self.get_metric_color(success_rate, 95.0, 80.0)),
+                Cell::from(format!("{:.1}%", load_percent)),
+                Cell::from(provider.response_time_ms
+                    .map(|ms| format!("{}ms", ms))
+                    .unwrap_or_else(|| "—".to_string()))
+                    .style(provider.response_time_ms
+                        .map(|ms| self.get_response_color(ms as f64))
+                        .unwrap_or_else(|| Style::default().fg(Color::Gray))),
+            ]));
+        }
+        
+        // Add summary row at the top
+        provider_rows.insert(0, Row::new(vec![
+            Cell::from(format!("TOTAL: {} providers", total_providers))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from(format!("{}/{}", total_healthy, total_providers))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from("—"),
+            Cell::from("—"),
+            Cell::from("100%")
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+            Cell::from(format!("{:.0}ms", avg_response))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
+        ]));
+        
+        let table = Table::new(
+            provider_rows,
+            vec![
+                Constraint::Min(30),      // Provider URL
+                Constraint::Length(8),    // Status
+                Constraint::Length(10),   // Requests
+                Constraint::Length(10),   // Success %
+                Constraint::Length(10),   // Load %
+                Constraint::Length(12),   // Response
+            ],
+        )
+        .header(
+            Row::new(vec!["Provider", "Status", "Requests", "Success", "Load", "Response"])
+                .style(Style::default().add_modifier(Modifier::BOLD))
+        )
+        .block(Block::default().borders(Borders::ALL).title("Provider Analytics"))
+        .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        
+        f.render_widget(table, area);
     }
 
     fn render_provider_list(&self, f: &mut Frame<'_>, area: Rect) {

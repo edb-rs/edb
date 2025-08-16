@@ -145,7 +145,7 @@ async fn test_fork_with_proxy_cache() {
     edb_utils::logging::ensure_test_logging(None);
     info!("Testing fork and prepare with proxy caching");
 
-    let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
+    let proxy_url = setup_test_proxy_with_cache(3000).await.expect("Failed to setup test proxy");
 
     register_with_proxy(&proxy_url).await.ok();
 

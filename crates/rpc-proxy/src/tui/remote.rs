@@ -10,7 +10,6 @@ use tracing::{debug, warn};
 pub struct RemoteProxyClient {
     client: reqwest::Client,
     proxy_url: String,
-    timeout: Duration,
 }
 
 impl RemoteProxyClient {
@@ -24,7 +23,6 @@ impl RemoteProxyClient {
         Self {
             client,
             proxy_url,
-            timeout: Duration::from_secs(timeout_secs),
         }
     }
 
@@ -174,16 +172,22 @@ impl RemoteMetricData {
 
         // Combine cache and provider history data
         for (cache_data, provider_data) in cache_history.iter().zip(provider_history.iter()) {
+            // Extract cache hits and misses from the history data
+            let cache_hits = cache_data.get("cache_hits").and_then(|v| v.as_u64()).unwrap_or(0);
+            let cache_misses = cache_data.get("cache_misses").and_then(|v| v.as_u64()).unwrap_or(0);
+            
             metrics.push(Self {
                 timestamp: cache_data.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0),
-                cache_hits: 0, // Will be calculated from hit_rate and size
-                cache_misses: 0, // Will be calculated from hit_rate and size
+                cache_hits,
+                cache_misses,
                 cache_size: cache_data.get("cache_size").and_then(|v| v.as_u64()).unwrap_or(0),
                 healthy_providers: provider_data.get("healthy_providers").and_then(|v| v.as_u64()).unwrap_or(0),
                 total_providers: provider_data.get("total_providers").and_then(|v| v.as_u64()).unwrap_or(0),
                 requests_per_minute: cache_data.get("requests_per_minute").and_then(|v| v.as_u64()).unwrap_or(0),
                 avg_response_time_ms: provider_data.get("avg_response_time_ms").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                active_instances: 0, // TODO: Add to history API
+                active_instances: cache_data.get("active_instances")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize,
             });
         }
 

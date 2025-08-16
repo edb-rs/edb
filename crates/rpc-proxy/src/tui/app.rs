@@ -279,7 +279,7 @@ impl App {
         let help_text = if self.show_help {
             "Press 'h' to hide help"
         } else {
-            "q:Quit | h:Help | r:Refresh | c:Clear Cache | Tab:Switch | ←→:Navigate Providers | ↑↓:Scroll Up/Down"
+            "q:Quit | h:Help | r:Refresh | c:Clear Cache | Tab:Switch | ←→:Navigate | ↑↓:Scroll"
         };
 
         let status_text = format!(
