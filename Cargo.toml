@@ -141,6 +141,7 @@ clap = "4"
 
 # misc
 chrono = "0.4"
+derive_more = "2"
 dirs-next = "2"
 dotenv = "0.15"
 eyre = "0.6"

@@ -1989,6 +1989,7 @@ dependencies = [
  "alloy-sol-types",
  "alloy-transport-http",
  "axum",
+ "derive_more 2.0.1",
  "edb-utils",
  "eyre",
  "foundry-block-explorers",
