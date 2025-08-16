@@ -1,6 +1,8 @@
 //! TUI application state and logic
 
-use super::remote::{RemoteProxyClient, RemoteDataFetcher, RemoteCacheStats, RemoteProviderStatus, RemoteMetricData};
+use super::remote::{
+    RemoteCacheStats, RemoteDataFetcher, RemoteMetricData, RemoteProviderStatus, RemoteProxyClient,
+};
 use ratatui::{prelude::*, widgets::*};
 use std::{
     collections::VecDeque,
@@ -39,7 +41,8 @@ pub struct App {
     // Remote data fetcher
     pub fetcher: RemoteDataFetcher,
     pub refresh_interval: u64,
-    
+    pub proxy_url: String,
+
     // UI state
     pub current_tab: Tab,
     pub show_help: bool,
@@ -49,15 +52,22 @@ pub struct App {
     pub providers: Vec<ProviderStatus>,
     pub cache_stats: Option<CacheStats>,
     pub active_instances: Vec<u32>,
-    
+
     // Enhanced metrics data (JSON values from API)
     pub cache_metrics: Option<serde_json::Value>,
     pub provider_metrics: Option<serde_json::Value>,
     pub request_metrics: Option<serde_json::Value>,
+    pub system_info: Option<serde_json::Value>,
 
     // UI state
     pub selected_provider: usize,
-    pub scroll_offset: usize,
+
+    // Separate scroll offsets for different tables/sections
+    pub provider_analytics_scroll: usize,
+    pub _provider_list_scroll: usize,
+    pub cache_details_scroll: usize,
+    pub methods_scroll: usize,
+    pub instances_scroll: usize,
 
     // Performance tracking
     pub last_update: u64,
@@ -66,11 +76,12 @@ pub struct App {
 
 impl App {
     /// Create a new app for remote proxy monitoring
-    pub fn new_remote(client: RemoteProxyClient, refresh_interval: u64) -> Self {
+    pub fn new_remote(client: RemoteProxyClient, refresh_interval: u64, proxy_url: String) -> Self {
         let fetcher = RemoteDataFetcher::new(client);
         Self {
             fetcher,
             refresh_interval,
+            proxy_url,
             current_tab: Tab::Overview,
             show_help: false,
             metrics_history: VecDeque::with_capacity(MAX_HISTORY),
@@ -80,8 +91,13 @@ impl App {
             cache_metrics: None,
             provider_metrics: None,
             request_metrics: None,
+            system_info: None,
             selected_provider: 0,
-            scroll_offset: 0,
+            provider_analytics_scroll: 0,
+            _provider_list_scroll: 0,
+            cache_details_scroll: 0,
+            methods_scroll: 0,
+            instances_scroll: 0,
             last_update: 0,
             update_count: 0,
         }
@@ -104,41 +120,62 @@ impl App {
 
                 // Update active instances
                 self.active_instances = data.active_instances;
-                
+
                 // Update enhanced metrics
                 self.cache_metrics = data.cache_metrics;
                 self.provider_metrics = data.provider_metrics;
                 self.request_metrics = data.request_metrics;
+                self.system_info = data.system_info;
 
                 // Update metrics history from remote data
                 if !data.metrics_history.is_empty() {
                     self.metrics_history = data.metrics_history.into();
                 } else {
                     // If no remote history, create a current data point from enhanced metrics
-                    let cache_hits = self.cache_metrics.as_ref()
+                    let cache_hits = self
+                        .cache_metrics
+                        .as_ref()
                         .and_then(|m| m.get("cache_hits").and_then(|v| v.as_u64()))
                         .unwrap_or(0);
-                    let cache_misses = self.cache_metrics.as_ref()
+                    let cache_misses = self
+                        .cache_metrics
+                        .as_ref()
                         .and_then(|m| m.get("cache_misses").and_then(|v| v.as_u64()))
                         .unwrap_or(0);
-                    let requests_per_minute = self.request_metrics.as_ref()
+
+                    // Get hit_rate from backend - it comes as a string like "75.5%"
+                    let hit_rate = self
+                        .cache_metrics
+                        .as_ref()
+                        .and_then(|m| m.get("hit_rate").and_then(|v| v.as_str()))
+                        .and_then(|s| s.trim_end_matches('%').parse::<f64>().ok())
+                        .unwrap_or(0.0);
+
+                    let requests_per_minute = self
+                        .request_metrics
+                        .as_ref()
                         .and_then(|m| m.get("requests_per_minute").and_then(|v| v.as_u64()))
                         .unwrap_or(0);
-                    let avg_response_time = self.providers.iter()
+                    let avg_response_time = self
+                        .providers
+                        .iter()
                         .filter_map(|p| p.response_time_ms)
                         .map(|ms| ms as f64)
-                        .sum::<f64>() / self.providers.len().max(1) as f64;
-                        
+                        .sum::<f64>()
+                        / self.providers.len().max(1) as f64;
+
                     let metric = MetricData {
                         timestamp: now,
-                        cache_hits,
-                        cache_misses,
+                        _cache_hits: cache_hits,
+                        _cache_misses: cache_misses,
                         cache_size: self.cache_stats.as_ref().map(|s| s.total_entries).unwrap_or(0),
-                        healthy_providers: self.providers.iter().filter(|p| p.is_healthy).count() as u64,
-                        total_providers: self.providers.len() as u64,
+                        hit_rate,
+                        _healthy_providers: self.providers.iter().filter(|p| p.is_healthy).count()
+                            as u64,
+                        _total_providers: self.providers.len() as u64,
                         requests_per_minute,
                         avg_response_time_ms: avg_response_time,
-                        active_instances: self.active_instances.len(),
+                        _active_instances: self.active_instances.len(),
                     };
 
                     self.metrics_history.push_back(metric);
@@ -194,11 +231,46 @@ impl App {
     }
 
     pub fn scroll_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+        match self.current_tab {
+            Tab::Overview => {
+                // Overview doesn't have scrollable content currently
+            }
+            Tab::Providers => {
+                // For now, scroll the provider analytics table
+                // Could be enhanced to support focus switching between analytics/list
+                self.provider_analytics_scroll = self.provider_analytics_scroll.saturating_sub(1);
+            }
+            Tab::Cache => {
+                self.cache_details_scroll = self.cache_details_scroll.saturating_sub(1);
+            }
+            Tab::Methods => {
+                self.methods_scroll = self.methods_scroll.saturating_sub(1);
+            }
+            Tab::Instances => {
+                self.instances_scroll = self.instances_scroll.saturating_sub(1);
+            }
+        }
     }
 
     pub fn scroll_down(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_add(1);
+        match self.current_tab {
+            Tab::Overview => {
+                // Overview doesn't have scrollable content currently
+            }
+            Tab::Providers => {
+                self.provider_analytics_scroll =
+                    self.provider_analytics_scroll.saturating_add(1) % (self.providers.len() + 1);
+            }
+            Tab::Cache => {
+                self.cache_details_scroll = self.cache_details_scroll.saturating_add(1);
+            }
+            Tab::Methods => {
+                self.methods_scroll = self.methods_scroll.saturating_add(1);
+            }
+            Tab::Instances => {
+                self.instances_scroll = self.instances_scroll.saturating_add(1);
+            }
+        }
     }
 
     pub fn next_provider(&mut self) {
@@ -266,8 +338,9 @@ impl App {
             Tab::Instances => 4,
         };
 
+        let title = format!("EDB RPC Proxy Monitor - {}", self.proxy_url);
         let tabs = Tabs::new(titles)
-            .block(Block::default().borders(Borders::ALL).title("EDB RPC Proxy Monitor"))
+            .block(Block::default().borders(Borders::ALL).title(title))
             .style(Style::default().fg(Color::White))
             .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
             .select(selected_tab);
@@ -282,8 +355,38 @@ impl App {
             "q:Quit | h:Help | r:Refresh | c:Clear Cache | Tab:Switch | ←→:Navigate | ↑↓:Scroll"
         };
 
+        // Extract system info
+        let system_text = if let Some(info) = &self.system_info {
+            let uptime = info
+                .get("uptime")
+                .and_then(|v| v.as_u64())
+                .map(|seconds| {
+                    let days = seconds / 86400;
+                    let hours = (seconds % 86400) / 3600;
+                    let minutes = (seconds % 3600) / 60;
+                    if days > 0 {
+                        format!("{}d {}h {}m", days, hours, minutes)
+                    } else if hours > 0 {
+                        format!("{}h {}m", hours, minutes)
+                    } else {
+                        format!("{}m", minutes)
+                    }
+                })
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            let pid = info
+                .get("pid")
+                .and_then(|v| v.as_u64())
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            format!("Proxy Server - PID: {} | Up: {}", pid, uptime)
+        } else {
+            "System info unavailable".to_string()
+        };
+
         let status_text = format!(
-            "Remote Monitor | Updates: {} | Last: {}s ago",
+            "TUI - Updates: {} | Last: {}s ago",
             self.update_count,
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -294,12 +397,21 @@ impl App {
 
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+            .constraints([
+                Constraint::Percentage(50),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+            ])
             .split(area);
 
         let help = Paragraph::new(help_text)
             .block(Block::default().borders(Borders::ALL))
             .style(Style::default().fg(Color::Gray));
+
+        let system = Paragraph::new(system_text)
+            .block(Block::default().borders(Borders::ALL))
+            .style(Style::default().fg(Color::Cyan))
+            .alignment(Alignment::Center);
 
         let status = Paragraph::new(status_text)
             .block(Block::default().borders(Borders::ALL))
@@ -307,7 +419,8 @@ impl App {
             .alignment(Alignment::Right);
 
         f.render_widget(help, chunks[0]);
-        f.render_widget(status, chunks[1]);
+        f.render_widget(system, chunks[1]);
+        f.render_widget(status, chunks[2]);
     }
 
     fn render_help(&self, f: &mut Frame<'_>) {

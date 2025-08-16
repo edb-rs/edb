@@ -94,8 +94,8 @@ struct MonitorArgs {
     /// Proxy URL to monitor
     proxy_url: String,
 
-    /// Refresh interval in seconds
-    #[arg(long, default_value = "1")]
+    /// Refresh interval in milliseconds
+    #[arg(long, default_value = "250")] // 4 FPS
     refresh_interval: u64,
 
     /// Connection timeout in seconds
@@ -111,12 +111,8 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
-        Commands::Server(server_args) => {
-            run_server(server_args).await
-        }
-        Commands::Monitor(monitor_args) => {
-            run_monitor(monitor_args).await
-        }
+        Commands::Server(server_args) => run_server(server_args).await,
+        Commands::Monitor(monitor_args) => run_monitor(monitor_args).await,
     }
 }
 
@@ -162,7 +158,7 @@ async fn run_server(args: ServerArgs) -> Result<()> {
 
         // Start TUI interface (now remote-based)
         let proxy_url = format!("http://{}", addr);
-        let tui_result = tui::run_tui(proxy_url, 1).await;
+        let tui_result = tui::run_tui(proxy_url, 250, 5).await;
 
         // Cleanup
         server_handle.abort();
@@ -194,11 +190,7 @@ async fn run_server(args: ServerArgs) -> Result<()> {
 /// Run the TUI monitor for an existing proxy
 async fn run_monitor(args: MonitorArgs) -> Result<()> {
     info!("Starting TUI monitor for proxy at {}", args.proxy_url);
-    
+
     // Create a remote TUI client and run it
-    tui::run_remote_tui(
-        args.proxy_url,
-        args.refresh_interval,
-        args.timeout,
-    ).await
+    tui::run_tui(args.proxy_url, args.refresh_interval, args.timeout).await
 }

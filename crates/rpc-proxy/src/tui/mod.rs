@@ -27,15 +27,9 @@ mod widgets;
 use app::App;
 use remote::RemoteProxyClient;
 
-/// Run the TUI interface for monitoring a local proxy server
-/// (Converts local proxy to remote monitoring automatically)
-pub async fn run_tui(proxy_url: String, refresh_interval: u64) -> Result<()> {
-    run_remote_tui(proxy_url, refresh_interval, 5).await
-}
-
 async fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     let mut last_tick = Instant::now();
-    let tick_rate = Duration::from_millis(250); // 4 FPS
+    let tick_rate = Duration::from_millis(app.refresh_interval); // 4 FPS
 
     loop {
         // Handle events
@@ -76,10 +70,10 @@ async fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> 
 }
 
 /// Run the TUI interface for monitoring a remote proxy server
-pub async fn run_remote_tui(proxy_url: String, refresh_interval: u64, timeout: u64) -> Result<()> {
+pub async fn run_tui(proxy_url: String, refresh_interval: u64, timeout: u64) -> Result<()> {
     // Create remote client
     let client = RemoteProxyClient::new(proxy_url.clone(), timeout);
-    
+
     // Test connection
     match client.ping().await {
         Ok(_) => {
@@ -99,7 +93,7 @@ pub async fn run_remote_tui(proxy_url: String, refresh_interval: u64, timeout: u
     let mut terminal = Terminal::new(backend)?;
 
     // Create app state for remote monitoring
-    let mut app = App::new_remote(client, refresh_interval);
+    let mut app = App::new_remote(client, refresh_interval, proxy_url);
 
     // Run TUI loop
     let result = run_tui_loop(&mut terminal, &mut app).await;

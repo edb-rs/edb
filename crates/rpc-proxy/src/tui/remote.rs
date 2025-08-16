@@ -20,10 +20,7 @@ impl RemoteProxyClient {
             .build()
             .expect("Failed to create HTTP client");
 
-        Self {
-            client,
-            proxy_url,
-        }
+        Self { client, proxy_url }
     }
 
     /// Make an RPC request to the proxy
@@ -36,12 +33,7 @@ impl RemoteProxyClient {
 
         debug!("Making RPC request to {}: {}", self.proxy_url, method);
 
-        let response = self
-            .client
-            .post(&self.proxy_url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&self.proxy_url).json(&request).send().await?;
 
         if !response.status().is_success() {
             eyre::bail!("HTTP error: {}", response.status());
@@ -91,11 +83,6 @@ impl RemoteProxyClient {
         self.rpc_request("edb_request_metrics").await
     }
 
-    /// Get system metrics
-    pub async fn get_system_metrics(&self) -> Result<Value> {
-        self.rpc_request("edb_system_metrics").await
-    }
-
     /// Check if proxy is reachable
     pub async fn ping(&self) -> Result<Value> {
         self.rpc_request("edb_ping").await
@@ -124,10 +111,22 @@ impl RemoteCacheStats {
         Ok(Self {
             total_entries: value.get("total_entries").and_then(|v| v.as_u64()).unwrap_or(0),
             max_entries: value.get("max_entries").and_then(|v| v.as_u64()).unwrap_or(0),
-            utilization: value.get("utilization").and_then(|v| v.as_str()).unwrap_or("0%").to_string(),
-            cache_file_path: value.get("cache_file_path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            oldest_entry_age_seconds: value.get("oldest_entry_age_seconds").and_then(|v| v.as_u64()),
-            newest_entry_age_seconds: value.get("newest_entry_age_seconds").and_then(|v| v.as_u64()),
+            utilization: value
+                .get("utilization")
+                .and_then(|v| v.as_str())
+                .unwrap_or("0%")
+                .to_string(),
+            cache_file_path: value
+                .get("cache_file_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            oldest_entry_age_seconds: value
+                .get("oldest_entry_age_seconds")
+                .and_then(|v| v.as_u64()),
+            newest_entry_age_seconds: value
+                .get("newest_entry_age_seconds")
+                .and_then(|v| v.as_u64()),
         })
     }
 }
@@ -146,9 +145,14 @@ impl RemoteProviderStatus {
         Ok(Self {
             url: value.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             is_healthy: value.get("is_healthy").and_then(|v| v.as_bool()).unwrap_or(false),
-            consecutive_failures: value.get("consecutive_failures").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+            consecutive_failures: value
+                .get("consecutive_failures")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32,
             response_time_ms: value.get("response_time_ms").and_then(|v| v.as_u64()),
-            last_health_check_seconds_ago: value.get("last_health_check_seconds_ago").and_then(|v| v.as_u64()),
+            last_health_check_seconds_ago: value
+                .get("last_health_check_seconds_ago")
+                .and_then(|v| v.as_u64()),
         })
     }
 }
@@ -156,14 +160,15 @@ impl RemoteProviderStatus {
 #[derive(Debug, Clone)]
 pub struct RemoteMetricData {
     pub timestamp: u64,
-    pub cache_hits: u64,
-    pub cache_misses: u64,
+    pub _cache_hits: u64,
+    pub _cache_misses: u64,
     pub cache_size: u64,
-    pub healthy_providers: u64,
-    pub total_providers: u64,
+    pub hit_rate: f64, // Store hit rate directly from backend
+    pub _healthy_providers: u64,
+    pub _total_providers: u64,
     pub requests_per_minute: u64,
     pub avg_response_time_ms: f64,
-    pub active_instances: usize,
+    pub _active_instances: usize,
 }
 
 impl RemoteMetricData {
@@ -175,17 +180,34 @@ impl RemoteMetricData {
             // Extract cache hits and misses from the history data
             let cache_hits = cache_data.get("cache_hits").and_then(|v| v.as_u64()).unwrap_or(0);
             let cache_misses = cache_data.get("cache_misses").and_then(|v| v.as_u64()).unwrap_or(0);
-            
+
+            // Extract hit_rate directly from backend
+            let hit_rate = cache_data.get("hit_rate").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
             metrics.push(Self {
                 timestamp: cache_data.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0),
-                cache_hits,
-                cache_misses,
+                _cache_hits: cache_hits,
+                _cache_misses: cache_misses,
                 cache_size: cache_data.get("cache_size").and_then(|v| v.as_u64()).unwrap_or(0),
-                healthy_providers: provider_data.get("healthy_providers").and_then(|v| v.as_u64()).unwrap_or(0),
-                total_providers: provider_data.get("total_providers").and_then(|v| v.as_u64()).unwrap_or(0),
-                requests_per_minute: cache_data.get("requests_per_minute").and_then(|v| v.as_u64()).unwrap_or(0),
-                avg_response_time_ms: provider_data.get("avg_response_time_ms").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                active_instances: cache_data.get("active_instances")
+                hit_rate,
+                _healthy_providers: provider_data
+                    .get("healthy_providers")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                _total_providers: provider_data
+                    .get("total_providers")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                requests_per_minute: cache_data
+                    .get("requests_per_minute")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                avg_response_time_ms: provider_data
+                    .get("avg_response_time_ms")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0),
+                _active_instances: cache_data
+                    .get("active_instances")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as usize,
             });
@@ -216,6 +238,7 @@ impl RemoteDataFetcher {
             instances_result,
             history_result,
             request_metrics_result,
+            info_result,
         ) = tokio::join!(
             self.client.get_cache_stats(),
             self.client.get_cache_metrics(),
@@ -224,6 +247,7 @@ impl RemoteDataFetcher {
             self.client.get_active_instances(),
             self.client.get_metrics_history(),
             self.client.get_request_metrics(),
+            self.client.get_info(),
         );
 
         // Convert results and handle errors gracefully
@@ -232,27 +256,26 @@ impl RemoteDataFetcher {
             .ok()
             .and_then(|v| RemoteCacheStats::from_json(&v).ok());
 
-        let providers_data = providers_result
-            .map_err(|e| warn!("Failed to fetch providers: {}", e))
-            .ok();
+        let providers_data =
+            providers_result.map_err(|e| warn!("Failed to fetch providers: {}", e)).ok();
 
         let providers = providers_data
             .as_ref()
             .and_then(|v| v.get("providers"))
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|p| RemoteProviderStatus::from_json(p).ok())
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|p| RemoteProviderStatus::from_json(p).ok()).collect())
             .unwrap_or_default();
 
         let active_instances = instances_result
             .map_err(|e| warn!("Failed to fetch instances: {}", e))
             .ok()
-            .and_then(|v| v.get("active_instances").and_then(|a| a.as_array().map(|arr| {
-                arr.iter().filter_map(|v| v.as_u64().map(|u| u as u32)).collect()
-            })))
+            .and_then(|v| {
+                v.get("active_instances").and_then(|a| {
+                    a.as_array().map(|arr| {
+                        arr.iter().filter_map(|v| v.as_u64().map(|u| u as u32)).collect()
+                    })
+                })
+            })
             .unwrap_or_default();
 
         let metrics_history = history_result
@@ -260,8 +283,10 @@ impl RemoteDataFetcher {
             .ok()
             .map(|v| {
                 let empty_vec = Vec::new();
-                let cache_history = v.get("cache_history").and_then(|v| v.as_array()).unwrap_or(&empty_vec);
-                let provider_history = v.get("provider_history").and_then(|v| v.as_array()).unwrap_or(&empty_vec);
+                let cache_history =
+                    v.get("cache_history").and_then(|v| v.as_array()).unwrap_or(&empty_vec);
+                let provider_history =
+                    v.get("provider_history").and_then(|v| v.as_array()).unwrap_or(&empty_vec);
                 RemoteMetricData::from_history_json(cache_history, provider_history)
             })
             .unwrap_or_default();
@@ -274,6 +299,7 @@ impl RemoteDataFetcher {
             cache_metrics: cache_metrics_result.ok(),
             provider_metrics: provider_metrics_result.ok(),
             request_metrics: request_metrics_result.ok(),
+            system_info: info_result.ok(),
         })
     }
 }
@@ -288,4 +314,5 @@ pub struct RemoteProxyData {
     pub cache_metrics: Option<Value>,
     pub provider_metrics: Option<Value>,
     pub request_metrics: Option<Value>,
+    pub system_info: Option<Value>,
 }

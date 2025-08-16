@@ -182,8 +182,7 @@ impl ProviderManager {
         }
 
         // Round-robin selection
-        let index =
-            self.round_robin_counter.load(Ordering::Relaxed) % healthy_providers.len();
+        let index = self.round_robin_counter.load(Ordering::Relaxed) % healthy_providers.len();
         Some(healthy_providers[index].url.clone())
     }
 
@@ -234,7 +233,7 @@ impl ProviderManager {
                     Ok(response_time) => {
                         self.mark_provider_success(&provider.url, response_time).await;
                         if !provider.is_healthy {
-                            info!("Provider {} is now healthy", provider.url);
+                            debug!("Provider {} is now healthy", provider.url);
                         }
                     }
                     Err(e) => {

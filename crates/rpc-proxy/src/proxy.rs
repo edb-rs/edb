@@ -222,8 +222,11 @@ impl ProxyServer {
         let provider_manager = Arc::new(ProviderManager::new(rpc_urls, max_failures).await?);
 
         // Create RPC handler with provider manager
-        let rpc_handler =
-            Arc::new(RpcHandler::new(provider_manager.clone(), cache_manager.clone(), metrics_collector.clone())?);
+        let rpc_handler = Arc::new(RpcHandler::new(
+            provider_manager.clone(),
+            cache_manager.clone(),
+            metrics_collector.clone(),
+        )?);
         let health_service = Arc::new(HealthService::new());
         let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -275,15 +278,17 @@ impl ProxyServer {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
-                
+
                 // Collect current metrics for historical tracking
                 let cache_stats = cache_manager_clone.detailed_stats().await;
                 let providers_info = provider_manager_clone.get_providers_info().await;
-                let healthy_providers = providers_info.iter().filter(|p| p.is_healthy).count() as u64;
+                let healthy_providers =
+                    providers_info.iter().filter(|p| p.is_healthy).count() as u64;
                 let total_providers = providers_info.len() as u64;
                 let active_instances = registry_clone.get_active_instances().await.len();
-                
-                let total_entries = cache_stats.get("total_entries").and_then(|v| v.as_u64()).unwrap_or(0);
+
+                let total_entries =
+                    cache_stats.get("total_entries").and_then(|v| v.as_u64()).unwrap_or(0);
                 metrics_collector_clone.add_historical_point(
                     total_entries,
                     healthy_providers,
@@ -455,8 +460,9 @@ async fn handle_rpc(
             "edb_provider_metrics" => {
                 let metrics = state.proxy.metrics_collector;
                 let provider_usage = metrics.get_provider_usage();
-                let total_requests = metrics.total_requests.load(std::sync::atomic::Ordering::Relaxed);
-                
+                let total_requests =
+                    metrics.total_requests.load(std::sync::atomic::Ordering::Relaxed);
+
                 let providers: Vec<serde_json::Value> = provider_usage.iter().map(|(url, usage)| {
                     serde_json::json!({
                         "url": url,
@@ -482,7 +488,7 @@ async fn handle_rpc(
             "edb_metrics_history" => {
                 let metrics = state.proxy.metrics_collector;
                 let history = metrics.get_metrics_history();
-                
+
                 let cache_history: Vec<serde_json::Value> = history.iter().map(|h| {
                     serde_json::json!({
                         "timestamp": h.timestamp,
@@ -494,14 +500,17 @@ async fn handle_rpc(
                     })
                 }).collect();
 
-                let provider_history: Vec<serde_json::Value> = history.iter().map(|h| {
-                    serde_json::json!({
-                        "timestamp": h.timestamp,
-                        "healthy_providers": h.healthy_providers,
-                        "total_providers": h.total_providers,
-                        "avg_response_time_ms": h.avg_response_time_ms
+                let provider_history: Vec<serde_json::Value> = history
+                    .iter()
+                    .map(|h| {
+                        serde_json::json!({
+                            "timestamp": h.timestamp,
+                            "healthy_providers": h.healthy_providers,
+                            "total_providers": h.total_providers,
+                            "avg_response_time_ms": h.avg_response_time_ms
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 let response = serde_json::json!({
                     "jsonrpc": "2.0",
@@ -515,7 +524,8 @@ async fn handle_rpc(
             }
             "edb_request_metrics" => {
                 let metrics = state.proxy.metrics_collector;
-                let recent_methods: Vec<String> = metrics.get_method_stats()
+                let recent_methods: Vec<String> = metrics
+                    .get_method_stats()
                     .iter()
                     .filter(|(_, stats)| stats.total_requests > 0)
                     .take(10)
@@ -531,25 +541,6 @@ async fn handle_rpc(
                         "recent_methods": recent_methods,
                         "error_rate": format!("{:.1}%", metrics.error_rate()),
                         "peak_requests_per_minute": 0 // TODO: implement peak tracking
-                    }
-                });
-                Ok(Json(response))
-            }
-            "edb_system_metrics" => {
-                let uptime = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-
-                let response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
-                    "result": {
-                        "uptime_seconds": uptime,
-                        "memory_usage_mb": 0, // TODO: implement memory tracking
-                        "cpu_usage_percent": 0.0, // TODO: implement CPU tracking
-                        "cache_disk_usage_mb": 0, // TODO: implement disk usage tracking
-                        "background_tasks": ["heartbeat_monitor", "cache_persistence", "health_checker", "metrics_collection"]
                     }
                 });
                 Ok(Json(response))

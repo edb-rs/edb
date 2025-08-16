@@ -17,7 +17,7 @@ impl App {
 
         // Render status cards
         self.render_status_cards(f, chunks[0]);
-        
+
         // Render metrics table with trends
         self.render_metrics_table(f, chunks[1]);
 
@@ -69,11 +69,13 @@ impl App {
         let cache_utilization =
             cache_stats.map(|s| s.utilization.clone()).unwrap_or_else(|| "0%".to_string());
         let cache_entries = cache_stats.map(|s| s.total_entries).unwrap_or(0);
-        
-        // Extract cache hit rate from enhanced metrics
-        let hit_rate = self.cache_metrics.as_ref()
-            .and_then(|m| m.get("hit_rate").and_then(|v| v.as_f64()))
-            .map(|rate| format!("{:.1}%", rate * 100.0))
+
+        // Extract cache hit rate from enhanced metrics - it comes as a string like "75.5%"
+        let hit_rate = self
+            .cache_metrics
+            .as_ref()
+            .and_then(|m| m.get("hit_rate").and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
             .unwrap_or_else(|| "N/A".to_string());
 
         let cache_color =
@@ -169,30 +171,27 @@ impl App {
 
     fn render_metrics_table(&self, f: &mut Frame<'_>, area: Rect) {
         // Calculate trends from historical data
-        let (hit_rate_trend, rpm_trend, response_trend) = self.calculate_trends();
-        
-        // Current metrics
-        let cache_hits = self.cache_metrics.as_ref()
-            .and_then(|m| m.get("cache_hits").and_then(|v| v.as_u64()))
-            .unwrap_or(0);
-        let cache_misses = self.cache_metrics.as_ref()
-            .and_then(|m| m.get("cache_misses").and_then(|v| v.as_u64()))
-            .unwrap_or(0);
-        let total_requests = cache_hits + cache_misses;
-        let hit_rate = if total_requests > 0 {
-            cache_hits as f64 / total_requests as f64 * 100.0
-        } else {
-            0.0
-        };
-        
-        let rpm = self.request_metrics.as_ref()
+        let (hit_rate_trend, rpm_trend, response_trend, cache_size_trend) = self.calculate_trends();
+
+        // Current metrics - get hit rate directly from backend
+        let hit_rate = self
+            .cache_metrics
+            .as_ref()
+            .and_then(|m| m.get("hit_rate").and_then(|v| v.as_str()))
+            .and_then(|s| s.trim_end_matches('%').parse::<f64>().ok())
+            .unwrap_or(0.0);
+
+        let rpm = self
+            .request_metrics
+            .as_ref()
             .and_then(|m| m.get("requests_per_minute").and_then(|v| v.as_u64()))
             .unwrap_or(0);
-        
-        let avg_response = self.metrics_history.back()
-            .map(|m| m.avg_response_time_ms)
-            .unwrap_or(0.0);
-        
+
+        let avg_response =
+            self.metrics_history.back().map(|m| m.avg_response_time_ms).unwrap_or(0.0);
+
+        let cache_size = self.metrics_history.back().map(|m| m.cache_size).unwrap_or(0);
+
         // Create table rows with trend indicators
         let rows = vec![
             Row::new(vec![
@@ -201,14 +200,21 @@ impl App {
                     .style(self.get_metric_color(hit_rate, 80.0, 50.0)),
                 Cell::from(self.format_trend(hit_rate_trend, true))
                     .style(self.get_trend_color(hit_rate_trend)),
-                Cell::from(self.create_mini_sparkline(&self.get_hit_rate_history(), 10)),
+                Cell::from(self.create_mini_sparkline(&self.get_hit_rate_history(), 40)),
+            ]),
+            Row::new(vec![
+                Cell::from("Cache Size"),
+                Cell::from(format!("{}", cache_size)),
+                Cell::from(self.format_trend(cache_size_trend, false))
+                    .style(self.get_trend_color(cache_size_trend)),
+                Cell::from(self.create_mini_sparkline(&self.get_cache_size_history(), 40)),
             ]),
             Row::new(vec![
                 Cell::from("Requests/Min"),
                 Cell::from(format!("{}", rpm)),
                 Cell::from(self.format_trend(rpm_trend, false))
                     .style(self.get_trend_color(rpm_trend)),
-                Cell::from(self.create_mini_sparkline(&self.get_rpm_history(), 10)),
+                Cell::from(self.create_mini_sparkline(&self.get_rpm_history(), 40)),
             ]),
             Row::new(vec![
                 Cell::from("Avg Response"),
@@ -216,7 +222,7 @@ impl App {
                     .style(self.get_response_color(avg_response)),
                 Cell::from(self.format_trend(response_trend, false))
                     .style(self.get_trend_color(-response_trend)), // Invert for response time
-                Cell::from(self.create_mini_sparkline(&self.get_response_history(), 10)),
+                Cell::from(self.create_mini_sparkline(&self.get_response_history(), 40)),
             ]),
             Row::new(vec![
                 Cell::from("Active Instances"),
@@ -225,7 +231,7 @@ impl App {
                 Cell::from(""),
             ]),
         ];
-        
+
         let table = Table::new(
             rows,
             vec![
@@ -237,42 +243,37 @@ impl App {
         )
         .header(
             Row::new(vec!["Metric", "Current", "Trend", "History"])
-                .style(Style::default().add_modifier(Modifier::BOLD))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(Block::default().borders(Borders::ALL).title("Real-time Metrics"))
         .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
-        
+
         f.render_widget(table, area);
     }
-    
-    fn calculate_trends(&self) -> (f64, f64, f64) {
+
+    fn calculate_trends(&self) -> (f64, f64, f64, f64) {
         if self.metrics_history.len() < 2 {
-            return (0.0, 0.0, 0.0);
+            return (0.0, 0.0, 0.0, 0.0);
         }
-        
+
         let recent = self.metrics_history.back().unwrap();
-        let previous = self.metrics_history.get(self.metrics_history.len().saturating_sub(10))
+        let previous = self
+            .metrics_history
+            .get(self.metrics_history.len().saturating_sub(10))
             .unwrap_or(self.metrics_history.front().unwrap());
-        
-        let recent_hit_rate = if recent.cache_hits + recent.cache_misses > 0 {
-            recent.cache_hits as f64 / (recent.cache_hits + recent.cache_misses) as f64 * 100.0
-        } else {
-            0.0
-        };
-        
-        let previous_hit_rate = if previous.cache_hits + previous.cache_misses > 0 {
-            previous.cache_hits as f64 / (previous.cache_hits + previous.cache_misses) as f64 * 100.0
-        } else {
-            0.0
-        };
-        
+
+        // Use the hit_rate directly from the stored data
+        let recent_hit_rate = recent.hit_rate;
+        let previous_hit_rate = previous.hit_rate;
+
         let hit_rate_trend = recent_hit_rate - previous_hit_rate;
         let rpm_trend = recent.requests_per_minute as f64 - previous.requests_per_minute as f64;
         let response_trend = recent.avg_response_time_ms - previous.avg_response_time_ms;
-        
-        (hit_rate_trend, rpm_trend, response_trend)
+        let cache_size_trend = recent.cache_size as f64 - previous.cache_size as f64;
+
+        (hit_rate_trend, rpm_trend, response_trend, cache_size_trend)
     }
-    
+
     fn format_trend(&self, trend: f64, is_percentage: bool) -> String {
         if trend.abs() < 0.1 {
             "→".to_string()
@@ -290,7 +291,7 @@ impl App {
             }
         }
     }
-    
+
     fn get_trend_color(&self, trend: f64) -> Style {
         if trend > 0.0 {
             Style::default().fg(Color::Green)
@@ -300,7 +301,7 @@ impl App {
             Style::default().fg(Color::Gray)
         }
     }
-    
+
     fn get_metric_color(&self, value: f64, good_threshold: f64, bad_threshold: f64) -> Style {
         if value >= good_threshold {
             Style::default().fg(Color::Green)
@@ -310,7 +311,7 @@ impl App {
             Style::default().fg(Color::Red)
         }
     }
-    
+
     fn get_response_color(&self, ms: f64) -> Style {
         if ms < 100.0 {
             Style::default().fg(Color::Green)
@@ -320,24 +321,24 @@ impl App {
             Style::default().fg(Color::Red)
         }
     }
-    
+
     fn create_mini_sparkline(&self, data: &[f64], width: usize) -> String {
         if data.is_empty() {
             return "—".repeat(width);
         }
-        
+
         let chars = vec!['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
         let min = data.iter().fold(f64::INFINITY, |a, &b| a.min(b));
         let max = data.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
         let range = max - min;
-        
+
         // Take last `width` points
         let start = data.len().saturating_sub(width);
         data[start..]
             .iter()
             .map(|&v| {
-                if range == 0.0 {
-                    chars[chars.len() / 2]
+                if range.abs() < f64::EPSILON {
+                    chars[(chars.len() - 1) / 2]
                 } else {
                     let index = ((v - min) / range * (chars.len() - 1) as f64) as usize;
                     chars[index.min(chars.len() - 1)]
@@ -345,32 +346,21 @@ impl App {
             })
             .collect()
     }
-    
+
     fn get_hit_rate_history(&self) -> Vec<f64> {
-        self.metrics_history
-            .iter()
-            .map(|m| {
-                if m.cache_hits + m.cache_misses > 0 {
-                    m.cache_hits as f64 / (m.cache_hits + m.cache_misses) as f64 * 100.0
-                } else {
-                    0.0
-                }
-            })
-            .collect()
+        self.metrics_history.iter().map(|m| m.hit_rate).collect()
     }
-    
+
     fn get_rpm_history(&self) -> Vec<f64> {
-        self.metrics_history
-            .iter()
-            .map(|m| m.requests_per_minute as f64)
-            .collect()
+        self.metrics_history.iter().map(|m| m.requests_per_minute as f64).collect()
     }
-    
+
     fn get_response_history(&self) -> Vec<f64> {
-        self.metrics_history
-            .iter()
-            .map(|m| m.avg_response_time_ms)
-            .collect()
+        self.metrics_history.iter().map(|m| m.avg_response_time_ms).collect()
+    }
+
+    fn get_cache_size_history(&self) -> Vec<f64> {
+        self.metrics_history.iter().map(|m| m.cache_size as f64).collect()
     }
 
     fn render_cache_hit_rate_chart(&self, f: &mut Frame<'_>, area: Rect) {
@@ -382,19 +372,12 @@ impl App {
             return;
         }
 
-        // Calculate hit rate percentage for each point
+        // Use hit rate directly from stored data
         let data: Vec<(f64, f64)> = self
             .metrics_history
             .iter()
             .enumerate()
-            .map(|(i, metric)| {
-                let hit_rate = if metric.cache_hits + metric.cache_misses > 0 {
-                    (metric.cache_hits as f64 / (metric.cache_hits + metric.cache_misses) as f64) * 100.0
-                } else {
-                    0.0
-                };
-                (i as f64, hit_rate)
-            })
+            .map(|(i, metric)| (i as f64, metric.hit_rate))
             .collect();
 
         // Create time labels for X-axis
@@ -402,8 +385,9 @@ impl App {
         let x_labels = if self.metrics_history.len() > 1 {
             let oldest_time = self.metrics_history.front().map(|m| m.timestamp).unwrap_or(now);
             let time_range = now - oldest_time;
-            
-            if time_range < 300 { // Less than 5 minutes
+
+            if time_range < 300 {
+                // Less than 5 minutes
                 vec![
                     format!("{}s ago", time_range),
                     format!("{}s ago", time_range / 2),
@@ -470,8 +454,9 @@ impl App {
         let x_labels = if self.metrics_history.len() > 1 {
             let oldest_time = self.metrics_history.front().map(|m| m.timestamp).unwrap_or(now);
             let time_range = now - oldest_time;
-            
-            if time_range < 300 { // Less than 5 minutes
+
+            if time_range < 300 {
+                // Less than 5 minutes
                 vec![
                     format!("{}s ago", time_range),
                     format!("{}s ago", time_range / 2),
@@ -518,19 +503,18 @@ impl App {
         f.render_widget(chart, area);
     }
 
-
     pub fn render_providers(&mut self, f: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(10), // Provider statistics table
-                Constraint::Min(10),    // Provider list and details
+                Constraint::Percentage(50), // Provider statistics table
+                Constraint::Percentage(50), // Provider list and details
             ])
             .split(area);
 
         // Provider statistics table
         self.render_provider_statistics(f, chunks[0]);
-        
+
         // Provider list and details
         let provider_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -540,102 +524,128 @@ impl App {
         self.render_provider_list(f, provider_chunks[0]);
         self.render_provider_details(f, provider_chunks[1]);
     }
-    
+
     fn render_provider_statistics(&self, f: &mut Frame<'_>, area: Rect) {
         // Extract provider metrics from enhanced data
-        let provider_metrics = self.provider_metrics.as_ref()
-            .and_then(|m| m.as_object())
-            .map(|obj| obj.clone())
+        // The provider_metrics response has format: { "providers": [...] }
+        let providers_data = self
+            .provider_metrics
+            .as_ref()
+            .and_then(|m| m.get("providers"))
+            .and_then(|p| p.as_array())
+            .cloned()
             .unwrap_or_default();
-        
+
         let mut provider_rows: Vec<Row<'_>> = Vec::new();
-        
+
         // Add header-like summary row
         let total_healthy = self.providers.iter().filter(|p| p.is_healthy).count();
         let total_providers = self.providers.len();
-        let avg_response = self.providers.iter()
+        let avg_response = self
+            .providers
+            .iter()
             .filter_map(|p| p.response_time_ms)
             .map(|ms| ms as f64)
-            .sum::<f64>() / self.providers.iter().filter(|p| p.response_time_ms.is_some()).count().max(1) as f64;
-        
+            .sum::<f64>()
+            / self.providers.iter().filter(|p| p.response_time_ms.is_some()).count().max(1) as f64;
+
         // Create rows for each provider with usage metrics
         for provider in &self.providers {
-            let url_short = if provider.url.len() > 30 {
-                format!("...{}", &provider.url[provider.url.len() - 27..])
+            let url_short = if provider.url.len() > 60 {
+                format!("...{}", &provider.url[provider.url.len() - 57..])
             } else {
                 provider.url.clone()
             };
-            
-            // Get usage metrics from provider_metrics if available
-            let usage_data = provider_metrics.get(&provider.url)
-                .and_then(|v| v.as_object());
-            
+
+            // Find matching provider in the providers data array
+            let usage_data = providers_data
+                .iter()
+                .find(|p| p.get("url").and_then(|u| u.as_str()) == Some(&provider.url))
+                .and_then(|p| p.as_object());
+
             let request_count = usage_data
                 .and_then(|d| d.get("request_count").and_then(|v| v.as_u64()))
                 .unwrap_or(0);
-            
+
             let success_rate = usage_data
-                .and_then(|d| d.get("success_rate").and_then(|v| v.as_f64()))
+                .and_then(|d| d.get("success_rate").and_then(|v| v.as_str()))
+                .and_then(|s| s.trim_end_matches('%').parse::<f64>().ok())
                 .unwrap_or(0.0);
-            
+
             let load_percent = usage_data
-                .and_then(|d| d.get("load_percentage").and_then(|v| v.as_f64()))
+                .and_then(|d| d.get("load_percentage").and_then(|v| v.as_str()))
+                .and_then(|s| s.trim_end_matches('%').parse::<f64>().ok())
                 .unwrap_or(0.0);
-            
+
             provider_rows.push(Row::new(vec![
                 Cell::from(url_short),
-                Cell::from(if provider.is_healthy { "✓" } else { "✗" })
-                    .style(if provider.is_healthy { 
-                        Style::default().fg(Color::Green) 
-                    } else { 
-                        Style::default().fg(Color::Red) 
-                    }),
+                Cell::from(if provider.is_healthy { "✓" } else { "✗" }).style(
+                    if provider.is_healthy {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::Red)
+                    },
+                ),
                 Cell::from(format!("{}", request_count)),
-                Cell::from(format!("{:.1}%", success_rate))
-                    .style(self.get_metric_color(success_rate, 95.0, 80.0)),
+                Cell::from(format!("{:.1}%", success_rate)).style(self.get_metric_color(
+                    success_rate,
+                    95.0,
+                    80.0,
+                )),
                 Cell::from(format!("{:.1}%", load_percent)),
-                Cell::from(provider.response_time_ms
-                    .map(|ms| format!("{}ms", ms))
-                    .unwrap_or_else(|| "—".to_string()))
-                    .style(provider.response_time_ms
+                Cell::from(
+                    provider
+                        .response_time_ms
+                        .map(|ms| format!("{}ms", ms))
+                        .unwrap_or_else(|| "—".to_string()),
+                )
+                .style(
+                    provider
+                        .response_time_ms
                         .map(|ms| self.get_response_color(ms as f64))
-                        .unwrap_or_else(|| Style::default().fg(Color::Gray))),
+                        .unwrap_or_else(|| Style::default().fg(Color::Gray)),
+                ),
             ]));
         }
-        
+
         // Add summary row at the top
-        provider_rows.insert(0, Row::new(vec![
-            Cell::from(format!("TOTAL: {} providers", total_providers))
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from(format!("{}/{}", total_healthy, total_providers))
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from("—"),
-            Cell::from("—"),
-            Cell::from("100%")
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-            Cell::from(format!("{:.0}ms", avg_response))
-                .style(Style::default().add_modifier(Modifier::BOLD)),
-        ]));
-        
+        provider_rows.insert(
+            0,
+            Row::new(vec![
+                Cell::from(format!("TOTAL: {} providers", total_providers))
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
+                Cell::from(format!("{}/{}", total_healthy, total_providers))
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
+                Cell::from("—"),
+                Cell::from("—"),
+                Cell::from("100%").style(Style::default().add_modifier(Modifier::BOLD)),
+                Cell::from(format!("{:.0}ms", avg_response))
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+        );
+
         let table = Table::new(
             provider_rows,
             vec![
-                Constraint::Min(30),      // Provider URL
-                Constraint::Length(8),    // Status
-                Constraint::Length(10),   // Requests
-                Constraint::Length(10),   // Success %
-                Constraint::Length(10),   // Load %
-                Constraint::Length(12),   // Response
+                Constraint::Min(60),    // Provider URL
+                Constraint::Length(8),  // Status
+                Constraint::Length(10), // Requests
+                Constraint::Length(10), // Success %
+                Constraint::Length(10), // Load %
+                Constraint::Length(12), // Response
             ],
         )
         .header(
             Row::new(vec!["Provider", "Status", "Requests", "Success", "Load", "Response"])
-                .style(Style::default().add_modifier(Modifier::BOLD))
+                .style(Style::default().add_modifier(Modifier::BOLD)),
         )
         .block(Block::default().borders(Borders::ALL).title("Provider Analytics"))
         .row_highlight_style(Style::default().add_modifier(Modifier::BOLD));
-        
-        f.render_widget(table, area);
+
+        let mut table_state = ratatui::widgets::TableState::default();
+        table_state.select(Some(self.provider_analytics_scroll));
+
+        f.render_stateful_widget(table, area, &mut table_state);
     }
 
     fn render_provider_list(&self, f: &mut Frame<'_>, area: Rect) {
@@ -680,6 +690,45 @@ impl App {
 
     fn render_provider_details(&self, f: &mut Frame<'_>, area: Rect) {
         if let Some(provider) = self.providers.get(self.selected_provider) {
+            // Get additional usage metrics from provider_metrics
+            // The provider_metrics response has format: { "providers": [...] }
+            let providers_data = self
+                .provider_metrics
+                .as_ref()
+                .and_then(|m| m.get("providers"))
+                .and_then(|p| p.as_array());
+
+            // Find matching provider in the providers data array
+            let provider_data = providers_data.and_then(|providers| {
+                providers
+                    .iter()
+                    .find(|p| p.get("url").and_then(|u| u.as_str()) == Some(&provider.url))
+                    .and_then(|p| p.as_object())
+            });
+
+            let error_count = provider_data
+                .and_then(|m| m.get("error_count").and_then(|v| v.as_u64()))
+                .unwrap_or(0);
+
+            let last_used_timestamp = provider_data
+                .and_then(|m| m.get("last_used_timestamp").and_then(|v| v.as_u64()))
+                .unwrap_or(0);
+
+            let last_used_text = if last_used_timestamp > 0 {
+                let now =
+                    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+                let seconds_ago = now.saturating_sub(last_used_timestamp);
+                if seconds_ago < 60 {
+                    format!("{}s ago", seconds_ago)
+                } else if seconds_ago < 3600 {
+                    format!("{}m ago", seconds_ago / 60)
+                } else {
+                    format!("{}h ago", seconds_ago / 3600)
+                }
+            } else {
+                "Never".to_string()
+            };
+
             let details = vec![
                 Line::from(vec![
                     Span::styled("URL: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -707,11 +756,32 @@ impl App {
                     ),
                 ]),
                 Line::from(vec![
-                    Span::styled("Failures: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Consecutive Failures: ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(format!("{}", provider.consecutive_failures)),
                 ]),
                 Line::from(vec![
-                    Span::styled("Last Check: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled("Total Errors: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        format!("{}", error_count),
+                        if error_count > 0 {
+                            Style::default().fg(Color::Red)
+                        } else {
+                            Style::default().fg(Color::Green)
+                        },
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("Last Used: ", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(last_used_text),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        "Last Health Check: ",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(
                         provider
                             .last_health_check_seconds_ago
@@ -853,29 +923,35 @@ impl App {
     fn render_enhanced_cache_details(&self, f: &mut Frame<'_>, area: Rect) {
         if let Some(stats) = &self.cache_stats {
             // Extract enhanced cache metrics
-            let cache_hits = self.cache_metrics.as_ref()
+            let cache_hits = self
+                .cache_metrics
+                .as_ref()
                 .and_then(|m| m.get("cache_hits").and_then(|v| v.as_u64()))
                 .unwrap_or(0);
-            let cache_misses = self.cache_metrics.as_ref()
+            let cache_misses = self
+                .cache_metrics
+                .as_ref()
                 .and_then(|m| m.get("cache_misses").and_then(|v| v.as_u64()))
                 .unwrap_or(0);
             let total_requests = cache_hits + cache_misses;
-            let hit_rate = if total_requests > 0 {
-                cache_hits as f64 / total_requests as f64 * 100.0
-            } else {
-                0.0
-            };
-            
+
+            // Get hit rate directly from backend
+            let hit_rate = self
+                .cache_metrics
+                .as_ref()
+                .and_then(|m| m.get("hit_rate").and_then(|v| v.as_str()))
+                .and_then(|s| s.trim_end_matches('%').parse::<f64>().ok())
+                .unwrap_or(0.0);
+
             // Extract method statistics if available
             let method_stats_lines = if let Some(metrics) = &self.cache_metrics {
-                if let Some(method_stats) = metrics.get("method_stats").and_then(|v| v.as_object()) {
-                    let mut lines = vec![
-                        Line::from(vec![Span::styled(
-                            "Top Methods by Cache Usage:",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        )]),
-                    ];
-                    
+                if let Some(method_stats) = metrics.get("method_stats").and_then(|v| v.as_object())
+                {
+                    let mut lines = vec![Line::from(vec![Span::styled(
+                        "Top Methods by Cache Usage:",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )])];
+
                     // Sort methods by hit count and take top 5
                     let mut methods: Vec<_> = method_stats.iter().collect();
                     methods.sort_by(|a, b| {
@@ -883,7 +959,7 @@ impl App {
                         let hits_b = b.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
                         hits_b.cmp(&hits_a)
                     });
-                    
+
                     for (method, stats) in methods.iter().take(5) {
                         let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
                         let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -904,7 +980,7 @@ impl App {
             } else {
                 vec![]
             };
-            
+
             let mut details = vec![
                 Line::from(vec![Span::styled(
                     "Cache File Path:",
@@ -960,28 +1036,26 @@ impl App {
                         .unwrap_or_else(|| "N/A".to_string())
                 )),
             ];
-            
+
             // Add method statistics if available
             if !method_stats_lines.is_empty() {
                 details.push(Line::from(""));
                 details.extend(method_stats_lines);
             }
-            
+
             details.push(Line::from(""));
             details.push(Line::from(vec![
                 Span::styled(
                     "Note:",
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                 ),
-                Span::raw(
-                    " Cache automatically evicts oldest entries when capacity is reached.",
-                ),
+                Span::raw(" Cache automatically evicts oldest entries when capacity is reached."),
             ]));
 
             let details_widget = Paragraph::new(details)
                 .block(Block::default().borders(Borders::ALL).title("Enhanced Cache Analytics"))
                 .wrap(Wrap { trim: true })
-                .scroll((self.scroll_offset as u16, 0));
+                .scroll((self.cache_details_scroll as u16, 0));
 
             f.render_widget(details_widget, area);
         } else {
@@ -1036,10 +1110,11 @@ impl App {
                 .alignment(Alignment::Center);
 
                 // Most used method
-                let most_used = method_stats.iter()
+                let most_used = method_stats
+                    .iter()
                     .max_by_key(|(_, stats)| {
-                        stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0) +
-                        stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0)
+                        stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0)
+                            + stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0)
                     })
                     .map(|(method, _)| method.as_str())
                     .unwrap_or("N/A");
@@ -1057,7 +1132,8 @@ impl App {
                 .alignment(Alignment::Center);
 
                 // Best hit rate method
-                let best_hit_rate = method_stats.iter()
+                let best_hit_rate = method_stats
+                    .iter()
                     .filter_map(|(method, stats)| {
                         let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
                         let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -1069,7 +1145,9 @@ impl App {
                         }
                     })
                     .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .map(|(method, rate)| (method.chars().take(12).collect::<String>(), rate * 100.0))
+                    .map(|(method, rate)| {
+                        (method.chars().take(12).collect::<String>(), rate * 100.0)
+                    })
                     .unwrap_or_else(|| ("N/A".to_string(), 0.0));
 
                 let best_rate_widget = Paragraph::new(vec![
@@ -1085,7 +1163,8 @@ impl App {
                 .alignment(Alignment::Center);
 
                 // Total method requests
-                let total_requests: u64 = method_stats.values()
+                let total_requests: u64 = method_stats
+                    .values()
                     .map(|stats| {
                         let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
                         let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -1129,10 +1208,10 @@ impl App {
                 // Sort methods by total requests (hits + misses) descending
                 let mut method_list: Vec<_> = method_stats.iter().collect();
                 method_list.sort_by(|a, b| {
-                    let requests_a = a.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0) +
-                                     a.1.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let requests_b = b.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0) +
-                                     b.1.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let requests_a = a.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0)
+                        + a.1.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let requests_b = b.1.get("hits").and_then(|v| v.as_u64()).unwrap_or(0)
+                        + b.1.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
                     requests_b.cmp(&requests_a)
                 });
 
@@ -1160,11 +1239,7 @@ impl App {
                     let hits = stats.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
                     let misses = stats.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
                     let total = hits + misses;
-                    let hit_rate = if total > 0 {
-                        hits as f64 / total as f64 * 100.0
-                    } else {
-                        0.0
-                    };
+                    let hit_rate = if total > 0 { hits as f64 / total as f64 * 100.0 } else { 0.0 };
 
                     let method_display = if method.len() > 25 {
                         format!("{}...", &method[..22])
@@ -1195,19 +1270,21 @@ impl App {
 
                 if method_list.len() > 15 {
                     details.push(Line::from(""));
-                    details.push(Line::from(vec![
-                        Span::styled(
-                            format!("... and {} more methods (scroll to see all)", 
-                                   method_list.len() - 15),
-                            Style::default().fg(Color::Gray),
+                    details.push(Line::from(vec![Span::styled(
+                        format!(
+                            "... and {} more methods (scroll to see all)",
+                            method_list.len() - 15
                         ),
-                    ]));
+                        Style::default().fg(Color::Gray),
+                    )]));
                 }
 
                 let details_widget = Paragraph::new(details)
-                    .block(Block::default().borders(Borders::ALL).title("Method Performance Details"))
+                    .block(
+                        Block::default().borders(Borders::ALL).title("Method Performance Details"),
+                    )
                     .wrap(Wrap { trim: false })
-                    .scroll((self.scroll_offset as u16, 0));
+                    .scroll((self.methods_scroll as u16, 0));
 
                 f.render_widget(details_widget, area);
             } else {
@@ -1309,7 +1386,10 @@ impl App {
             let list = List::new(items)
                 .block(Block::default().borders(Borders::ALL).title("Active EDB Instances"));
 
-            f.render_widget(list, area);
+            let mut list_state = ratatui::widgets::ListState::default();
+            list_state.select(Some(self.instances_scroll));
+
+            f.render_stateful_widget(list, area, &mut list_state);
         }
     }
 }

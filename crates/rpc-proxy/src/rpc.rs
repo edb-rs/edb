@@ -169,17 +169,27 @@ impl RpcHandler {
                 debug!("Non-deterministic block params for {}, bypassing cache", method);
                 let response = self.forward_request(&request).await;
                 let response_time = start_time.elapsed().as_millis() as u64;
-                
+
                 match &response {
                     Ok(resp) => {
                         let success = resp.get("error").is_none();
                         if let Some(provider_url) = self.get_last_used_provider().await {
-                            self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, success);
+                            self.metrics_collector.record_non_cacheable_request(
+                                method,
+                                &provider_url,
+                                response_time,
+                                success,
+                            );
                         }
                     }
                     Err(_) => {
                         if let Some(provider_url) = self.get_last_used_provider().await {
-                            self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, false);
+                            self.metrics_collector.record_non_cacheable_request(
+                                method,
+                                &provider_url,
+                                response_time,
+                                false,
+                            );
                         }
                     }
                 }
@@ -207,7 +217,12 @@ impl RpcHandler {
                 Ok(resp) => {
                     let success = resp.get("error").is_none();
                     if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_cache_miss(method, &provider_url, response_time, success);
+                        self.metrics_collector.record_cache_miss(
+                            method,
+                            &provider_url,
+                            response_time,
+                            success,
+                        );
                     }
 
                     // Only cache successful responses
@@ -226,11 +241,19 @@ impl RpcHandler {
                         debug!("Error response for {}, not caching", method);
                         // Classify error type for metrics
                         if let Some(error_obj) = resp.get("error") {
-                            if let Some(error_msg) = error_obj.get("message").and_then(|m| m.as_str()) {
+                            if let Some(error_msg) =
+                                error_obj.get("message").and_then(|m| m.as_str())
+                            {
                                 let error_msg_lower = error_msg.to_lowercase();
-                                if RATE_LIMIT_PATTERNS.iter().any(|pattern| error_msg_lower.contains(pattern)) {
+                                if RATE_LIMIT_PATTERNS
+                                    .iter()
+                                    .any(|pattern| error_msg_lower.contains(pattern))
+                                {
                                     self.metrics_collector.record_error(ErrorType::RateLimit);
-                                } else if USER_ERROR_PATTERNS.iter().any(|pattern| error_msg_lower.contains(pattern)) {
+                                } else if USER_ERROR_PATTERNS
+                                    .iter()
+                                    .any(|pattern| error_msg_lower.contains(pattern))
+                                {
                                     self.metrics_collector.record_error(ErrorType::UserError);
                                 } else {
                                     self.metrics_collector.record_error(ErrorType::Other);
@@ -241,7 +264,12 @@ impl RpcHandler {
                 }
                 Err(_) => {
                     if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_cache_miss(method, &provider_url, response_time, false);
+                        self.metrics_collector.record_cache_miss(
+                            method,
+                            &provider_url,
+                            response_time,
+                            false,
+                        );
                     }
                 }
             }
@@ -252,17 +280,27 @@ impl RpcHandler {
             debug!("Non-cacheable request: {}", method);
             let response = self.forward_request(&request).await;
             let response_time = start_time.elapsed().as_millis() as u64;
-            
+
             match &response {
                 Ok(resp) => {
                     let success = resp.get("error").is_none();
                     if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, success);
+                        self.metrics_collector.record_non_cacheable_request(
+                            method,
+                            &provider_url,
+                            response_time,
+                            success,
+                        );
                     }
                 }
                 Err(_) => {
                     if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_non_cacheable_request(method, &provider_url, response_time, false);
+                        self.metrics_collector.record_non_cacheable_request(
+                            method,
+                            &provider_url,
+                            response_time,
+                            false,
+                        );
                     }
                 }
             }
