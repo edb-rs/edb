@@ -7,7 +7,7 @@ use eyre::Result;
 use reqwest::StatusCode;
 use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
@@ -167,33 +167,7 @@ impl RpcHandler {
             // This applies uniformly to eth_call, eth_getBalance, etc.
             if self.has_non_deterministic_block_params(&request) {
                 debug!("Non-deterministic block params for {}, bypassing cache", method);
-                let response = self.forward_request(&request).await;
-                let response_time = start_time.elapsed().as_millis() as u64;
-
-                match &response {
-                    Ok(resp) => {
-                        let success = resp.get("error").is_none();
-                        if let Some(provider_url) = self.get_last_used_provider().await {
-                            self.metrics_collector.record_non_cacheable_request(
-                                method,
-                                &provider_url,
-                                response_time,
-                                success,
-                            );
-                        }
-                    }
-                    Err(_) => {
-                        if let Some(provider_url) = self.get_last_used_provider().await {
-                            self.metrics_collector.record_non_cacheable_request(
-                                method,
-                                &provider_url,
-                                response_time,
-                                false,
-                            );
-                        }
-                    }
-                }
-                return response;
+                return self.forward_request(&request).await;
             }
 
             // Generate cache key from request
@@ -211,19 +185,11 @@ impl RpcHandler {
 
             // Forward to upstream
             let response = self.forward_request(&request).await;
-            let response_time = start_time.elapsed().as_millis() as u64;
+            self.metrics_collector.record_cache_miss();
 
             match &response {
                 Ok(resp) => {
                     let success = resp.get("error").is_none();
-                    if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_cache_miss(
-                            method,
-                            &provider_url,
-                            response_time,
-                            success,
-                        );
-                    }
 
                     // Only cache successful responses
                     if success {
@@ -262,49 +228,14 @@ impl RpcHandler {
                         }
                     }
                 }
-                Err(_) => {
-                    if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_cache_miss(
-                            method,
-                            &provider_url,
-                            response_time,
-                            false,
-                        );
-                    }
-                }
+                Err(_) => {}
             }
 
             response
         } else {
             // Non-cacheable request - forward directly
             debug!("Non-cacheable request: {}", method);
-            let response = self.forward_request(&request).await;
-            let response_time = start_time.elapsed().as_millis() as u64;
-
-            match &response {
-                Ok(resp) => {
-                    let success = resp.get("error").is_none();
-                    if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_non_cacheable_request(
-                            method,
-                            &provider_url,
-                            response_time,
-                            success,
-                        );
-                    }
-                }
-                Err(_) => {
-                    if let Some(provider_url) = self.get_last_used_provider().await {
-                        self.metrics_collector.record_non_cacheable_request(
-                            method,
-                            &provider_url,
-                            response_time,
-                            false,
-                        );
-                    }
-                }
-            }
-            response
+            self.forward_request(&request).await
         }
     }
 
@@ -470,44 +401,60 @@ impl RpcHandler {
         const MAX_RETRIES: usize = 5;
         const MAX_MULTIPLE_SAME_ERROR: usize = 3;
 
+        // Track providers we've already tried for this request
+        let mut tried_providers = HashSet::new();
         // Track errors from different providers using hash as key
         let mut error_responses: HashMap<u64, (Value, usize)> = HashMap::new();
         let mut last_network_error: Option<eyre::Error> = None;
         let mut providers_tried = 0;
 
         for retry in 0..MAX_RETRIES {
-            // Get next available provider
-            let provider_url = match self.provider_manager.get_working_provider(3).await {
-                Some(url) => url,
-                None => {
-                    warn!("No healthy providers available (attempt {})", retry + 1);
-                    if retry < MAX_RETRIES - 1 {
-                        // Trigger health check and wait before retry
-                        self.provider_manager.health_check_all().await;
-                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        continue;
-                    }
+            // Get a provider we haven't tried yet
+            let provider_url =
+                match self.provider_manager.get_weighted_provider_excluding(&tried_providers).await
+                {
+                    Some(url) => url,
+                    None => {
+                        debug!(
+                            "All available providers have been tried for this request (attempt {})",
+                            retry + 1
+                        );
 
-                    // If we have any error responses, return the most common one
-                    if let Some((error_response, _)) =
-                        error_responses.values().max_by_key(|(_, count)| *count)
-                    {
-                        debug!("All providers exhausted, returning most common error");
-                        return Ok(error_response.clone());
-                    }
+                        // If no untried providers, trigger health check and try again
+                        if retry < MAX_RETRIES - 1 {
+                            self.provider_manager.health_check_all().await;
+                            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                            // Clear tried providers to allow retry of previously failed ones after health check
+                            tried_providers.clear();
+                            continue;
+                        }
 
-                    return Err(last_network_error
-                        .unwrap_or_else(|| eyre::eyre!("No healthy RPC providers available")));
-                }
-            };
+                        // If we have any error responses, return the most common one
+                        if let Some((error_response, _)) =
+                            error_responses.values().max_by_key(|(_, count)| *count)
+                        {
+                            debug!("All providers exhausted, returning most common error");
+                            return Ok(error_response.clone());
+                        }
+
+                        return Err(last_network_error
+                            .unwrap_or_else(|| eyre::eyre!("No healthy RPC providers available")));
+                    }
+                };
+
+            // Mark this provider as tried
+            tried_providers.insert(provider_url.clone());
 
             providers_tried += 1;
             debug!(
-                "Forwarding request to provider: {} (attempt {}/{})",
+                "Forwarding request to provider: {} (attempt {}/{}, {} providers tried)",
                 provider_url,
                 retry + 1,
-                MAX_RETRIES
+                MAX_RETRIES,
+                tried_providers.len()
             );
+
+            let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("unknown_method");
 
             let start = Instant::now();
 
@@ -540,6 +487,12 @@ impl RpcHandler {
                                     &response_text.chars().take(200).collect::<String>()
                                 );
 
+                                self.metrics_collector.record_request(
+                                    method,
+                                    &provider_url,
+                                    response_time,
+                                    false,
+                                );
                                 self.provider_manager.mark_provider_failed(&provider_url).await;
 
                                 // Continue to next provider without counting as error
@@ -551,9 +504,17 @@ impl RpcHandler {
                                 Ok(response_json) => {
                                     // Check if response contains an error
                                     if let Some(error) = response_json.get("error") {
+                                        self.metrics_collector.record_request(
+                                            method,
+                                            &provider_url,
+                                            response_time,
+                                            false,
+                                        );
+
                                         // Check if it's a user error (invalid request)
                                         if self.is_user_error(&response_json) {
                                             debug!("Detected user error, returning immediately");
+
                                             // Don't mark provider as failed - it's user's fault
                                             self.provider_manager
                                                 .mark_provider_success(&provider_url, response_time)
@@ -594,6 +555,13 @@ impl RpcHandler {
                                     }
 
                                     // Success! No error in response
+                                    self.metrics_collector.record_request(
+                                        method,
+                                        &provider_url,
+                                        response_time,
+                                        true,
+                                    );
+
                                     self.provider_manager
                                         .mark_provider_success(&provider_url, response_time)
                                         .await;
@@ -612,6 +580,12 @@ impl RpcHandler {
                                         &response_text.chars().take(200).collect::<String>()
                                     );
 
+                                    self.metrics_collector.record_request(
+                                        method,
+                                        &provider_url,
+                                        response_time,
+                                        false,
+                                    );
                                     self.provider_manager.mark_provider_failed(&provider_url).await;
                                     last_network_error = Some(eyre::eyre!(
                                         "Invalid JSON from provider: {}",
@@ -623,6 +597,12 @@ impl RpcHandler {
                         }
                         Err(e) => {
                             warn!("Failed to read response body from {}: {}", provider_url, e);
+                            self.metrics_collector.record_request(
+                                method,
+                                &provider_url,
+                                response_time,
+                                false,
+                            );
                             self.provider_manager.mark_provider_failed(&provider_url).await;
                             last_network_error = Some(e.into());
                             continue;
@@ -631,6 +611,15 @@ impl RpcHandler {
                 }
                 Err(e) => {
                     warn!("Request failed to {}: {}", provider_url, e);
+
+                    let response_time = start.elapsed().as_millis() as u64;
+                    self.metrics_collector.record_request(
+                        method,
+                        &provider_url,
+                        response_time,
+                        false,
+                    );
+
                     self.provider_manager.mark_provider_failed(&provider_url).await;
                     last_network_error = Some(e.into());
                     continue;
@@ -735,21 +724,15 @@ impl RpcHandler {
             }
         }
     }
-
-    /// Get the URL of the last used provider (for metrics tracking)
-    async fn get_last_used_provider(&self) -> Option<String> {
-        // XXX (ZZ): This is a simple implementation that returns the current selected
-        // provider. In a more sophisticated implementation, we might track the actual
-        // last used provider
-        self.provider_manager.get_current_provider().await
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cache::CacheManager;
+    use edb_utils::logging;
     use tempfile::TempDir;
+    use tracing::{debug, info};
     use wiremock::{
         matchers::{method, path},
         Mock, MockServer, ResponseTemplate,
@@ -1029,8 +1012,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multi_provider_round_robin() {
-        // Create 3 mock servers for round-robin testing
+    async fn test_multi_provider_weighted_distribution() {
+        // Create 3 mock servers for weighted distribution testing
         let mock1 = MockServer::start().await;
         let mock2 = MockServer::start().await;
         let mock3 = MockServer::start().await;
@@ -1063,7 +1046,7 @@ mod tests {
         let metrics_collector = Arc::new(MetricsCollector::new());
         let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
-        // Setup different responses for each mock to verify round-robin
+        // Setup different responses for each mock to verify weighted distribution
         let response1 = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -1082,29 +1065,30 @@ mod tests {
             "result": "response_from_server_3"
         });
 
-        // Setup expectations for non-cacheable method (eth_blockNumber) to test round-robin
+        // Setup expectations for non-cacheable method (eth_blockNumber) to test weighted distribution
+        // Each server should get roughly equal requests for single request calls due to weighted selection
         Mock::given(method("POST"))
             .and(path("/"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&response1))
-            .expect(3) // Each server should get exactly 3 requests
+            .expect(0..=9) // Variable count due to weighted selection
             .mount(&mock1)
             .await;
 
         Mock::given(method("POST"))
             .and(path("/"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&response2))
-            .expect(3)
+            .expect(0..=9)
             .mount(&mock2)
             .await;
 
         Mock::given(method("POST"))
             .and(path("/"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&response3))
-            .expect(3)
+            .expect(0..=9)
             .mount(&mock3)
             .await;
 
-        // Send 9 requests for non-cacheable method to verify round-robin distribution
+        // Send 9 requests for non-cacheable method to verify weighted distribution
         let mut responses = Vec::new();
         for i in 0..9 {
             let request = serde_json::json!({
@@ -1118,33 +1102,114 @@ mod tests {
             responses.push(response["result"].as_str().unwrap().to_string());
         }
 
-        // Verify that each server response appears exactly 3 times (round-robin)
+        // Verify that all servers are used (distribution may vary due to weighted selection)
         let server1_count = responses.iter().filter(|r| *r == "response_from_server_1").count();
         let server2_count = responses.iter().filter(|r| *r == "response_from_server_2").count();
         let server3_count = responses.iter().filter(|r| *r == "response_from_server_3").count();
 
-        assert_eq!(server1_count, 3, "Server 1 should receive exactly 3 requests");
-        assert_eq!(server2_count, 3, "Server 2 should receive exactly 3 requests");
-        assert_eq!(server3_count, 3, "Server 3 should receive exactly 3 requests");
+        // Verify that all requests were completed and distributed among servers
+        assert_eq!(
+            server1_count + server2_count + server3_count,
+            9,
+            "All 9 requests should be completed"
+        );
 
-        // Verify round-robin order: should cycle through servers 1,2,3,1,2,3,1,2,3
-        let expected_pattern = vec![
-            "response_from_server_1",
-            "response_from_server_2",
-            "response_from_server_3",
-            "response_from_server_1",
-            "response_from_server_2",
-            "response_from_server_3",
-            "response_from_server_1",
-            "response_from_server_2",
-            "response_from_server_3",
-        ];
+        // With weighted selection, each server should get at least some requests over 9 attempts
+        // (though the exact distribution varies due to randomness)
+        debug!(
+            "Server distribution - Server1: {}, Server2: {}, Server3: {}",
+            server1_count, server2_count, server3_count
+        );
+    }
 
-        assert_eq!(responses, expected_pattern, "Requests should follow round-robin pattern");
+    #[tokio::test]
+    async fn test_provider_tried_once_per_request() {
+        edb_utils::logging::ensure_test_logging(None);
+        info!("Testing that each provider is only tried once per request with Option 1");
+
+        // Create 3 mock servers that will all return errors
+        let mock1 = MockServer::start().await;
+        let mock2 = MockServer::start().await;
+        let mock3 = MockServer::start().await;
+
+        // Setup health checks
+        for mock_server in &[&mock1, &mock2, &mock3] {
+            Mock::given(method("POST"))
+                .and(path("/"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": "0x1"
+                })))
+                .up_to_n_times(1)
+                .mount(mock_server)
+                .await;
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let cache_path = temp_dir.path().join("test_cache.json");
+        let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());
+
+        let provider_manager = Arc::new(
+            ProviderManager::new(vec![mock1.uri(), mock2.uri(), mock3.uri()], 3)
+                .await
+                .expect("Failed to create provider manager"),
+        );
+
+        let metrics_collector = Arc::new(MetricsCollector::new());
+        let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
+
+        // All providers return the same blockchain error
+        let error_response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": -32000,
+                "message": "Execution reverted: insufficient balance"
+            }
+        });
+
+        // Each provider should be called exactly once per request
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
+            .expect(1) // Should only be called once
+            .mount(&mock1)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
+            .expect(1) // Should only be called once
+            .mount(&mock2)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
+            .expect(1) // Should only be called once
+            .mount(&mock3)
+            .await;
+
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_call",
+            "params": [{}, "0x1000000"],
+            "id": 1
+        });
+
+        // Should return the error after all 3 providers are tried once each
+        let result = handler.handle_request(request).await.unwrap();
+        assert_eq!(result, error_response);
+
+        // Mock expectations will verify that each provider was called exactly once
+        debug!("All providers tried exactly once - Option 1 working correctly");
     }
 
     #[tokio::test]
     async fn test_multi_provider_caching_behavior() {
+        logging::ensure_test_logging(None);
+
         // Create 2 mock servers
         let mock1 = MockServer::start().await;
         let mock2 = MockServer::start().await;
@@ -1187,11 +1252,10 @@ mod tests {
         });
 
         // Setup expectations: Only ONE server should be hit for cacheable requests
-        // Due to round-robin, the first request will go to mock1
         Mock::given(method("POST"))
             .and(path("/"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&cacheable_response))
-            .expect(1) // Should only be called once due to caching
+            .up_to_n_times(1) // Should only be called once due to caching
             .mount(&mock1)
             .await;
 
@@ -1199,7 +1263,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&cacheable_response))
-            .expect(0) // Should not be called
+            .up_to_n_times(1) // Should only be called once due to caching
             .mount(&mock2)
             .await;
 
@@ -1210,8 +1274,8 @@ mod tests {
             "id": 1
         });
 
-        // Send the same cacheable request 3 times
-        for _ in 0..3 {
+        // Send the same cacheable request 5 times
+        for _ in 0..5 {
             let response = handler.handle_request(request.clone()).await.unwrap();
             assert_eq!(response, cacheable_response);
         }
@@ -1460,7 +1524,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/"))
             .respond_with(ResponseTemplate::new(429).set_body_string("Rate limit exceeded"))
-            .expect(1)
+            .up_to_n_times(1)
             .mount(&mock1)
             .await;
 

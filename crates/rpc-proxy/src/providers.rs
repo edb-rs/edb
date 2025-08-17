@@ -1,7 +1,9 @@
 //! Multi-provider RPC management with health checking and load balancing
 
 use eyre::Result;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -78,6 +80,29 @@ pub struct ProviderManager {
     client: reqwest::Client,
     /// Maximum consecutive failures before marking unhealthy
     max_failures: u32,
+}
+
+/// Calculate performance tier based on response time (100ms buckets)
+/// Lower tier numbers indicate better performance
+fn get_performance_tier(response_time_ms: u64) -> u8 {
+    match response_time_ms / 100 {
+        0..=1 => 1, // 0-199ms: Tier 1 (fastest)
+        2..=3 => 2, // 200-399ms: Tier 2
+        4..=5 => 3, // 400-599ms: Tier 3
+        _ => 4,     // 600ms+: Tier 4 (slowest)
+    }
+}
+
+/// Calculate weight for each performance tier
+/// Higher weight means more likely to be selected
+fn get_tier_weight(tier: u8) -> u32 {
+    match tier {
+        1 => 100, // Fast providers get 100% weight
+        2 => 60,  // Medium providers get 60% weight
+        3 => 30,  // Slow providers get 30% weight
+        4 => 10,  // Very slow providers get 10% weight
+        _ => 1,   // Fallback for unknown tiers
+    }
 }
 
 impl ProviderManager {
@@ -157,7 +182,109 @@ impl ProviderManager {
         }
     }
 
+    /// Get a weighted random provider that hasn't been tried yet
+    /// Only considers healthy providers not in the exclusion set
+    pub async fn get_weighted_provider_excluding(
+        &self,
+        tried_providers: &HashSet<String>,
+    ) -> Option<String> {
+        let providers = self.providers.read().await;
+        let available_providers: Vec<_> = providers
+            .iter()
+            .filter(|p| p.is_healthy && !tried_providers.contains(&p.url))
+            .collect();
+
+        if available_providers.is_empty() {
+            return None;
+        }
+
+        // If only one available provider, return it
+        if available_providers.len() == 1 {
+            return Some(available_providers[0].url.clone());
+        }
+
+        // Calculate weights for each available provider
+        let mut weighted_providers = Vec::new();
+        let mut total_weight = 0u32;
+
+        for provider in &available_providers {
+            // Use response time if available, otherwise assume medium performance
+            let response_time = provider.response_time_ms.unwrap_or(300); // Default to 300ms
+            let tier = get_performance_tier(response_time);
+            let weight = get_tier_weight(tier);
+
+            total_weight += weight;
+            weighted_providers.push((provider, weight));
+        }
+
+        // Generate random number for weighted selection
+        let mut rng = rand::thread_rng();
+        let random_weight = rng.gen_range(0..total_weight);
+
+        // Find the provider corresponding to the random weight
+        let mut current_weight = 0u32;
+        for (provider, weight) in weighted_providers {
+            current_weight += weight;
+            if random_weight < current_weight {
+                return Some(provider.url.clone());
+            }
+        }
+
+        // Fallback to first available provider (should not reach here)
+        Some(available_providers[0].url.clone())
+    }
+
+    /// Get a weighted random provider based on response time
+    /// Only considers healthy providers
+    /// DEPRECATED: Use get_weighted_provider_excluding instead
+    #[allow(dead_code)]
+    async fn get_weighted_provider(&self) -> Option<String> {
+        let providers = self.providers.read().await;
+        let healthy_providers: Vec<_> = providers.iter().filter(|p| p.is_healthy).collect();
+
+        if healthy_providers.is_empty() {
+            return None;
+        }
+
+        // If only one healthy provider, return it
+        if healthy_providers.len() == 1 {
+            return Some(healthy_providers[0].url.clone());
+        }
+
+        // Calculate weights for each healthy provider
+        let mut weighted_providers = Vec::new();
+        let mut total_weight = 0u32;
+
+        for provider in &healthy_providers {
+            // Use response time if available, otherwise assume medium performance
+            let response_time = provider.response_time_ms.unwrap_or(300); // Default to 300ms
+            let tier = get_performance_tier(response_time);
+            let weight = get_tier_weight(tier);
+
+            total_weight += weight;
+            weighted_providers.push((provider, weight));
+        }
+
+        // Generate random number for weighted selection
+        let mut rng = rand::thread_rng();
+        let random_weight = rng.gen_range(0..total_weight);
+
+        // Find the provider corresponding to the random weight
+        let mut current_weight = 0u32;
+        for (provider, weight) in weighted_providers {
+            current_weight += weight;
+            if random_weight < current_weight {
+                return Some(provider.url.clone());
+            }
+        }
+
+        // Fallback to first healthy provider (should not reach here)
+        Some(healthy_providers[0].url.clone())
+    }
+
     /// Get the next healthy provider using round-robin
+    /// DEPRECATED: Use get_weighted_provider_excluding instead
+    #[allow(dead_code)]
     pub async fn get_next_provider(&self) -> Option<String> {
         let providers = self.providers.read().await;
         let healthy_providers: Vec<_> = providers.iter().filter(|p| p.is_healthy).collect();
@@ -169,20 +296,6 @@ impl ProviderManager {
         // Round-robin selection
         let index =
             self.round_robin_counter.fetch_add(1, Ordering::Relaxed) % healthy_providers.len();
-        Some(healthy_providers[index].url.clone())
-    }
-
-    /// Get the current healthy provider using round-robin
-    pub async fn get_current_provider(&self) -> Option<String> {
-        let providers = self.providers.read().await;
-        let healthy_providers: Vec<_> = providers.iter().filter(|p| p.is_healthy).collect();
-
-        if healthy_providers.is_empty() {
-            return None;
-        }
-
-        // Round-robin selection
-        let index = self.round_robin_counter.load(Ordering::Relaxed) % healthy_providers.len();
         Some(healthy_providers[index].url.clone())
     }
 
@@ -255,23 +368,6 @@ impl ProviderManager {
     pub async fn healthy_provider_count(&self) -> usize {
         let providers = self.providers.read().await;
         providers.iter().filter(|p| p.is_healthy).count()
-    }
-
-    /// Try to get a working provider, with retries
-    pub async fn get_working_provider(&self, max_retries: usize) -> Option<String> {
-        for _ in 0..max_retries {
-            if let Some(provider) = self.get_next_provider().await {
-                return Some(provider);
-            }
-
-            // If no healthy providers, try health checking
-            self.health_check_all().await;
-
-            // Wait a bit before retry
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-
-        None
     }
 }
 
@@ -385,5 +481,62 @@ mod tests {
 
         manager.mark_provider_failed(&mock.uri()).await;
         assert_eq!(manager.healthy_provider_count().await, 0); // Unhealthy after 2 failures
+    }
+
+    #[tokio::test]
+    async fn test_weighted_provider_selection() {
+        edb_utils::logging::ensure_test_logging(None);
+        debug!("Testing weighted provider selection based on response time");
+
+        // Start 3 healthy mock servers with different response times
+        let mocks =
+            vec![MockServer::start().await, MockServer::start().await, MockServer::start().await];
+
+        for mock in &mocks {
+            Mock::given(method("POST"))
+                .and(path("/"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": "0x1234567"
+                })))
+                .mount(mock)
+                .await;
+        }
+
+        let urls: Vec<String> = mocks.iter().map(|m| m.uri()).collect();
+        let manager = ProviderManager::new(urls.clone(), 3).await.unwrap();
+
+        // Simulate different response times for providers
+        manager.mark_provider_success(&urls[0], 50).await; // Fast: Tier 1 (100 weight)
+        manager.mark_provider_success(&urls[1], 250).await; // Medium: Tier 2 (60 weight)
+        manager.mark_provider_success(&urls[2], 500).await; // Slow: Tier 3 (30 weight)
+
+        // Test weighted selection multiple times
+        let mut selections = std::collections::HashMap::new();
+        for _ in 0..100 {
+            if let Some(provider) = manager.get_weighted_provider().await {
+                *selections.entry(provider).or_insert(0) += 1;
+            }
+        }
+
+        // Verify all providers were selected
+        assert_eq!(selections.len(), 3);
+
+        // Fast provider should be selected most often due to higher weight
+        let fast_count = selections.get(&urls[0]).unwrap_or(&0);
+        let medium_count = selections.get(&urls[1]).unwrap_or(&0);
+        let slow_count = selections.get(&urls[2]).unwrap_or(&0);
+
+        debug!(
+            "Selection counts - Fast: {}, Medium: {}, Slow: {}",
+            fast_count, medium_count, slow_count
+        );
+
+        // Fast provider should have more selections than slow provider
+        assert!(
+            fast_count > slow_count,
+            "Fast provider should be selected more often than slow provider"
+        );
     }
 }

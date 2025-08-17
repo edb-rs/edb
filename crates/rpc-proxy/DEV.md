@@ -2,19 +2,21 @@
 
 This document provides deep technical insights into the RPC Proxy architecture, design decisions, and implementation details for developers working on or extending the codebase.
 
+_This document is created by Claude with ❤️_.
+
 ## 📋 Table of Contents
 
 - [Architecture Overview](#architecture-overview)
-- [Process Model](#process-model)
-- [Concurrency Design](#concurrency-design)
+- [Process Model & Concurrency](#process-model--concurrency)
 - [Module Breakdown](#module-breakdown)
 - [Design Patterns](#design-patterns)
+- [Intelligent Caching System](#intelligent-caching-system)
+- [Weighted Provider Management](#weighted-provider-management)
 - [Error Handling Strategy](#error-handling-strategy)
-- [Caching Algorithm](#caching-algorithm)
-- [Provider Management](#provider-management)
+- [Metrics & Observability](#metrics--observability)
 - [Testing Strategy](#testing-strategy)
 - [Performance Considerations](#performance-considerations)
-- [Future Architecture](#future-architecture)
+- [Extension Points](#extension-points)
 
 ## 🏗️ Architecture Overview
 
@@ -26,6 +28,7 @@ This document provides deep technical insights into the RPC Proxy architecture, 
 4. **Zero-Copy Where Possible**: Minimize allocations in hot paths
 5. **Configuration-Driven**: Behavior controlled through builder pattern
 6. **Testability**: Each component can be tested in isolation
+7. **Observability**: Comprehensive metrics and real-time monitoring
 
 ### Layered Architecture
 
@@ -39,14 +42,16 @@ This document provides deep technical insights into the RPC Proxy architecture, 
 │                     Application Layer                           │
 │  ├─ ProxyServer (orchestrates all components)                   │
 │  ├─ ProxyServerBuilder (fluent configuration API)               │
+│  ├─ TUI Application (real-time monitoring)                      │
 │  └─ Background task coordination                                │
 ├─────────────────────────────────────────────────────────────────┤
 │                       Domain Layer                              │
 │  ├─ RpcHandler (request routing and caching logic)              │
 │  ├─ CacheManager (LRU + persistence)                            │
-│  ├─ ProviderManager (health monitoring + load balancing)        │
+│  ├─ ProviderManager (weighted selection + health monitoring)    │
 │  ├─ EDBRegistry (instance lifecycle management)                 │
-│  └─ HealthService (service monitoring)                          │
+│  ├─ HealthService (service monitoring)                          │
+│  └─ MetricsCollector (performance tracking)                     │
 ├─────────────────────────────────────────────────────────────────┤
 │                    Infrastructure Layer                         │
 │  ├─ HTTP Client (reqwest for upstream requests)                 │
@@ -56,7 +61,7 @@ This document provides deep technical insights into the RPC Proxy architecture, 
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## ⚙️ Process Model
+## ⚙️ Process Model & Concurrency
 
 ### Main Process Lifecycle
 
@@ -66,21 +71,33 @@ async fn main() -> Result<()> {
     // 1. Sequential Initialization Phase
     init_logging();
     let args = parse_cli_args();
-    let proxy = build_proxy_server(args).await?;
     
-    // 2. Concurrent Execution Phase
-    tokio::select! {
-        // Main HTTP server (always runs)
-        result = proxy.serve(addr) => result?,
-        
-        // Graceful shutdown signal
-        _ = tokio::signal::ctrl_c() => {
-            info!("Received shutdown signal");
+    match args.command {
+        Commands::Server(config) => {
+            let proxy = build_proxy_server(config).await?;
+            
+            // 2. Concurrent Execution Phase
+            tokio::select! {
+                // Main HTTP server (always runs)
+                result = proxy.serve(addr) => result?,
+                
+                // Optional TUI monitoring
+                _ = run_tui_if_enabled() => {},
+                
+                // Graceful shutdown signal
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received shutdown signal");
+                }
+            }
+            
+            // 3. Cleanup Phase
+            proxy.cache_manager().save_to_disk().await?;
+        }
+        Commands::Monitor(url) => {
+            run_monitoring_tui(url).await?;
         }
     }
     
-    // 3. Cleanup Phase
-    cache_manager.save_to_disk().await?;
     Ok(())
 }
 ```
@@ -135,16 +152,6 @@ impl ProxyServer {
 }
 ```
 
-### Task Communication
-
-Tasks communicate through:
-1. **Shared State**: `Arc<RwLock<T>>` for thread-safe shared data
-2. **Broadcast Channels**: For shutdown coordination
-3. **Atomic Counters**: For lock-free round-robin selection
-4. **No Direct Task Communication**: Each task is independent
-
-## 🔄 Concurrency Design
-
 ### Thread Safety Model
 
 ```rust
@@ -155,11 +162,12 @@ Arc<RwLock<HashMap<u32, EDBInstance>>>       // EDB instance registry
 
 // Lock-free atomic operations
 AtomicUsize                                   // Round-robin counter
-AtomicBool                                    // Shutdown flags
+AtomicU64                                     // Metrics counters
 
 // Immutable shared data
 Arc<CacheManager>                             // Shared ownership
 Arc<ProviderManager>                          // Shared ownership
+Arc<MetricsCollector>                         // Shared ownership
 ```
 
 ### Lock Hierarchy and Deadlock Prevention
@@ -169,56 +177,22 @@ Arc<ProviderManager>                          // Shared ownership
 2. Short-lived locks only (no I/O while holding locks)
 3. Clone data out of locks for expensive operations
 
-**Example Safe Pattern**:
-```rust
-async fn handle_request(&self, request: Value) -> Result<Value> {
-    // 1. Quick cache check (short lock)
-    let cache_key = self.generate_cache_key(&request);
-    if let Some(cached) = self.cache_manager.get(&cache_key).await {
-        return Ok(cached);
-    }
-    
-    // 2. Provider selection (short lock)
-    let provider_url = self.provider_manager.get_next_provider().await?;
-    
-    // 3. Network I/O (no locks held)
-    let response = self.forward_to_provider(&provider_url, &request).await?;
-    
-    // 4. Cache update (short lock)
-    if response.get("error").is_none() {
-        self.cache_manager.set(cache_key, response.clone()).await;
-    }
-    
-    Ok(response)
-}
-```
-
-### Reader-Writer Lock Usage
-
-**High-Read Scenarios** (RwLock appropriate):
-- Cache lookups (frequent reads, infrequent writes)
-- Provider health status (frequent reads, periodic health updates)
-- EDB instance registry (frequent reads, occasional registration)
-
-**Write-Heavy Scenarios** (Mutex would be better, but we don't have any):
-- All our use cases are read-heavy, justifying RwLock usage
-
 ## 📦 Module Breakdown
 
-### 1. `main.rs` - CLI Interface
+### 1. `main.rs` - CLI Interface & Application Entry
 
 **Responsibilities**:
-- Command-line argument parsing with `clap`
-- Logging initialization
-- Builder pattern orchestration
+- Command-line argument parsing with `clap` using derive macros
+- Logging initialization with `tracing`
+- Application mode selection (server vs monitor)
 - Signal handling and graceful shutdown
 
 **Key Design Decisions**:
 - Uses `tokio::select!` for concurrent signal handling
-- Explicit cache save on shutdown to prevent data loss
-- Comprehensive CLI validation before server start
+- Subcommand pattern for different modes (server/monitor)
+- Comprehensive CLI validation before application start
 
-### 2. `proxy.rs` - Server Orchestration
+### 2. `proxy.rs` - Server Orchestration & HTTP Layer
 
 **Responsibilities**:
 - Builder pattern implementation for configuration
@@ -230,8 +204,9 @@ async fn handle_request(&self, request: Value) -> Result<Value> {
 ```rust
 // Builder pattern with fluent API
 ProxyServerBuilder::new()
-    .max_cache_items(50000)
+    .max_cache_items(500000)
     .grace_period(300)
+    .health_check_interval(30)
     .build().await?
 
 // Service composition
@@ -239,6 +214,7 @@ struct ProxyServer {
     rpc_handler: Arc<RpcHandler>,        // Core request handling
     registry: Arc<EDBRegistry>,          // Instance management
     health_service: Arc<HealthService>,  // Health endpoints
+    metrics_collector: Arc<MetricsCollector>, // Performance tracking
     shutdown_tx: broadcast::Sender<()>,  // Shutdown coordination
 }
 ```
@@ -255,8 +231,9 @@ let app = Router::new()
 
 **Responsibilities**:
 - RPC method analysis and caching decisions
-- Request forwarding with provider failover
-- Error detection and classification
+- Request forwarding with weighted provider selection
+- Error detection, classification, and deduplication
+- Provider exclusion tracking per request
 - Response validation for debug/trace methods
 
 **Core Algorithm**:
@@ -277,11 +254,12 @@ async fn handle_request(&self, request: Value) -> Result<Value> {
     // Step 3: Cache lookup
     let cache_key = self.generate_cache_key(&request);
     if let Some(cached) = self.cache_manager.get(&cache_key).await {
+        self.metrics_collector.record_cache_hit(method, response_time);
         return Ok(cached);
     }
     
     // Step 4: Provider forwarding with error handling
-    let response = self.forward_request_with_retry(&request).await?;
+    let response = self.forward_request(&request).await?;
     
     // Step 5: Response validation and caching
     if self.is_valid_response(&response, &method) {
@@ -292,39 +270,56 @@ async fn handle_request(&self, request: Value) -> Result<Value> {
 }
 ```
 
-**Error Classification System**:
+**Provider Exclusion Algorithm**:
 ```rust
-enum ErrorType {
-    RateLimit,      // Retry with different provider
-    UserError,      // Return immediately, don't retry
-    ProviderError,  // Mark provider as failed, retry
-    NetworkError,   // Retry with backoff
+async fn forward_request(&self, request: &Value) -> Result<Value> {
+    let mut tried_providers = HashSet::new();
+    let mut error_responses: HashMap<u64, (Value, usize)> = HashMap::new();
+    
+    for retry in 0..MAX_RETRIES {
+        // Get a provider we haven't tried yet
+        let provider_url = match self.provider_manager
+            .get_weighted_provider_excluding(&tried_providers).await 
+        {
+            Some(url) => url,
+            None => {
+                // All providers tried, trigger health check and retry
+                self.provider_manager.health_check_all().await;
+                tried_providers.clear(); // Allow retry after health check
+                continue;
+            }
+        };
+        
+        tried_providers.insert(provider_url.clone());
+        
+        // Try request with this provider...
+    }
 }
 ```
 
-### 4. `cache.rs` - Intelligent Caching
+### 4. `cache.rs` - Intelligent Caching System
 
 **Responsibilities**:
-- In-memory LRU cache management
+- In-memory LRU cache management with `accessed_at` timestamps
 - Atomic disk persistence with merge logic
-- Concurrent access coordination
-- Cache size management and eviction
+- Concurrent access coordination with RwLock
+- Cache size management and batch eviction
 
 **LRU Implementation**:
 ```rust
 // Timestamp-based LRU (simpler than linked list)
 struct CacheEntry {
     data: Value,
-    created_at: u64,  // Unix timestamp for LRU ordering
+    accessed_at: u64,  // Unix timestamp for LRU ordering
 }
 
-// Eviction algorithm
+// Eviction algorithm - batch eviction for performance
 async fn evict_oldest(&self, cache: &mut HashMap<String, CacheEntry>) {
     let to_remove = (cache.len() / 10).max(1);  // Remove 10% at a time
     
     // Sort by timestamp, remove oldest entries
     let mut entries: Vec<_> = cache.iter()
-        .map(|(key, entry)| (key.clone(), entry.created_at))
+        .map(|(key, entry)| (key.clone(), entry.accessed_at))
         .collect();
     entries.sort_by_key(|(_, timestamp)| *timestamp);
     
@@ -340,7 +335,7 @@ async fn save_to_disk(&self) -> Result<()> {
     // 1. Load existing cache (if any)
     let existing_cache = self.load_existing_cache()?;
     
-    // 2. Merge with in-memory cache (newest wins)
+    // 2. Merge with in-memory cache (newest wins by timestamp)
     let merged_cache = self.merge_caches(existing_cache, current_cache);
     
     // 3. Apply size management rules
@@ -355,79 +350,167 @@ async fn save_to_disk(&self) -> Result<()> {
 }
 ```
 
-### 5. `providers.rs` - Multi-Provider Management
+### 5. `providers.rs` - Weighted Provider Management
 
 **Responsibilities**:
 - Provider health monitoring with configurable thresholds
-- Round-robin load balancing
+- Weighted provider selection based on response time performance tiers
 - Failure detection and automatic recovery
-- Response time tracking
+- Provider exclusion for unique-per-request selection
 
-**Provider Health State Machine**:
-```
-Healthy ──failure──> Consecutive Failures (1)
-   ▲                           │
-   │                          failure
-   │                           ▼
-   │                  Consecutive Failures (2)
-   │                           │
-   │                          failure
-   │                           ▼
-   └──success─────── Unhealthy (max_failures reached)
-```
-
-**Round-Robin Implementation**:
+**Performance Tier System**:
 ```rust
-// Lock-free atomic counter for performance
-pub async fn get_next_provider(&self) -> Option<String> {
-    let providers = self.providers.read().await;
-    let healthy: Vec<_> = providers.iter()
-        .filter(|p| p.is_healthy)
-        .collect();
-    
-    if healthy.is_empty() { return None; }
-    
-    // Atomic increment for thread-safe round-robin
-    let index = self.round_robin_counter
-        .fetch_add(1, Ordering::Relaxed) % healthy.len();
-    
-    Some(healthy[index].url.clone())
+fn get_performance_tier(response_time_ms: u64) -> u8 {
+    match response_time_ms / 100 {
+        0..=1 => 1,    // 0-199ms: Tier 1 (fastest)
+        2..=3 => 2,    // 200-399ms: Tier 2 
+        4..=5 => 3,    // 400-599ms: Tier 3
+        _ => 4,        // 600ms+: Tier 4 (slowest)
+    }
+}
+
+fn get_tier_weight(tier: u8) -> u32 {
+    match tier {
+        1 => 100,  // Fast providers get 100% weight
+        2 => 60,   // Medium providers get 60% weight  
+        3 => 30,   // Slow providers get 30% weight
+        4 => 10,   // Very slow providers get 10% weight
+        _ => 1,    // Fallback for unknown tiers
+    }
 }
 ```
 
-### 6. `registry.rs` - Lifecycle Management
+**Weighted Selection with Exclusion**:
+```rust
+pub async fn get_weighted_provider_excluding(
+    &self,
+    tried_providers: &HashSet<String>,
+) -> Option<String> {
+    let providers = self.providers.read().await;
+    let available_providers: Vec<_> = providers.iter()
+        .filter(|p| p.is_healthy && !tried_providers.contains(&p.url))
+        .collect();
+
+    if available_providers.is_empty() {
+        return None;
+    }
+
+    // Calculate weights for available providers only
+    let mut weighted_providers = Vec::new();
+    let mut total_weight = 0u32;
+
+    for provider in &available_providers {
+        let response_time = provider.response_time_ms.unwrap_or(300);
+        let tier = get_performance_tier(response_time);
+        let weight = get_tier_weight(tier);
+        
+        total_weight += weight;
+        weighted_providers.push((provider, weight));
+    }
+
+    // Weighted random selection from available providers
+    let random_weight = rng.gen_range(0..total_weight);
+    // ... selection logic
+}
+```
+
+### 6. `metrics.rs` - Performance Tracking & Analytics
 
 **Responsibilities**:
-- EDB instance registration and heartbeat tracking
-- Process liveness verification (cross-platform)
-- Grace period management for auto-shutdown
-- Instance cleanup on process termination
+- Real-time metrics collection for cache, providers, and requests
+- Thread-safe counters using atomic operations
+- Historical data tracking with configurable limits
+- Method-level cache performance analysis
 
-**Cross-Platform Process Checking**:
+**Metrics Structure**:
 ```rust
-fn is_process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        // Use kill -0 (doesn't actually kill, just checks existence)
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-    }
+pub struct MetricsCollector {
+    // Cache metrics
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
     
-    #[cfg(windows)]
-    {
-        // Use tasklist to check process existence
-        Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {}", pid)])
-            .output()
-            .map(|output| {
-                output.status.success() && 
-                String::from_utf8_lossy(&output.stdout)
-                    .contains(&pid.to_string())
-            })
-            .unwrap_or(false)
+    // Request tracking
+    total_requests: AtomicU64,
+    request_timestamps: Arc<RwLock<VecDeque<u64>>>,
+    
+    // Provider usage
+    provider_usage: Arc<RwLock<HashMap<String, ProviderUsage>>>,
+    
+    // Method-specific statistics
+    method_stats: Arc<RwLock<HashMap<String, MethodStats>>>,
+    
+    // Error tracking
+    error_counts: Arc<RwLock<HashMap<ErrorType, u64>>>,
+}
+```
+
+**Thread-Safe Metric Updates**:
+```rust
+pub fn record_cache_hit(&self, method: &str, response_time_ms: u64) {
+    self.cache_hits.fetch_add(1, Ordering::Relaxed);
+    
+    // Update method-specific stats
+    let mut method_stats = self.method_stats.write().await;
+    let stats = method_stats.entry(method.to_string()).or_default();
+    stats.hits += 1;
+    stats.update_avg_response_time(response_time_ms);
+}
+
+pub fn record_request(&self, method: &str, provider_url: &str, 
+                      response_time_ms: u64, success: bool) {
+    // All forwarded requests count as cache misses
+    self.cache_misses.fetch_add(1, Ordering::Relaxed);
+    
+    // Track provider usage
+    let mut provider_usage = self.provider_usage.write().await;
+    let usage = provider_usage.entry(provider_url.to_string()).or_default();
+    usage.record_request(response_time_ms, success);
+    
+    // Update method stats
+    let mut method_stats = self.method_stats.write().await;
+    let stats = method_stats.entry(method.to_string()).or_default();
+    stats.misses += 1;
+    stats.update_avg_response_time(response_time_ms);
+}
+```
+
+### 7. `tui/` - Real-Time Monitoring Interface
+
+**Responsibilities**:
+- Real-time dashboard for proxy monitoring
+- Interactive navigation between different metric views
+- Live charts and provider health visualization
+- Remote proxy client for fetching metrics
+
+**Architecture**:
+```rust
+// tui/app.rs - Application state management
+pub struct App {
+    pub current_tab: Tab,
+    pub proxy_client: ProxyClient,
+    pub cache_stats: Option<CacheStats>,
+    pub provider_info: Vec<ProviderInfo>,
+    pub active_instances: Vec<EDBInstance>,
+    pub cache_metrics: Option<CacheMetrics>,
+    pub should_refresh: bool,
+}
+
+// tui/remote.rs - Remote proxy communication
+pub struct ProxyClient {
+    base_url: String,
+    client: reqwest::Client,
+}
+
+impl ProxyClient {
+    pub async fn get_cache_stats(&self) -> Result<CacheStats> {
+        let response = self.client.post(&format!("{}/", self.base_url))
+            .json(&json!({
+                "jsonrpc": "2.0",
+                "method": "edb_cache_stats",
+                "id": 1
+            }))
+            .send().await?;
+        // ... parse response
     }
 }
 ```
@@ -442,7 +525,7 @@ fn is_process_alive(pid: u32) -> bool {
 ```rust
 pub struct ProxyServerBuilder {
     rpc_urls: Option<Vec<String>>,
-    max_cache_items: u32,        // Default: 102400
+    max_cache_items: u32,        // Default: 1024000
     cache_dir: Option<PathBuf>,  // Default: ~/.edb/cache/rpc/<chain_id>
     grace_period: u64,           // Default: 0 (no auto-shutdown)
     // ... other fields with defaults
@@ -478,28 +561,7 @@ tokio::spawn(async move {
 });
 ```
 
-### 3. Type-Safe State Management
-
-**Problem**: Need to pass multiple components to HTTP handlers.
-
-**Solution**: Wrapped state with Axum's state extraction:
-```rust
-#[derive(Clone)]
-struct AppState {
-    proxy: ProxyServer,
-}
-
-async fn handle_rpc(
-    State(state): State<AppState>,
-    Json(request): Json<Value>,
-) -> Result<Json<Value>, StatusCode> {
-    // Type-safe access to all proxy components
-    let response = state.proxy.rpc_handler.handle_request(request).await?;
-    Ok(Json(response))
-}
-```
-
-### 4. Error Type Classification
+### 3. Error Type Classification
 
 **Problem**: Different error types require different handling strategies.
 
@@ -518,58 +580,7 @@ if self.is_user_error(&response_json) {
 }
 ```
 
-## 🚨 Error Handling Strategy
-
-### Error Categorization
-
-1. **Recoverable Errors**: Retry with exponential backoff
-2. **Provider Errors**: Mark provider as failed, try alternative
-3. **User Errors**: Return immediately without retry
-4. **System Errors**: Log and degrade gracefully
-
-### Silent Failure Philosophy
-
-**Core Principle**: The proxy should never crash due to secondary failures.
-
-```rust
-// Cache save failures are logged but don't propagate
-pub async fn save_to_disk(&self) -> Result<()> {
-    match self.save_to_disk_impl().await {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            warn!("Failed to save cache: {}. In-memory cache remains available.", e);
-            Ok(()) // Silent failure - don't crash the service
-        }
-    }
-}
-```
-
-### Provider Fallback Strategy
-
-```rust
-async fn forward_request(&self, request: &Value) -> Result<Value> {
-    const MAX_RETRIES: usize = 5;
-    let mut error_responses = HashMap::new();
-    
-    for retry in 0..MAX_RETRIES {
-        match self.try_single_provider(request).await {
-            Ok(response) => return Ok(response),
-            Err(ProviderError::RateLimit) => continue,        // Try next provider
-            Err(ProviderError::UserError(resp)) => return Ok(resp), // Return immediately
-            Err(ProviderError::Network(e)) => {
-                // Track error for potential return
-                error_responses.insert(hash_error(&e), e);
-                continue;
-            }
-        }
-    }
-    
-    // Return most common error if all providers failed
-    return_most_common_error(error_responses)
-}
-```
-
-## 🧠 Caching Algorithm
+## 🧠 Intelligent Caching System
 
 ### Cache Key Generation
 
@@ -624,25 +635,284 @@ fn hash_json_value(&self, hasher: &mut DefaultHasher, value: &Value) {
 - Debug traces (after validation)
 - Log queries with specific block ranges
 
-### Cache Eviction Strategy
+### Cache Persistence Strategy
 
-**LRU with Batch Eviction**:
+**Design Goals**:
+- Atomic writes to prevent corruption
+- Merge logic for multiple proxy instances
+- Size management based on memory vs disk
+
+**Implementation**:
 ```rust
-// Instead of evicting one item at a time, evict 10% when limit reached
-// This amortizes the cost of sorting by timestamp
-async fn evict_oldest(&self, cache: &mut HashMap<String, CacheEntry>) {
-    let to_remove = (cache.len() / 10).max(1);
-    
-    // Sort entries by creation time (oldest first)
-    let mut entries: Vec<(String, u64)> = cache.iter()
-        .map(|(key, entry)| (key.clone(), entry.created_at))
-        .collect();
-    entries.sort_by_key(|(_, created_at)| *created_at);
-    
-    // Remove oldest entries
-    for (key, _) in entries.into_iter().take(to_remove) {
-        cache.remove(&key);
+async fn apply_size_management(
+    &self,
+    mut merged_cache: HashMap<String, CacheEntry>,
+    original_disk_size: usize,
+    current_memory_size: usize,
+) -> HashMap<String, CacheEntry> {
+    // Determine target size based on policy
+    let target_size = if original_disk_size >= current_memory_size {
+        // Case 1: Disk cache was larger - respect disk size, no growth
+        original_disk_size
+    } else {
+        // Case 2: Memory cache is larger - allow growth up to max_items
+        std::cmp::min(self.max_items as usize, merged_cache.len())
+    };
+
+    // Apply LRU eviction to fit target size if needed
+    if merged_cache.len() > target_size {
+        self.evict_to_size(&mut merged_cache, target_size);
     }
+    
+    merged_cache
+}
+```
+
+## 🔄 Weighted Provider Management
+
+### Performance-Based Selection
+
+The provider selection algorithm prioritizes faster providers while ensuring diversity:
+
+```rust
+pub async fn get_weighted_provider_excluding(&self, tried_providers: &HashSet<String>) -> Option<String> {
+    // 1. Filter to healthy, untried providers
+    let available_providers: Vec<_> = providers.iter()
+        .filter(|p| p.is_healthy && !tried_providers.contains(&p.url))
+        .collect();
+    
+    // 2. Calculate weights based on performance tiers
+    let mut weighted_providers = Vec::new();
+    let mut total_weight = 0u32;
+
+    for provider in &available_providers {
+        let response_time = provider.response_time_ms.unwrap_or(300);
+        let tier = get_performance_tier(response_time);
+        let weight = get_tier_weight(tier);
+        
+        total_weight += weight;
+        weighted_providers.push((provider, weight));
+    }
+
+    // 3. Weighted random selection
+    let random_weight = rng.gen_range(0..total_weight);
+    let mut current_weight = 0u32;
+    
+    for (provider, weight) in weighted_providers {
+        current_weight += weight;
+        if random_weight < current_weight {
+            return Some(provider.url.clone());
+        }
+    }
+    
+    None
+}
+```
+
+### Health Monitoring
+
+**Provider Health State Machine**:
+```
+Healthy ──failure──> Consecutive Failures (1)
+   ▲                           │
+   │                          failure
+   │                           ▼
+   │                  Consecutive Failures (2)
+   │                           │
+   │                          failure
+   │                           ▼
+   └──success─────── Unhealthy (max_failures reached)
+```
+
+**Health Check Implementation**:
+```rust
+pub async fn health_check_all(&self) {
+    let providers_snapshot = {
+        let providers = self.providers.read().await;
+        providers.clone()
+    };
+
+    for provider in providers_snapshot {
+        // Check if provider needs health check (unhealthy or stale)
+        let needs_check = !provider.is_healthy
+            || provider.last_health_check
+                .map_or(true, |t| t.elapsed() > Duration::from_secs(60));
+
+        if needs_check {
+            match Self::check_provider_health(&self.client, &provider.url).await {
+                Ok(response_time) => {
+                    self.mark_provider_success(&provider.url, response_time).await;
+                }
+                Err(e) => {
+                    debug!("Health check failed for {}: {}", provider.url, e);
+                    self.mark_provider_failed(&provider.url).await;
+                }
+            }
+        }
+    }
+}
+```
+
+## 🚨 Error Handling Strategy
+
+### Error Categorization
+
+1. **Rate Limit Errors**: Retry with different provider
+2. **User Errors**: Return immediately without retry (4xx codes)
+3. **Provider Errors**: Mark provider as failed, try alternative
+4. **Network Errors**: Retry with exponential backoff
+
+### Error Deduplication with Provider Tracking
+
+**Problem**: With weighted selection, the same provider might be selected multiple times, making error consensus unreliable.
+
+**Solution**: Track unique providers per request to ensure genuine error consensus:
+
+```rust
+async fn forward_request(&self, request: &Value) -> Result<Value> {
+    let mut tried_providers = HashSet::new();
+    let mut error_responses: HashMap<u64, (Value, usize)> = HashMap::new();
+    
+    for retry in 0..MAX_RETRIES {
+        // Ensure each provider is tried only once per request
+        let provider_url = match self.provider_manager
+            .get_weighted_provider_excluding(&tried_providers).await 
+        {
+            Some(url) => url,
+            None => break, // All unique providers exhausted
+        };
+        
+        tried_providers.insert(provider_url.clone());
+        
+        match self.try_provider(&provider_url, request).await {
+            Ok(response) => return Ok(response),
+            Err(error) => {
+                // Track error for deduplication
+                let error_hash = self.create_error_signature(&error);
+                error_responses.entry(error_hash)
+                    .and_modify(|(_, count)| *count += 1)
+                    .or_insert((error.clone(), 1));
+                
+                // If multiple unique providers return same error, it's likely legitimate
+                if let Some((_, count)) = error_responses.get(&error_hash) {
+                    if *count >= MAX_MULTIPLE_SAME_ERROR {
+                        return Ok(error);
+                    }
+                }
+            }
+        }
+    }
+    
+    // Return most common error if all providers failed
+    return_most_common_error(error_responses)
+}
+```
+
+### Silent Failure Philosophy
+
+**Core Principle**: The proxy should never crash due to secondary failures.
+
+```rust
+// Cache save failures are logged but don't propagate
+pub async fn save_to_disk(&self) -> Result<()> {
+    match self.save_to_disk_impl().await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            warn!("Failed to save cache: {}. In-memory cache remains available.", e);
+            Ok(()) // Silent failure - don't crash the service
+        }
+    }
+}
+```
+
+## 📊 Metrics & Observability
+
+### Comprehensive Metrics Collection
+
+**Performance Metrics**:
+- Cache hit/miss rates by method
+- Provider response times and success rates
+- Request rates (requests per minute)
+- Error classification and rates
+
+**Implementation**:
+```rust
+pub struct MetricsCollector {
+    // Atomic counters for lock-free updates
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
+    total_requests: AtomicU64,
+    
+    // Thread-safe collections for detailed metrics
+    method_stats: Arc<RwLock<HashMap<String, MethodStats>>>,
+    provider_usage: Arc<RwLock<HashMap<String, ProviderUsage>>>,
+    error_counts: Arc<RwLock<HashMap<ErrorType, u64>>>,
+    
+    // Historical data with bounded collections
+    request_timestamps: Arc<RwLock<VecDeque<u64>>>,
+}
+
+// Method-specific cache performance
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MethodStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub total_response_time_ms: u64,
+    pub request_count: u64,
+}
+
+impl MethodStats {
+    pub fn hit_rate(&self) -> f64 {
+        if self.hits + self.misses == 0 {
+            0.0
+        } else {
+            self.hits as f64 / (self.hits + self.misses) as f64
+        }
+    }
+    
+    pub fn avg_response_time(&self) -> f64 {
+        if self.request_count == 0 {
+            0.0
+        } else {
+            self.total_response_time_ms as f64 / self.request_count as f64
+        }
+    }
+}
+```
+
+### Real-Time TUI Monitoring
+
+**Features**:
+- Live provider health dashboard
+- Cache performance charts
+- EDB instance registry
+- Interactive navigation
+
+**Implementation**:
+```rust
+// tui/widgets.rs - Custom UI components
+pub fn render_provider_health(providers: &[ProviderInfo]) -> Table {
+    let headers = Row::new(vec!["Provider", "Status", "Response Time", "Success Rate"]);
+    let rows: Vec<Row> = providers.iter().map(|provider| {
+        let status = if provider.is_healthy { "✓ Healthy" } else { "✗ Unhealthy" };
+        let response_time = provider.response_time_ms
+            .map(|rt| format!("{}ms", rt))
+            .unwrap_or_else(|| "N/A".to_string());
+        
+        Row::new(vec![
+            Cell::from(provider.url.clone()),
+            Cell::from(status),
+            Cell::from(response_time),
+            Cell::from(format!("{:.1}%", provider.success_rate * 100.0)),
+        ])
+    }).collect();
+    
+    Table::new(rows).header(headers).widths(&[
+        Constraint::Percentage(50),
+        Constraint::Percentage(15),
+        Constraint::Percentage(15),
+        Constraint::Percentage(20),
+    ])
 }
 ```
 
@@ -650,10 +920,10 @@ async fn evict_oldest(&self, cache: &mut HashMap<String, CacheEntry>) {
 
 ### Test Categories
 
-1. **Unit Tests**: Individual component testing
-2. **Integration Tests**: Multi-component interaction testing
-3. **Mock Testing**: External dependency simulation
-4. **Property Tests**: Invariant verification
+1. **Unit Tests**: Individual component testing with mocking
+2. **Integration Tests**: Full HTTP server testing with wiremock
+3. **Concurrency Tests**: Multi-threaded behavior verification
+4. **Property Tests**: Cache invariants and LRU behavior
 
 ### Mock Server Testing
 
@@ -674,7 +944,8 @@ async fn create_test_rpc_handler() -> (RpcHandler, MockServer, TempDir) {
     // Create handler with mock URL
     let handler = RpcHandler::new(
         mock_server.uri(),
-        cache_manager
+        cache_manager,
+        metrics_collector
     ).unwrap();
     
     (handler, mock_server, temp_dir)
@@ -682,8 +953,6 @@ async fn create_test_rpc_handler() -> (RpcHandler, MockServer, TempDir) {
 ```
 
 ### Concurrency Testing
-
-**Challenge**: Testing multi-threaded behavior is inherently difficult.
 
 **Approach**: 
 1. Test components in isolation where possible
@@ -711,17 +980,29 @@ async fn test_concurrent_cache_access() {
 }
 ```
 
-### Property-Based Testing Ideas
+### Provider Selection Testing
 
-**Cache Invariants**:
-- Cache size never exceeds `max_items`
-- Cache hits return exact same data as original response
-- Eviction maintains LRU ordering
-
-**Provider Management Invariants**:
-- At least one provider remains healthy if any are responsive
-- Round-robin provides fair distribution over time
-- Health recovery works after provider becomes responsive
+**Key Test**: Verify each provider tried only once per request:
+```rust
+#[tokio::test]
+async fn test_provider_tried_once_per_request() {
+    // Create 3 mock servers that all return errors
+    let mock1 = MockServer::start().await;
+    let mock2 = MockServer::start().await; 
+    let mock3 = MockServer::start().await;
+    
+    // Each provider should be called exactly once per request
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&error_response))
+        .expect(1) // Should only be called once
+        .mount(&mock1).await;
+    // ... similar for mock2, mock3
+    
+    let result = handler.handle_request(request).await.unwrap();
+    
+    // Mock expectations will verify each provider called exactly once
+}
+```
 
 ## ⚡ Performance Considerations
 
@@ -739,12 +1020,17 @@ use std::collections::hash_map::DefaultHasher; // Fast but not cryptographic
 
 // Minimize allocations in cache lookup
 pub async fn get(&self, key: &str) -> Option<Value> {
-    let cache = self.cache.read().await;
-    cache.get(key).map(|entry| entry.data.clone()) // Only clone if found
+    let mut cache = self.cache.write().await;
+    if let Some(entry) = cache.get_mut(key) {
+        entry.update_access_time(); // Update LRU tracking
+        Some(entry.data.clone()) // Only clone if found
+    } else {
+        None
+    }
 }
 
-// Lock-free atomic for round-robin
-let index = self.counter.fetch_add(1, Ordering::Relaxed) % provider_count;
+// Lock-free atomic for metrics
+let cache_hits = self.cache_hits.fetch_add(1, Ordering::Relaxed);
 ```
 
 ### Memory Management
@@ -755,26 +1041,10 @@ let index = self.counter.fetch_add(1, Ordering::Relaxed) % provider_count;
 async fn handle_request(&self, request: &Value) -> Result<Value>
 
 // Good: Clone only when necessary for async boundaries
-let provider_url = self.provider_manager.get_next_provider().await?;
+let provider_url = self.provider_manager.get_weighted_provider_excluding(&tried).await?;
 
 // Good: Use Arc for shared ownership instead of cloning large data
 let cache_manager = Arc::new(CacheManager::new(/* ... */));
-```
-
-### Disk I/O Optimization
-
-**Atomic Writes**: Prevent corruption during concurrent access:
-```rust
-// Write to temporary file first, then atomic rename
-let temp_file = self.cache_file_path.with_extension("tmp");
-fs::write(&temp_file, &content)?;
-fs::rename(&temp_file, &self.cache_file_path)?; // Atomic on most filesystems
-```
-
-**Batch Operations**: Reduce I/O frequency:
-```rust
-// Save cache periodically rather than on every update
-// Configurable interval: --cache-save-interval <minutes>
 ```
 
 ### Network Optimization
@@ -797,56 +1067,13 @@ let health_futures: Vec<_> = providers.iter()
 let results = futures::future::join_all(health_futures).await;
 ```
 
-## 🔮 Future Architecture
-
-### Scalability Considerations
-
-**Current Limitations**:
-1. Single-node deployment only
-2. Cache limited by single machine memory
-3. No horizontal scaling capability
-
-**Potential Enhancements**:
-
-**1. Distributed Caching**:
-```rust
-// Potential Redis integration for shared cache
-pub trait CacheBackend {
-    async fn get(&self, key: &str) -> Option<Value>;
-    async fn set(&self, key: String, value: Value);
-}
-
-pub struct RedisCacheBackend { /* ... */ }
-pub struct LocalCacheBackend { /* ... */ }
-```
-
-**2. Multi-Node Provider Pool**:
-```rust
-// Service discovery for dynamic provider management
-pub trait ProviderDiscovery {
-    async fn discover_providers(&self) -> Vec<String>;
-    async fn health_check_provider(&self, url: &str) -> bool;
-}
-```
-
-**3. Metrics and Observability**:
-```rust
-// OpenTelemetry integration for production monitoring
-use opentelemetry::metrics::{Counter, Histogram};
-
-struct ProxyMetrics {
-    cache_hits: Counter<u64>,
-    cache_misses: Counter<u64>,
-    request_duration: Histogram<f64>,
-    provider_errors: Counter<u64>,
-}
-```
+## 🔧 Extension Points
 
 ### Plugin Architecture
 
 **Extensibility Points**:
 1. Custom cache backends
-2. Provider discovery mechanisms
+2. Provider discovery mechanisms  
 3. Request/response middleware
 4. Custom health check strategies
 
@@ -864,19 +1091,59 @@ pub struct ProxyServerBuilder {
 }
 ```
 
-### Performance Monitoring
+### Custom Cache Backends
 
-**Future Metrics**:
-- Cache hit/miss ratios by method
-- Provider response times and availability
-- Request latency percentiles
-- Memory usage and GC pressure
-- Error rates by category
+**Trait Definition**:
+```rust
+#[async_trait]
+pub trait CacheBackend {
+    async fn get(&self, key: &str) -> Option<Value>;
+    async fn set(&self, key: String, value: Value) -> Result<()>;
+    async fn remove(&self, key: &str) -> Result<()>;
+    async fn clear(&self) -> Result<()>;
+    async fn size(&self) -> usize;
+}
 
-**Alerting Integration**:
-- Prometheus metrics export
-- Health check endpoints for load balancers
-- Structured logging for centralized monitoring
+// Implementations
+pub struct MemoryCacheBackend { /* current implementation */ }
+pub struct RedisCacheBackend { /* distributed caching */ }
+pub struct SqliteCacheBackend { /* persistent local cache */ }
+```
+
+### Provider Discovery
+
+**Service Discovery Interface**:
+```rust
+#[async_trait]
+pub trait ProviderDiscovery {
+    async fn discover_providers(&self) -> Vec<String>;
+    async fn health_check_provider(&self, url: &str) -> bool;
+}
+
+pub struct StaticProviderDiscovery { /* current implementation */ }
+pub struct ConsulProviderDiscovery { /* dynamic discovery */ }
+pub struct KubernetesProviderDiscovery { /* k8s service discovery */ }
+```
+
+### Metrics Integration
+
+**OpenTelemetry Integration**:
+```rust
+use opentelemetry::metrics::{Counter, Histogram};
+
+struct ProxyMetrics {
+    cache_hits: Counter<u64>,
+    cache_misses: Counter<u64>,
+    request_duration: Histogram<f64>,
+    provider_errors: Counter<u64>,
+}
+
+impl ProxyMetrics {
+    pub fn record_cache_hit(&self, method: &str) {
+        self.cache_hits.add(1, &[KeyValue::new("method", method)]);
+    }
+}
+```
 
 ---
 

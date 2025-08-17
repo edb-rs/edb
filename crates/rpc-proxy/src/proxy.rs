@@ -42,7 +42,7 @@ impl Default for ProxyServerBuilder {
             rpc_urls: None, // Will use DEFAULT_MAINNET_RPCS
 
             // Cache Configuration
-            max_cache_items: 102400,
+            max_cache_items: 1024000,
             cache_dir: None,        // Will use ~/.edb/cache/rpc/<chain_id>
             cache_save_interval: 5, // 5 minutes
 
@@ -460,8 +460,8 @@ async fn handle_rpc(
             "edb_provider_metrics" => {
                 let metrics = state.proxy.metrics_collector;
                 let provider_usage = metrics.get_provider_usage();
-                let total_requests =
-                    metrics.total_requests.load(std::sync::atomic::Ordering::Relaxed);
+                let total_requests_to_providers =
+                    metrics.cache_misses.load(std::sync::atomic::Ordering::Relaxed);
 
                 let providers: Vec<serde_json::Value> = provider_usage.iter().map(|(url, usage)| {
                     serde_json::json!({
@@ -469,7 +469,7 @@ async fn handle_rpc(
                         "request_count": usage.request_count,
                         "success_rate": format!("{:.1}%", usage.success_rate()),
                         "avg_response_time_ms": usage.avg_response_time_ms(),
-                        "load_percentage": format!("{:.1}%", usage.load_percentage(total_requests)),
+                        "load_percentage": format!("{:.1}%", usage.load_percentage(total_requests_to_providers)),
                         "last_used_timestamp": usage.last_used_timestamp,
                         "error_count": usage.error_count
                     })
@@ -480,7 +480,6 @@ async fn handle_rpc(
                     "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
                     "result": {
                         "providers": providers,
-                        "total_requests": total_requests
                     }
                 });
                 Ok(Json(response))

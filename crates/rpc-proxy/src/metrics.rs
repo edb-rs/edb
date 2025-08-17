@@ -16,11 +16,11 @@ use std::{
 /// including cache performance, response times, and error rates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MethodStats {
-    /// Number of cache hits for this method
+    /// Number of cache hits for this method (served from cache)
     pub hits: u64,
-    /// Number of cache misses for this method
+    /// Number of requests forwarded to upstream providers (cache misses + non-cacheable)
     pub misses: u64,
-    /// Total number of requests for this method (hits + misses + non-cacheable)
+    /// Total number of requests for this method (hits + misses)
     pub total_requests: u64,
     /// Average response time in milliseconds
     pub avg_response_time_ms: f64,
@@ -189,11 +189,11 @@ pub struct HistoricalMetric {
 #[derive(Debug)]
 pub struct MetricsCollector {
     // Cache metrics - atomic for high-performance concurrent access
-    /// Total number of cache hits across all methods
+    /// Total number of cache hits across all methods (served from cache)
     pub cache_hits: AtomicU64,
-    /// Total number of cache misses across all methods
+    /// Total number of cache misses that required checking the cache (excludes non-cacheable)
     pub cache_misses: AtomicU64,
-    /// Total number of requests processed (hits + misses + non-cacheable)
+    /// Total number of requests processed (all requests)
     pub total_requests: AtomicU64,
 
     // Provider metrics - protected by RwLock for complex operations
@@ -247,6 +247,9 @@ impl MetricsCollector {
     /// Record a cache hit for a specific method
     pub fn record_cache_hit(&self, method: &str, response_time_ms: u64) {
         self.cache_hits.fetch_add(1, Ordering::Relaxed);
+
+        // XXX (ZZ): since we will not go through the forward_request when cache is hit,
+        // we need to update the following metrics accordingly
         self.total_requests.fetch_add(1, Ordering::Relaxed);
         self.record_request_timestamp();
 
@@ -261,42 +264,13 @@ impl MetricsCollector {
     }
 
     /// Record a cache miss for a specific method
-    pub fn record_cache_miss(
-        &self,
-        method: &str,
-        provider_url: &str,
-        response_time_ms: u64,
-        success: bool,
-    ) {
+    pub fn record_cache_miss(&self) {
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
-        self.total_requests.fetch_add(1, Ordering::Relaxed);
-        self.record_request_timestamp();
-
-        if !success {
-            self.total_errors.fetch_add(1, Ordering::Relaxed);
-        }
-
-        // Update method stats
-        if let Ok(mut stats) = self.method_stats.write() {
-            let method_stat = stats.entry(method.to_string()).or_default();
-            method_stat.misses += 1;
-            method_stat.total_requests += 1;
-            method_stat.total_response_time_ms += response_time_ms;
-            if !success {
-                method_stat.errors += 1;
-            }
-            method_stat.update_avg_response_time();
-        }
-
-        // Update provider usage
-        if let Ok(mut usage) = self.provider_usage.write() {
-            let provider_usage = usage.entry(provider_url.to_string()).or_default();
-            provider_usage.record_request(response_time_ms, success);
-        }
     }
 
-    /// Record a non-cacheable request
-    pub fn record_non_cacheable_request(
+    /// Record a request that was forwarded to an upstream provider
+    /// This includes both cache misses and non-cacheable requests
+    pub fn record_request(
         &self,
         method: &str,
         provider_url: &str,
@@ -313,6 +287,7 @@ impl MetricsCollector {
         // Update method stats
         if let Ok(mut stats) = self.method_stats.write() {
             let method_stat = stats.entry(method.to_string()).or_default();
+            method_stat.misses += 1; // Any forwarded request counts as a miss
             method_stat.total_requests += 1;
             method_stat.total_response_time_ms += response_time_ms;
             if !success {
@@ -705,7 +680,11 @@ mod tests {
         let collector = MetricsCollector::new();
         let provider_url = "https://eth.llamarpc.com";
 
-        collector.record_cache_miss("eth_getBlockByNumber", provider_url, 200, true);
+        // Record a cache miss (just increments the counter)
+        collector.record_cache_miss();
+
+        // Then record the forwarded request
+        collector.record_request("eth_getBlockByNumber", provider_url, 200, true);
 
         assert_eq!(collector.cache_hits.load(Ordering::Relaxed), 0);
         assert_eq!(collector.cache_misses.load(Ordering::Relaxed), 1);
@@ -735,7 +714,11 @@ mod tests {
         let collector = MetricsCollector::new();
         let provider_url = "https://failing-provider.com";
 
-        collector.record_cache_miss("eth_getBalance", provider_url, 5000, false);
+        // Record a cache miss
+        collector.record_cache_miss();
+
+        // Then record the failed forwarded request
+        collector.record_request("eth_getBalance", provider_url, 5000, false);
 
         assert_eq!(collector.cache_misses.load(Ordering::Relaxed), 1);
         assert_eq!(collector.total_errors.load(Ordering::Relaxed), 1);
@@ -753,21 +736,22 @@ mod tests {
     }
 
     #[test]
-    fn test_metrics_collector_record_non_cacheable_request() {
+    fn test_metrics_collector_record_request() {
         let collector = MetricsCollector::new();
         let provider_url = "https://eth.llamarpc.com";
 
-        collector.record_non_cacheable_request("eth_sendRawTransaction", provider_url, 100, true);
+        // Record a non-cacheable request (directly forwarded)
+        collector.record_request("eth_sendRawTransaction", provider_url, 100, true);
 
         assert_eq!(collector.cache_hits.load(Ordering::Relaxed), 0);
         assert_eq!(collector.cache_misses.load(Ordering::Relaxed), 0);
         assert_eq!(collector.total_requests.load(Ordering::Relaxed), 1);
 
-        // Method should be tracked but no cache stats
+        // Method should be tracked with misses incremented (forwarded request)
         let stats = collector.get_method_stats();
         let method_stat = stats.get("eth_sendRawTransaction").unwrap();
         assert_eq!(method_stat.hits, 0);
-        assert_eq!(method_stat.misses, 0);
+        assert_eq!(method_stat.misses, 1); // Forwarded requests count as misses
         assert_eq!(method_stat.total_requests, 1);
     }
 
@@ -794,9 +778,16 @@ mod tests {
         // Record some hits and misses
         collector.record_cache_hit("method1", 50);
         collector.record_cache_hit("method2", 75);
-        collector.record_cache_miss("method3", "provider1", 100, true);
-        collector.record_cache_miss("method4", "provider1", 125, true);
-        collector.record_non_cacheable_request("method5", "provider1", 150, true);
+
+        // Record cache misses followed by forwarded requests
+        collector.record_cache_miss();
+        collector.record_request("method3", "provider1", 100, true);
+
+        collector.record_cache_miss();
+        collector.record_request("method4", "provider1", 125, true);
+
+        // Direct forwarded request (non-cacheable)
+        collector.record_request("method5", "provider1", 150, true);
 
         // 2 hits out of 5 total requests = 40%
         assert_eq!(collector.cache_hit_rate(), 40.0);
@@ -811,9 +802,13 @@ mod tests {
 
         // Record some requests with errors
         collector.record_cache_hit("method1", 50); // Success
-        collector.record_cache_miss("method2", "provider1", 100, false); // Error
-        collector.record_non_cacheable_request("method3", "provider1", 150, true); // Success
-        collector.record_non_cacheable_request("method4", "provider1", 200, false); // Error
+
+        // Cache miss with error
+        collector.record_cache_miss();
+        collector.record_request("method2", "provider1", 100, false); // Error
+
+        collector.record_request("method3", "provider1", 150, true); // Success
+        collector.record_request("method4", "provider1", 200, false); // Error
 
         // 2 errors out of 4 total requests = 50%
         assert_eq!(collector.error_rate(), 50.0);
@@ -828,7 +823,9 @@ mod tests {
 
         // Record some requests
         collector.record_cache_hit("method1", 50);
-        collector.record_cache_miss("method2", "provider1", 100, true);
+
+        collector.record_cache_miss();
+        collector.record_request("method2", "provider1", 100, true);
 
         // Should count recent requests (within last minute)
         assert_eq!(collector.requests_per_minute(), 2);
@@ -840,7 +837,9 @@ mod tests {
 
         // Add some metrics first
         collector.record_cache_hit("method1", 100);
-        collector.record_cache_miss("method2", "provider1", 200, true);
+
+        collector.record_cache_miss();
+        collector.record_request("method2", "provider1", 200, true);
 
         collector.add_historical_point(1000, 3, 5, 2);
 
@@ -899,7 +898,10 @@ mod tests {
             let handle = thread::spawn(move || {
                 for j in 0..100 {
                     collector_clone.record_cache_hit(&format!("method_{}", i), j as u64);
-                    collector_clone.record_cache_miss(
+
+                    // Record cache miss and forwarded request
+                    collector_clone.record_cache_miss();
+                    collector_clone.record_request(
                         &format!("method_{}", i),
                         &format!("provider_{}", i),
                         (j * 2) as u64,
@@ -954,7 +956,9 @@ mod tests {
         // Add requests with different response times
         collector.record_cache_hit("method1", 100); // 100ms
         collector.record_cache_hit("method2", 200); // 200ms
-        collector.record_cache_miss("method3", "provider1", 300, true); // 300ms
+
+        collector.record_cache_miss();
+        collector.record_request("method3", "provider1", 300, true); // 300ms
 
         // Should calculate weighted average across all methods
         // method1: 100ms total, 1 request

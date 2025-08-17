@@ -56,6 +56,9 @@ chrono.workspace = true
 # http client
 reqwest = { workspace = true, features = ["json"] }
 
+# random number generation
+rand.workspace = true
+
 # TUI
 crossterm.workspace = true
 ratatui.workspace = true

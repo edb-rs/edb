@@ -18,25 +18,32 @@ use tracing::{debug, info, warn};
 
 /// A cached RPC response entry with metadata
 ///
-/// This struct holds a cached RPC response along with its creation timestamp
+/// This struct holds a cached RPC response along with its last access timestamp
 /// for LRU eviction purposes.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CacheEntry {
     /// The cached RPC response data
     pub data: Value,
-    /// Unix timestamp when this entry was created
-    pub created_at: u64,
+    /// Unix timestamp when this entry was accessed
+    pub accessed_at: u64,
 }
 
 impl CacheEntry {
     fn new(data: Value) -> Self {
         Self {
             data,
-            created_at: std::time::SystemTime::now()
+            accessed_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
         }
+    }
+
+    fn update_access_time(&mut self) {
+        self.accessed_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
     }
 }
 
@@ -98,9 +105,10 @@ impl CacheManager {
     /// # Returns
     /// The cached value if found, None otherwise
     pub async fn get(&self, key: &str) -> Option<Value> {
-        let cache = self.cache.read().await;
-        if let Some(entry) = cache.get(key) {
+        let mut cache = self.cache.write().await;
+        if let Some(entry) = cache.get_mut(key) {
             debug!("Cache hit: {}", key);
+            entry.update_access_time(); // Update access time for LRU
             Some(entry.data.clone())
         } else {
             debug!("Cache miss: {}", key);
@@ -215,11 +223,11 @@ impl CacheManager {
         let mut newest_entry = None;
 
         for entry in cache.values() {
-            if oldest_entry.is_none() || entry.created_at < oldest_entry.unwrap() {
-                oldest_entry = Some(entry.created_at);
+            if oldest_entry.is_none() || entry.accessed_at < oldest_entry.unwrap() {
+                oldest_entry = Some(entry.accessed_at);
             }
-            if newest_entry.is_none() || entry.created_at > newest_entry.unwrap() {
-                newest_entry = Some(entry.created_at);
+            if newest_entry.is_none() || entry.accessed_at > newest_entry.unwrap() {
+                newest_entry = Some(entry.accessed_at);
             }
         }
 
@@ -319,7 +327,7 @@ impl CacheManager {
             match merged.get(&key) {
                 Some(disk_entry) => {
                     // Keep the entry with newest timestamp
-                    if memory_entry.created_at >= disk_entry.created_at {
+                    if memory_entry.accessed_at >= disk_entry.accessed_at {
                         merged.insert(key, memory_entry);
                     }
                     // else keep existing disk entry
@@ -389,9 +397,9 @@ impl CacheManager {
 
         // Sort entries by creation time (oldest first)
         let mut entries: Vec<(String, u64)> =
-            cache.iter().map(|(key, entry)| (key.clone(), entry.created_at)).collect();
+            cache.iter().map(|(key, entry)| (key.clone(), entry.accessed_at)).collect();
 
-        entries.sort_by_key(|(_, created_at)| *created_at);
+        entries.sort_by_key(|(_, accessed_at)| *accessed_at);
 
         // Remove oldest entries
         let keys_to_remove: Vec<String> =
@@ -552,7 +560,7 @@ mod tests {
         sleep(Duration::from_secs(1)).await;
         let entry2 = CacheEntry::new(serde_json::json!({"test": 2}));
 
-        assert!(entry2.created_at > entry1.created_at);
+        assert!(entry2.accessed_at > entry1.accessed_at);
     }
 
     #[tokio::test]

@@ -2045,6 +2045,7 @@ dependencies = [
  "eyre",
  "futures",
  "jsonrpsee",
+ "rand 0.8.5",
  "ratatui",
  "reqwest",
  "serde",

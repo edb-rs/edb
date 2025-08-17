@@ -53,7 +53,7 @@ struct ServerArgs {
 
     // ========== Cache Configuration ==========
     /// Maximum number of cached items
-    #[arg(long, default_value = "102400")]
+    #[arg(long, default_value = "1024000")]
     max_cache_items: u32,
 
     /// Cache directory (default: ~/.edb/cache/rpc/<chain_id>)
