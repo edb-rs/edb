@@ -2,7 +2,7 @@
 
 This document provides deep technical insights into the RPC Proxy architecture, design decisions, and implementation details for developers working on or extending the codebase.
 
-_This document is created by Claude with ❤️_.
+_This document is created by Claude with ❤️._
 
 ## 📋 Table of Contents
 
