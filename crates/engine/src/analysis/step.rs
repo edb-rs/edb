@@ -1,12 +1,75 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc, sync::Mutex};
 
 use derive_more::{Deref, DerefMut};
 use foundry_compilers::artifacts::{
     ast::SourceLocation, BlockOrStatement, Expression, ExpressionOrVariableDeclarationStatement,
     ExpressionStatement, FunctionCall, SourceUnit, Statement,
 };
+use lazy_static::lazy_static;
 
 use crate::{Visitor, Walk};
+
+lazy_static! {
+    /// The next USID to be assigned.
+    pub static ref NEXT_USID: Mutex<USID> = Mutex::new(USID(0));
+}
+
+/// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub struct USID(u64);
+
+impl USID {
+    /// Increment the USID and return the previous value.
+    pub fn inc(&mut self) -> Self {
+        let v = *self;
+        self.0 += 1;
+        v
+    }
+}
+
+impl From<USID> for u64 {
+    fn from(usid: USID) -> Self {
+        usid.0
+    }
+}
+
+impl From<USID> for alloy_primitives::U256 {
+    fn from(usid: USID) -> Self {
+        Self::from(usid.0)
+    }
+}
+
+/// Generate a new USID.
+pub fn new_usid() -> USID {
+    let mut usid = NEXT_USID.lock().unwrap();
+    usid.inc()
+}
+
+/// A reference to a source step.
+pub type SourceStepRef = Arc<SourceStep>;
+
+/// The variant types for source steps.
+#[derive(Debug, Clone)]
+pub enum SourceStepVariant {
+    /// A single statement that is executed in a single debug step.
+    Statement(Statement),
+    /// A consecutive list of statements that are executed in a single debug step.
+    Statements(Vec<Statement>),
+    /// The condition of an if statement that is executed in a single debug step.
+    IfCondition(Expression),
+    /// The header of a for loop that is executed in a single debug step.
+    ForLoop(
+        (
+            Option<ExpressionOrVariableDeclarationStatement>,
+            Option<Expression>,
+            Option<ExpressionStatement>,
+        ),
+    ),
+    /// The condition of a while loop that is executed in a single debug step.
+    WhileLoop(Expression),
+    /// The try external call
+    Try(FunctionCall),
+}
 
 /// A set of source code statements or lines that are executed in a single debugger step.
 ///
@@ -18,26 +81,36 @@ use crate::{Visitor, Walk};
 /// We aim to partition the source code into a set of [SourceStep]s as fine-grained as
 /// possible, each [SourceStep] is as small as possible.
 #[derive(Debug, Clone)]
-pub enum SourceStep {
-    /// A single statement that is executed in a single debug step.
-    Statement(Statement, SourceLocation),
-    /// A consecutive list of statements that are executed in a single debug step.
-    Statements(Vec<Statement>, SourceLocation),
-    /// The condition of an if statement that is executed in a single debug step.
-    IfCondition(Expression, SourceLocation),
-    /// The header of a for loop that is executed in a single debug step.
-    ForLoop(
-        (
-            Option<ExpressionOrVariableDeclarationStatement>,
-            Option<Expression>,
-            Option<ExpressionStatement>,
-        ),
-        SourceLocation,
-    ),
-    /// The condition of a while loop that is executed in a single debug step.
-    WhileLoop(Expression, SourceLocation),
-    /// The try external call
-    Try(FunctionCall, SourceLocation),
+pub struct SourceStep {
+    /// The unique identifier for this step.
+    pub usid: USID,
+    /// The variant of this step.
+    pub variant: SourceStepVariant,
+    /// The source location of this step.
+    pub source_location: SourceLocation,
+}
+
+impl SourceStep {
+    /// Creates a new SourceStep with the given variant and source location.
+    pub fn new(variant: SourceStepVariant, source_location: SourceLocation) -> Self {
+        Self { usid: new_usid(), variant, source_location }
+    }
+
+    /// Returns the variant name of this step.
+    ///
+    /// # Returns
+    ///
+    /// A string slice representing the variant name.
+    pub fn variant_name(&self) -> &'static str {
+        match &self.variant {
+            SourceStepVariant::Statement(_) => "Statement",
+            SourceStepVariant::Statements(_) => "Statements",
+            SourceStepVariant::IfCondition(_) => "IfCondition",
+            SourceStepVariant::ForLoop(_) => "ForLoop",
+            SourceStepVariant::WhileLoop(_) => "WhileLoop",
+            SourceStepVariant::Try(_) => "Try",
+        }
+    }
 }
 
 /// A collection of source steps representing the execution flow of a Solidity contract.
@@ -71,6 +144,15 @@ impl SourceSteps {
     /// A reference to the vector of collected `SourceStep`s.
     pub fn steps(&self) -> &[SourceStep] {
         &self.steps
+    }
+
+    /// Consumes the SourceSteps and returns the steps as a vector.
+    ///
+    /// # Returns
+    ///
+    /// A vector of `SourceStep`s.
+    pub fn into_steps(self) -> Vec<SourceStep> {
+        self.steps
     }
 
     /// Returns the number of steps in the collection.
@@ -165,14 +247,8 @@ impl SourceSteps {
             output.push_str(&format!("\nStep {}: ", i + 1));
 
             // Get the source location and extract the code snippet
-            let (step_type, location) = match step {
-                SourceStep::Statement(_, loc) => ("Statement", loc),
-                SourceStep::Statements(_, loc) => ("Statements", loc),
-                SourceStep::IfCondition(_, loc) => ("IfCondition", loc),
-                SourceStep::ForLoop(_, loc) => ("ForLoop", loc),
-                SourceStep::WhileLoop(_, loc) => ("WhileLoop", loc),
-                SourceStep::Try(_, loc) => ("Try", loc),
-            };
+            let step_type = step.variant_name();
+            let location = &step.source_location;
 
             output.push_str(step_type);
 
@@ -299,7 +375,7 @@ impl Visitor for StepPartitioner {
     fn visit_statement(&mut self, statement: &Statement) -> eyre::Result<()> {
         macro_rules! step {
             ($variant:ident, $stmt:expr, $loc:expr) => {{
-                let step = SourceStep::$variant($stmt.clone(), $loc);
+                let step = SourceStep::new(SourceStepVariant::$variant($stmt.clone()), $loc);
                 self.steps.push(step);
             }};
         }
@@ -439,8 +515,8 @@ mod tests {
         let mut step_types = std::collections::HashMap::new();
 
         for step in steps.iter() {
-            let type_name = match step {
-                SourceStep::Statement(statement, _location) => match statement {
+            let type_name = match &step.variant {
+                SourceStepVariant::Statement(statement) => match statement {
                     Statement::VariableDeclarationStatement(_) => "VariableDeclarationStatement",
                     Statement::Break(_) => "Break",
                     Statement::Continue(_) => "Continue",
@@ -452,10 +528,10 @@ mod tests {
                     Statement::TryStatement(_) => "Try",
                     _ => "OtherStatement",
                 },
-                SourceStep::WhileLoop(_, _location) => "WhileLoop",
-                SourceStep::ForLoop(_, _location) => "ForLoop",
-                SourceStep::IfCondition(_, _location) => "IfCondition",
-                SourceStep::Try(_, _location) => "Try",
+                SourceStepVariant::WhileLoop(_) => "WhileLoop",
+                SourceStepVariant::ForLoop(_) => "ForLoop",
+                SourceStepVariant::IfCondition(_) => "IfCondition",
+                SourceStepVariant::Try(_) => "Try",
                 _ => "Other",
             };
 

@@ -91,7 +91,7 @@ impl Engine {
         // Step 2: Download verified source code for each contract
 
         // Step 3: Analyze source code to identify instrumentation points
-        let analysis_result = AnalysisResult {};
+        let analysis_result = AnalysisResult::default();
 
         // Step 4: Instrument source code
 

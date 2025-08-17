@@ -60,8 +60,10 @@ eyre.workspace = true
 hex.workspace = true
 lazy_static.workspace = true
 paste.workspace = true
+rayon.workspace = true
 semver.workspace = true
 tempfile.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 derive_more.workspace = true
