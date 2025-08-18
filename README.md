@@ -2,6 +2,10 @@
 
 A powerful step-by-step debugger for Ethereum transactions, providing deep visibility into smart contract execution.
 
+_This document is created by Claude with ❤️._ 
+
+**The current open-source version is under construction.**
+
 ## Features
 
 - 🔍 **Transaction Replay**: Debug any historical transaction by its hash
