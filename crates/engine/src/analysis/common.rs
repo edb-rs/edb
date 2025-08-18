@@ -41,17 +41,14 @@
 //! }
 //! ```
 
-use foundry_compilers::{
-    artifacts::{Ast, Source, SourceUnit},
-    error::SolcError,
-    solc::{SolcCompiler, SolcVersionedInput},
-    Compiler,
-};
+use foundry_compilers::artifacts::{Ast, Source, SourceUnit};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{collections::HashMap, path::PathBuf};
 use thiserror::Error;
 
-use crate::{utils::ASTPruner, SourceStepRef, SourceSteps, StepHook, VariableRef, USID, UVID};
+use crate::{
+    utils::ASTPruner, Artifact, SourceStepRef, SourceSteps, StepHook, VariableRef, USID, UVID,
+};
 
 /// Main analysis result containing debugging information from source code analysis.
 ///
@@ -368,16 +365,12 @@ impl StepAnalysisResult {
 /// # Errors
 ///
 /// This function can return the following errors:
-/// - `AnalysisError::SolcError`: When Solc compilation fails
 /// - `AnalysisError::StepPartitionError`: When step partitioning fails
-pub fn analyze(input: SolcVersionedInput) -> Result<AnalysisResult, AnalysisError> {
-    // compile the input
-    let compiler = SolcCompiler::AutoDetect;
-    let output = compiler.compile(&input)?;
-
+pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
     // parse ast of each file into SourceUnit
     // TODO: can we avoid cloning?
-    let source_results = output
+    let source_results = artifact
+        .output
         .sources
         .par_iter()
         .map(|(path, source)| {
@@ -390,7 +383,7 @@ pub fn analyze(input: SolcVersionedInput) -> Result<AnalysisResult, AnalysisErro
             let result = SourceResult {
                 id: source.id,
                 path: path.clone(),
-                source: input.input.sources.get(path).expect("Source not found").clone(),
+                source: artifact.input.sources.get(path).expect("Source not found").clone(),
                 ast,
                 unit,
                 steps,
@@ -463,10 +456,6 @@ fn analyze_source(unit: &SourceUnit) -> Result<Vec<StepAnalysisResult>, Analysis
 /// the analysis process, from compilation failures to step partitioning errors.
 #[derive(Debug, Error)]
 pub enum AnalysisError {
-    /// Error from the Solc compiler during compilation
-    #[error("solc error: {0}")]
-    SolcError(#[from] SolcError),
-
     /// Error during step partitioning of source code
     #[error("failed to partition source steps: {0}")]
     StepPartitionError(#[from] eyre::Report),
@@ -475,10 +464,12 @@ pub enum AnalysisError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use foundry_block_explorers::contract::Metadata;
     use foundry_compilers::{
-        artifacts::{Source, Sources},
-        solc::{SolcLanguage, SolcSettings, SolcVersionedInput},
-        CompilerInput,
+        artifacts::{
+            output_selection::OutputSelection, EvmVersion, Settings, SolcInput, Source, Sources,
+        },
+        solc::{Solc, SolcLanguage},
     };
     use std::path::PathBuf;
 
@@ -506,17 +497,47 @@ contract SimpleContract {
         let file_path = PathBuf::from("SimpleContract.sol");
         let sources =
             Sources::from_iter([(file_path.clone(), Source::new(contract_source.to_string()))]);
-        let settings = SolcSettings::default();
 
-        let versioned_input = SolcVersionedInput::build(
-            sources,
-            settings,
-            SolcLanguage::Solidity,
-            semver::Version::new(0, 8, 0),
+        let mut settings = Settings::default();
+        settings.output_selection = OutputSelection::complete_output_selection();
+        // Set a valid EVM version for Solidity 0.8.19
+        settings.evm_version = Some(EvmVersion::Paris);
+
+        let input = SolcInput::new(SolcLanguage::Solidity, sources, settings);
+
+        // Compile using Solc
+        let version = semver::Version::new(0, 8, 19);
+        let compiler = Solc::find_or_install(&version).expect("Failed to find or install Solc");
+        let output = compiler.compile_exact(&input).expect("Compilation failed");
+        println!("input {:?}", input);
+        println!("output {:?}", output);
+
+        // Create fake metadata for testing
+        // Note: SourceCodeMetadata doesn't have Default impl, so we need to create it manually
+        let source_code_meta = foundry_block_explorers::contract::SourceCodeMetadata::SourceCode(
+            contract_source.to_string(),
         );
 
+        let meta = Metadata {
+            source_code: source_code_meta,
+            abi: String::new(),
+            contract_name: "SimpleContract".to_string(),
+            compiler_version: "0.8.19".to_string(),
+            optimization_used: 200,
+            runs: 200,
+            constructor_arguments: Default::default(),
+            evm_version: "paris".to_string(),
+            library: String::new(),
+            license_type: String::new(),
+            proxy: 0,
+            implementation: None,
+            swarm_source: String::new(),
+        };
+
+        let artifact = Artifact { meta, input, output };
+
         // Run the analysis
-        let result = analyze(versioned_input).expect("Analysis should succeed");
+        let result = analyze(&artifact).expect("Analysis should succeed");
 
         // Verify the analysis result
         assert!(!result.sources.is_empty(), "Should have analyzed at least one source file");
