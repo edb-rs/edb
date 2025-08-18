@@ -2,9 +2,7 @@
 //!
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
 
-use crate::{
-    get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EDBContext,
-};
+use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EDBContext};
 use alloy_primitives::{TxHash, TxKind, B256, U256};
 use alloy_provider::{
     layers::{CacheProvider, SharedCache},

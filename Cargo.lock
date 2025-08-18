@@ -1995,6 +1995,7 @@ dependencies = [
  "foundry-block-explorers",
  "foundry-compilers",
  "hex",
+ "indicatif",
  "lazy_static",
  "once_cell",
  "paste",

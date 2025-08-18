@@ -46,11 +46,7 @@ impl OnchainCompiler {
     /// Returns `Some`` if the contract is successfully compiled.
     /// Returns `None` if the contract is not verified, is a Vyper contract, or it is a Solidity
     /// 0.4.x contract which does not support --stand-json option.
-    pub async fn compile(
-        &self,
-        etherscan: &Client,
-        addr: Address,
-    ) -> Result<Option<Artifact>> {
+    pub async fn compile(&self, etherscan: &Client, addr: Address) -> Result<Option<Artifact>> {
         // Get the cache_root. If not provided, use the default cache directory.
         if let Some(output) = self.cache.load_cache(addr.to_string()) {
             Ok(output)
@@ -95,10 +91,8 @@ impl OnchainCompiler {
 
             // compile the source code
             let output = match compiler.compile_exact(&input) {
-                Ok(output) => Some(Artifact{ meta, input, output }),
-                Err(_) if version.major == 0 && version.minor == 4 => {
-                    None
-                }
+                Ok(output) => Some(Artifact { meta, input, output }),
+                Err(_) if version.major == 0 && version.minor == 4 => None,
                 Err(e) => {
                     return Err(eyre::eyre!("failed to compile contract: {}", e));
                 }

@@ -35,14 +35,14 @@ pub enum CallType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallResult {
     /// Call succeeded
-    Success { 
+    Success {
         /// Output data from the call
-        output: Bytes 
+        output: Bytes,
     },
     /// Call reverted
-    Revert { 
+    Revert {
         /// Output data from the call
-        output: Bytes 
+        output: Bytes,
     },
 }
 
