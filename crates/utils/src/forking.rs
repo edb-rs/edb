@@ -43,7 +43,7 @@ pub struct ForkInfo {
 }
 
 /// Result of forking operation containing comprehensive replay information
-pub struct ForkResult<DB: Database + DatabaseCommit> {
+pub struct ForkResult<DB: Database + DatabaseCommit + Clone> {
     /// Fork information
     pub fork_info: ForkInfo,
     /// Revm context with executed state
@@ -72,7 +72,7 @@ pub async fn fork_and_prepare(
     rpc_url: &str,
     target_tx_hash: TxHash,
     quick: bool,
-) -> Result<ForkResult<impl Database + DatabaseCommit>> {
+) -> Result<ForkResult<impl Database + DatabaseCommit + Clone>> {
     info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
 
     let provider = ProviderBuilder::new().connect(rpc_url).await?;
@@ -129,11 +129,12 @@ pub async fn fork_and_prepare(
     // Create revm database: we start with AlloyDB.
     let state_db = WrapDatabaseAsync::new(AlloyDB::new(provider, (target_block_number - 1).into()))
         .ok_or(eyre::eyre!("Failed to create AlloyDB"))?;
-    let cache_db: CacheDB<_> = CacheDB::new(state_db);
-    let state = StateBuilder::new_with_database(cache_db).build();
+    let cache_db: CacheDB<_> = CacheDB::new(Arc::new(state_db));
+    // let state = StateBuilder::new_with_database(cache_db).build();
 
     let ctx = Context::mainnet()
-        .with_db(state)
+        // .with_db(state)
+        .with_db(cache_db)
         .modify_block_chained(|b| {
             b.number = U256::from(target_block_number);
             b.timestamp = U256::from(block.header.timestamp);

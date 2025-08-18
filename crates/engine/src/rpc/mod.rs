@@ -4,6 +4,7 @@
 //! and inspect debugging sessions.
 
 use crate::analysis::AnalysisResult;
+use alloy_primitives::Address;
 use axum::{
     response::Json,
     routing::{get, post},
@@ -12,7 +13,7 @@ use axum::{
 use eyre::Result;
 use revm::database::CacheDB;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::{collections::HashMap, net::SocketAddr};
 use std::sync::Arc;
 
 /// Handle to the running RPC server
@@ -65,21 +66,21 @@ pub type StateSnapshots<DB> = Vec<CacheDB<DB>>;
 /// Server state containing analysis results and state snapshots
 #[derive(Clone)]
 struct ServerState<DB> {
-    analysis_result: Arc<AnalysisResult>,
+    analysis_result: Arc<HashMap<Address, AnalysisResult>>,
     snapshots: Arc<StateSnapshots<DB>>,
 }
 
 /// Start the JSON-RPC server with analysis results and state snapshots
 pub async fn start_server<DB>(
     port: u16,
-    analysis_result: AnalysisResult,
+    analysis_results: HashMap<Address, AnalysisResult>,
     snapshots: StateSnapshots<DB>,
 ) -> Result<RpcServerHandle>
 where
     DB: Clone + Send + Sync + 'static,
 {
     let state =
-        ServerState { analysis_result: Arc::new(analysis_result), snapshots: Arc::new(snapshots) };
+        ServerState { analysis_result: Arc::new(analysis_results), snapshots: Arc::new(snapshots) };
 
     let app = Router::new()
         .route("/", post(handle_rpc_request))

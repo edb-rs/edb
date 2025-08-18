@@ -18,16 +18,13 @@ use revm::{
     database::{CacheDB, EmptyDB},
     Database, DatabaseCommit, InspectEvm, MainBuilder,
 };
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{collections::HashMap, hash::Hash, path::PathBuf, time::Duration};
 use tracing::{debug, error, info, warn};
 
 use edb_utils::{CachePath, EDBCachePath, EDBContext, ForkResult, DEFAULT_ETHERSCAN_CACHE_TTL};
 
 use crate::{
-    analysis::AnalysisResult,
-    inspector::{CallTracer, TraceReplayResult},
-    rpc::{start_server, RpcServerHandle},
-    utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
+    analysis::AnalysisResult, analyze, inspector::{CallTracer, TraceReplayResult}, rpc::{start_server, RpcServerHandle}, utils::{next_etherscan_api_key, Artifact, OnchainCompiler}
 };
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
@@ -76,7 +73,7 @@ impl Engine {
     /// 5. Recompiles and redeploys the instrumented contracts
     /// 6. Re-executes the transaction with state snapshots
     /// 7. Starts a JSON-RPC server with the analysis results and snapshots
-    pub async fn prepare<DB: Database + DatabaseCommit>(
+    pub async fn prepare<DB: Database + DatabaseCommit + Clone>(
         &self,
         fork_result: ForkResult<DB>,
     ) -> Result<RpcServerHandle> {
@@ -93,10 +90,11 @@ impl Engine {
         let artifacts =
             self.download_verified_source_code(&replay_result, ctx.chain_id().to::<u64>()).await?;
 
-        unimplemented!("Implement logic to handle replay result");
-
         // Step 3: Analyze source code to identify instrumentation points
-        let analysis_result = AnalysisResult::default();
+        let analysis_result = self.analyze_source_code(
+            &artifacts,
+        )?;
+        unimplemented!("Implement logic to handle replay result");
 
         // Step 4: Instrument source code
 
@@ -225,5 +223,20 @@ impl Engine {
         ));
 
         Ok(artifacts)
+    }
+
+    fn analyze_source_code(
+        &self,
+        artifacts: &HashMap<Address, Artifact>,
+    ) -> Result<HashMap<Address, AnalysisResult>> {
+        info!("Analyzing source code to identify instrumentation points");
+
+        let mut analysis_result = HashMap::new();
+        for (address, artifact) in artifacts {
+            let analysis = analyze(artifact)?;
+            analysis_result.insert(*address, analysis);
+        }
+
+        Ok(analysis_result)
     }
 }
