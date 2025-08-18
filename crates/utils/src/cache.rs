@@ -11,9 +11,6 @@ use tracing::{trace, warn};
 /// Set to 1 day since the source code of a contract is unlikely to change frequently.
 pub const DEFAULT_ETHERSCAN_CACHE_TTL: u64 = 86400;
 
-/// Default maximum cache items
-pub const DEFAULT_RPC_CACHE_ITEM: u32 = 100 * 1024; // 100MB assuming 1KB per item
-
 /// Trait for cache paths.
 pub trait CachePath {
     /// Returns the path to edb's cache dir: `~/.edb/cache` by default.

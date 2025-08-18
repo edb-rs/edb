@@ -3,7 +3,7 @@
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
 
 use crate::{
-    get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, DEFAULT_RPC_CACHE_ITEM,
+    get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EDBContext,
 };
 use alloy_primitives::{TxHash, TxKind, B256, U256};
 use alloy_provider::{
@@ -17,7 +17,7 @@ use revm::{
     context::{ContextTr, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
     database::{AlloyDB, CacheDB, StateBuilder},
-    Context, ExecuteCommitEvm, MainBuilder, MainContext,
+    Context, Database, DatabaseCommit, ExecuteCommitEvm, MainBuilder, MainContext,
 };
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -45,11 +45,11 @@ pub struct ForkInfo {
 }
 
 /// Result of forking operation containing comprehensive replay information
-pub struct ForkResult<CTX> {
+pub struct ForkResult<DB: Database + DatabaseCommit> {
     /// Fork information
     pub fork_info: ForkInfo,
     /// Revm context with executed state
-    pub context: CTX,
+    pub context: EDBContext<DB>,
     /// Transaction environment for the target transaction
     pub target_tx_env: TxEnv,
     /// Target transaction hash
@@ -74,7 +74,7 @@ pub async fn fork_and_prepare(
     rpc_url: &str,
     target_tx_hash: TxHash,
     quick: bool,
-) -> Result<ForkResult<impl ContextTr>> {
+) -> Result<ForkResult<impl Database + DatabaseCommit>> {
     info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
 
     let provider = ProviderBuilder::new().connect(rpc_url).await?;
@@ -166,7 +166,18 @@ pub async fn fork_and_prepare(
 
         // Actually execute each transaction with revm
         let console_bar = Arc::new(ProgressBar::new(preceding_txs.len() as u64));
+        console_bar.set_style(
+            indicatif::ProgressStyle::with_template(
+                "{spinner:.green} 🔮 Replaying blockchain history [{bar:40.cyan/blue}] {pos:>3}/{len:3} ⛽ {msg}"
+            )?
+            .progress_chars("🟩🟦⬜")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+        );
+
         for (i, tx) in preceding_txs.iter().enumerate() {
+            let short_hash = &tx.inner.hash().to_string()[2..10]; // Skip 0x, take 8 chars
+            console_bar.set_message(format!("tx {}: 0x{}...", i + 1, short_hash));
+
             debug!(
                 "Executing transaction {}/{}: {:?}",
                 i + 1,
@@ -180,6 +191,8 @@ pub async fn fork_and_prepare(
             match evm.transact_commit(tx) {
                 Ok(result) => match result {
                     ExecutionResult::Success { gas_used, .. } => {
+                        console_bar
+                            .set_message(format!("✅ 0x{}... gas: {}", short_hash, gas_used));
                         debug!(
                             "Transaction {} executed and committed successfully, gas used: {}",
                             i + 1,
@@ -187,6 +200,7 @@ pub async fn fork_and_prepare(
                         );
                     }
                     ExecutionResult::Revert { gas_used, output } => {
+                        console_bar.set_message(format!("⚠️  0x{}... reverted", short_hash));
                         debug!(
                             "Transaction {} reverted but committed, gas used: {}, output: {:?}",
                             i + 1,
@@ -195,6 +209,7 @@ pub async fn fork_and_prepare(
                         );
                     }
                     ExecutionResult::Halt { reason, gas_used } => {
+                        console_bar.set_message(format!("❌ 0x{}... halted", short_hash));
                         debug!(
                             "Transaction {} halted, gas used: {}, reason: {:?}",
                             i + 1,
@@ -216,7 +231,11 @@ pub async fn fork_and_prepare(
             console_bar.inc(1);
         }
 
-        console_bar.finish_with_message(format!("Fork and prepare complete for {target_tx_hash}."));
+        console_bar.finish_with_message(format!(
+            "✨ Ready! Replayed {} transactions before {}",
+            preceding_txs.len(),
+            &target_tx_hash.to_string()[2..10]
+        ));
     }
 
     // Get the target transaction environment

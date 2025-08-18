@@ -3,26 +3,34 @@
 use std::path::PathBuf;
 
 use alloy_primitives::Address;
+use edb_utils::{Cache, EDBCache};
 use eyre::Result;
 use foundry_block_explorers::{contract::Metadata, errors::EtherscanError, Client};
 use foundry_compilers::{
-    artifacts::{output_selection::OutputSelection, CompilerOutput, SolcInput, Source, Sources},
+    artifacts::{output_selection::OutputSelection, CompilerOutput, SolcInput, Source},
     solc::{Solc, SolcLanguage},
 };
+use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::{
-    cache::{Cache, EDBCache},
-    etherscan_rate_limit_guard,
-};
+use crate::etherscan_rate_limit_guard;
 
-type CompileOutput = (Metadata, Sources, CompilerOutput);
+/// Artifact for a compiled contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Artifact {
+    /// Metadata about the contract.
+    pub meta: Metadata,
+    /// Input for the Solidity compiler.
+    pub input: SolcInput,
+    /// Output from the Solidity compiler.
+    pub output: CompilerOutput,
+}
 
 /// Onchain compiler.
 #[derive(Debug, Clone)]
 pub struct OnchainCompiler {
     /// Cache for the compiled contracts.
-    pub cache: Option<EDBCache<CompileOutput>>,
+    pub cache: Option<EDBCache<Option<Artifact>>>,
 }
 
 impl OnchainCompiler {
@@ -42,17 +50,19 @@ impl OnchainCompiler {
         &self,
         etherscan: &Client,
         addr: Address,
-    ) -> Result<Option<CompileOutput>> {
+    ) -> Result<Option<Artifact>> {
         // Get the cache_root. If not provided, use the default cache directory.
         if let Some(output) = self.cache.load_cache(addr.to_string()) {
-            Ok(Some(output))
+            Ok(output)
         } else {
             let mut meta =
                 match etherscan_rate_limit_guard!(etherscan.contract_source_code(addr).await) {
                     Ok(meta) => meta,
                     Err(EtherscanError::ContractCodeNotVerified(_)) => {
-                        // We do not cache if the contract is not verified.
-                        return Ok(None);
+                        // We also cache the fact that the contract is not verified.
+                        let artifact = None;
+                        self.cache.save_cache(addr.to_string(), &artifact)?;
+                        return Ok(artifact);
                     }
                     Err(e) => return Err(e.into()),
                 };
@@ -85,9 +95,9 @@ impl OnchainCompiler {
 
             // compile the source code
             let output = match compiler.compile_exact(&input) {
-                Ok(compiler_output) => (meta, input.sources, compiler_output),
+                Ok(output) => Some(Artifact{ meta, input, output }),
                 Err(_) if version.major == 0 && version.minor == 4 => {
-                    return Ok(None);
+                    None
                 }
                 Err(e) => {
                     return Err(eyre::eyre!("failed to compile contract: {}", e));
@@ -95,7 +105,7 @@ impl OnchainCompiler {
             };
 
             self.cache.save_cache(addr.to_string(), &output)?;
-            Ok(Some(output))
+            Ok(output)
         }
     }
 }
@@ -107,11 +117,11 @@ mod tests {
     use alloy_chains::Chain;
     use serial_test::serial;
 
-    use crate::next_etherscan_api_key;
+    use crate::utils::next_etherscan_api_key;
 
     use super::*;
 
-    async fn run_compile(chain_id: Chain, addr: &str) -> eyre::Result<Option<CompileOutput>> {
+    async fn run_compile(chain_id: Chain, addr: &str) -> eyre::Result<Option<Artifact>> {
         let etherscan_cache_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../testdata/cache/etherscan")
             .join(chain_id.to_string());

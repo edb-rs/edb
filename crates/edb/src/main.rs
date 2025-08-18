@@ -6,6 +6,7 @@ use alloy_primitives::TxHash;
 use clap::{Parser, Subcommand, ValueEnum};
 use eyre::Result;
 
+mod cmd;
 mod proxy;
 
 /// Command-line interface for EDB
@@ -92,7 +93,7 @@ async fn main() -> Result<()> {
 
     // Handle proxy status command separately (doesn't need engine)
     if let Commands::ProxyStatus = &cli.command {
-        return show_proxy_status(&cli).await;
+        return cmd::show_proxy_status(&cli).await;
     }
 
     // Execute the command to get RPC server handle
@@ -100,11 +101,11 @@ async fn main() -> Result<()> {
         Commands::Replay { tx_hash } => {
             tracing::info!("Replaying transaction: {}", tx_hash);
             let tx_hash: TxHash = tx_hash.parse()?;
-            replay_transaction(tx_hash, &cli, &effective_rpc_url).await?
+            cmd::replay_transaction(tx_hash, &cli, &effective_rpc_url).await?
         }
         Commands::Test { test_name } => {
             tracing::info!("Debugging test: {}", test_name);
-            debug_foundry_test(test_name, &cli, &effective_rpc_url).await?
+            cmd::debug_foundry_test(test_name, &cli, &effective_rpc_url).await?
         }
         Commands::ProxyStatus => unreachable!(), // Handled above
     };
@@ -174,151 +175,6 @@ async fn main() -> Result<()> {
         tracing::error!("Failed to shutdown RPC server: {}", e);
     } else {
         tracing::info!("RPC server shut down successfully");
-    }
-
-    Ok(())
-}
-
-/// Replay an existing transaction following the correct architecture
-async fn replay_transaction(
-    tx_hash: TxHash,
-    cli: &Cli,
-    rpc_url: &str,
-) -> Result<edb_engine::rpc::RpcServerHandle> {
-    tracing::info!("Starting transaction replay workflow");
-
-    // Step 1: Fork the chain and replay earlier transactions in the block
-    // Fork and prepare the database/environment for the target transaction
-    let fork_result = edb_utils::fork_and_prepare(rpc_url, tx_hash, cli.quick).await?;
-
-    tracing::info!(
-        "Forked chain and prepared database for transaction replay at block {}",
-        fork_result.fork_info.block_number
-    );
-
-    // Step 2: Build inputs for the engine
-    let engine_config = edb_engine::EngineConfig {
-        rpc_port: cli.proxy_port,
-        etherscan_api_key: cli.etherscan_api_key.clone(),
-        quick: cli.quick,
-    };
-
-    // Step 3: Call engine::prepare with forked database and EVM config
-    tracing::info!("Calling engine::prepare with prepared inputs");
-
-    // Create the engine and run preparation
-    let engine = edb_engine::Engine::new(engine_config);
-    engine.prepare(fork_result).await
-}
-
-/// Debug a Foundry test case
-async fn debug_foundry_test(
-    test_name: &str,
-    cli: &Cli,
-    rpc_url: &str,
-) -> Result<edb_engine::rpc::RpcServerHandle> {
-    tracing::info!("Starting Foundry test debug workflow");
-
-    // Step 1: Find the transaction hash for the test
-    let tx_hash = find_test_transaction(test_name)?;
-
-    // Step 2: Use the same replay workflow as regular transactions
-    replay_transaction(tx_hash, cli, rpc_url).await
-}
-
-/// Find the transaction hash for a Foundry test
-fn find_test_transaction(_test_name: &str) -> Result<TxHash> {
-    // TODO: Implement test transaction discovery
-    // This would involve:
-    // 1. Running the test with foundry
-    // 2. Extracting the transaction hash from the test execution
-    todo!("Test transaction discovery not yet implemented")
-}
-
-/// Show the status of RPC proxy providers
-async fn show_proxy_status(cli: &Cli) -> Result<()> {
-    use serde_json::json;
-    use std::time::Duration;
-
-    tracing::info!("Checking proxy status...");
-
-    // Query provider status
-    let client = reqwest::Client::new();
-    let request = json!({
-        "jsonrpc": "2.0",
-        "method": "edb_providers",
-        "params": [],
-        "id": 1
-    });
-
-    let response = client
-        .post(&format!("http://127.0.0.1:{}", cli.proxy_port))
-        .json(&request)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    let response_json: serde_json::Value = response.json().await?;
-
-    if let Some(error) = response_json.get("error") {
-        println!("❌ Error getting proxy status: {}", error);
-        return Ok(());
-    }
-
-    if let Some(result) = response_json.get("result") {
-        let healthy_count = result["healthy_count"].as_u64().unwrap_or(0);
-        let total_count = result["total_count"].as_u64().unwrap_or(0);
-        let empty_providers = vec![];
-        let providers = result["providers"].as_array().unwrap_or(&empty_providers);
-
-        println!("🌐 EDB RPC Proxy Status");
-        println!("=====================");
-        println!("📊 Provider Summary: {}/{} healthy", healthy_count, total_count);
-        println!();
-
-        for (i, provider) in providers.iter().enumerate() {
-            let url = provider["url"].as_str().unwrap_or("unknown");
-            let is_healthy = provider["is_healthy"].as_bool().unwrap_or(false);
-            let response_time = provider["response_time_ms"].as_u64();
-            let failures = provider["consecutive_failures"].as_u64().unwrap_or(0);
-            let last_check = provider["last_health_check_seconds_ago"].as_u64();
-
-            let status_emoji = if is_healthy { "✅" } else { "❌" };
-            let status_text = if is_healthy { "Healthy" } else { "Unhealthy" };
-
-            println!("{}. {} {}", i + 1, status_emoji, status_text);
-            println!("   URL: {}", url);
-
-            if let Some(rt) = response_time {
-                println!("   Response Time: {}ms", rt);
-            }
-
-            if failures > 0 {
-                println!("   Failures: {}", failures);
-            }
-
-            if let Some(last) = last_check {
-                if last < 60 {
-                    println!("   Last Check: {}s ago", last);
-                } else if last < 3600 {
-                    println!("   Last Check: {}m ago", last / 60);
-                } else {
-                    println!("   Last Check: {}h ago", last / 3600);
-                }
-            }
-            println!();
-        }
-
-        if healthy_count == 0 {
-            println!("⚠️  Warning: No healthy providers available!");
-            println!("   The proxy will attempt to health-check providers automatically.");
-        } else if healthy_count < total_count {
-            println!("⚠️  Some providers are unhealthy but {} are still working.", healthy_count);
-        } else {
-            println!("✨ All providers are healthy!");
-        }
-    } else {
-        println!("❌ Unexpected response format from proxy");
     }
 
     Ok(())

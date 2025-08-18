@@ -136,14 +136,13 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         use std::os::unix::process::CommandExt;
 
         let mut args = vec![
+            "server".to_string(), // Add the server subcommand
             "--port".to_string(),
             cli.proxy_port.to_string(),
             "--grace-period".to_string(),
             PROXY_GRACE_PERIOD.to_string(),
             "--heartbeat-interval".to_string(),
             PROXY_HEARTBEAT_INTERVAL.to_string(),
-            "--max-failures".to_string(),
-            "3".to_string(),
         ];
 
         // Add RPC URLs if provided, otherwise proxy will use defaults
@@ -167,27 +166,19 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         use std::os::windows::process::CommandExt;
 
         let mut args = vec![
+            "server".to_string(), // Add the server subcommand
             "--port".to_string(),
             cli.proxy_port.to_string(),
-            "--max-cache-items".to_string(),
-            "102400".to_string(),
             "--grace-period".to_string(),
-            cli.proxy_grace_period.to_string(),
+            PROXY_GRACE_PERIOD.to_string(),
             "--heartbeat-interval".to_string(),
-            cli.proxy_heartbeat_interval.to_string(),
-            "--max-failures".to_string(),
-            "3".to_string(),
+            PROXY_HEARTBEAT_INTERVAL.to_string(),
         ];
 
         // Add RPC URLs if provided, otherwise proxy will use defaults
         if let Some(rpc_urls) = &cli.rpc_urls {
             args.push("--rpc-urls".to_string());
             args.push(rpc_urls.clone());
-        }
-
-        if let Some(cache_dir) = &cli.cache_dir {
-            args.push("--cache-dir".to_string());
-            args.push(cache_dir.clone());
         }
 
         Command::new(&proxy_binary)
@@ -237,7 +228,7 @@ fn find_proxy_binary() -> Result<std::path::PathBuf> {
 }
 
 async fn wait_for_proxy_ready(port: u16) -> Result<()> {
-    let max_attempts = 15; // 15 seconds total
+    let max_attempts = 30; // 30 seconds total
 
     for attempt in 1..=max_attempts {
         match proxy_health_check(port).await {

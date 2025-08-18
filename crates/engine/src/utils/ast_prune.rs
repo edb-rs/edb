@@ -3,12 +3,11 @@ use std::path::PathBuf;
 use eyre::{OptionExt, Result};
 use foundry_compilers::{
     artifacts::{
-        output_selection::OutputSelection, Ast, Contract, Error, Node, NodeType, Settings, Source,
-        SourceUnit, Sources,
+        output_selection::OutputSelection, Ast, Node, NodeType, Settings, Source, SourceUnit,
+        Sources,
     },
-    error::SolcError,
     solc::{SolcCompiler, SolcLanguage, SolcSettings, SolcVersionedInput},
-    Compiler, CompilerInput, CompilerOutput,
+    Compiler, CompilerInput,
 };
 use semver::Version;
 
@@ -191,9 +190,10 @@ mod tests {
 
     use alloy_chains::Chain;
     use alloy_primitives::Address;
-    use edb_utils::onchain_compiler::OnchainCompiler;
     use eyre::Result;
     use foundry_block_explorers::Client;
+
+    use crate::utils::OnchainCompiler;
 
     use super::*;
 
@@ -210,9 +210,9 @@ mod tests {
             .join(chain.to_string());
         let compiler = OnchainCompiler::new(Some(compiler_cache_root))?;
 
-        let (_, _, mut output) =
+        let mut artifact =
             compiler.compile(&client, addr).await?.ok_or_eyre("missing compiler output")?;
-        for (_, contract) in output.sources.iter_mut() {
+        for (_, contract) in artifact.output.sources.iter_mut() {
             ASTPruner::convert(contract.ast.as_mut().ok_or_eyre("AST does not exist")?)?;
         }
 

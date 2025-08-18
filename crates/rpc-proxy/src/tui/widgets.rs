@@ -541,6 +541,7 @@ impl App {
         // Add header-like summary row
         let total_healthy = self.providers.iter().filter(|p| p.is_healthy).count();
         let total_providers = self.providers.len();
+        let mut total_requests = 0;
         let avg_response = self
             .providers
             .iter()
@@ -566,6 +567,7 @@ impl App {
             let request_count = usage_data
                 .and_then(|d| d.get("request_count").and_then(|v| v.as_u64()))
                 .unwrap_or(0);
+            total_requests += request_count;
 
             let success_rate = usage_data
                 .and_then(|d| d.get("success_rate").and_then(|v| v.as_str()))
@@ -616,7 +618,8 @@ impl App {
                     .style(Style::default().add_modifier(Modifier::BOLD)),
                 Cell::from(format!("{}/{}", total_healthy, total_providers))
                     .style(Style::default().add_modifier(Modifier::BOLD)),
-                Cell::from("—"),
+                Cell::from(format!("{}", total_requests))
+                    .style(Style::default().add_modifier(Modifier::BOLD)),
                 Cell::from("—"),
                 Cell::from("100%").style(Style::default().add_modifier(Modifier::BOLD)),
                 Cell::from(format!("{:.0}ms", avg_response))
