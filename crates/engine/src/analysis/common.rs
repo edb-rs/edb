@@ -81,8 +81,8 @@ use crate::{
 /// ```
 #[derive(Debug, Default)]
 pub struct AnalysisResult {
-    /// Maps file paths to their corresponding source analysis results
-    pub sources: HashMap<PathBuf, SourceResult>,
+    /// Maps source index to their corresponding source analysis results
+    pub sources: HashMap<usize, SourceResult>,
     /// Maps unique step identifiers to their source step references for quick lookup
     pub usid_to_step: HashMap<USID, SourceStepRef>,
     /// Maps unique variable identifiers to their variable references (currently unimplemented)
@@ -253,13 +253,28 @@ impl StepAnalysisResult {
                         }
                     }
                     StepHook::VariableInScope(var) => {
-                        format!("  {}: {}(\"{}\")", i + 1, hook.variant_name(), var.name)
+                        format!(
+                            "  {}: {}(\"{}\")",
+                            i + 1,
+                            hook.variant_name(),
+                            var.pretty_display()
+                        )
                     }
                     StepHook::VariableOutOfScope(var) => {
-                        format!("  {}: {}(\"{}\")", i + 1, hook.variant_name(), var.name)
+                        format!(
+                            "  {}: {}(\"{}\")",
+                            i + 1,
+                            hook.variant_name(),
+                            var.pretty_display()
+                        )
                     }
                     StepHook::VariableUpdate(var) => {
-                        format!("  {}: {}(\"{}\")", i + 1, hook.variant_name(), var.name)
+                        format!(
+                            "  {}: {}(\"{}\")",
+                            i + 1,
+                            hook.variant_name(),
+                            var.pretty_display()
+                        )
                     }
                 };
                 output.push_str(&hook_display);
@@ -301,13 +316,28 @@ impl StepAnalysisResult {
                         }
                     }
                     StepHook::VariableInScope(var) => {
-                        format!("  {}: {}(\"{}\")", i + 1, hook.variant_name(), var.name)
+                        format!(
+                            "  {}: {}(\"{}\")",
+                            i + 1,
+                            hook.variant_name(),
+                            var.pretty_display()
+                        )
                     }
                     StepHook::VariableOutOfScope(var) => {
-                        format!("  {}: {}(\"{}\")", i + 1, hook.variant_name(), var.name)
+                        format!(
+                            "  {}: {}(\"{}\")",
+                            i + 1,
+                            hook.variant_name(),
+                            var.pretty_display()
+                        )
                     }
                     StepHook::VariableUpdate(var) => {
-                        format!("  {}: {}(\"{}\")", i + 1, hook.variant_name(), var.name)
+                        format!(
+                            "  {}: {}(\"{}\")",
+                            i + 1,
+                            hook.variant_name(),
+                            var.pretty_display()
+                        )
                     }
                 };
                 output.push_str(&hook_display);
@@ -415,7 +445,7 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
                 steps,
             };
 
-            Ok((path.clone(), result))
+            Ok((source.id as usize, result))
         })
         .collect::<Result<HashMap<_, _>, AnalysisError>>()?;
 
@@ -568,7 +598,7 @@ contract SimpleContract {
         // Verify the analysis result
         assert!(!result.sources.is_empty(), "Should have analyzed at least one source file");
 
-        let source_result = result.sources.get(&file_path).expect("Should find the source file");
+        let source_result = result.sources.get(&0).expect("Should find the source file");
         assert_eq!(source_result.path, file_path);
         assert!(!source_result.steps.is_empty(), "Should have analyzed steps in the contract");
 
