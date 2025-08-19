@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, sync::Arc, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    fmt::Display,
+    sync::{Arc, Mutex},
+};
 
 use derive_more::{Deref, DerefMut};
 use foundry_compilers::artifacts::{
@@ -36,6 +40,12 @@ impl From<USID> for u64 {
 impl From<USID> for alloy_primitives::U256 {
     fn from(usid: USID) -> Self {
         Self::from(usid.0)
+    }
+}
+
+impl Display for USID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

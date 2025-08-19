@@ -183,10 +183,7 @@ impl ExecutionStepInspector {
         };
 
         // Add to records for this frame
-        self.step_records
-            .entry(frame_id)
-            .or_default()
-            .push(step_record);
+        self.step_records.entry(frame_id).or_default().push(step_record);
     }
 
     /// Get all recorded steps for a specific frame
@@ -246,7 +243,6 @@ impl<CTX: ContextTr> Inspector<CTX> for ExecutionStepInspector {
 impl ExecutionStepRecords {
     /// Print comprehensive summary with frame details
     pub fn print_summary(&self) {
-        println!("WFT {:?}", self.keys().into_iter().collect::<Vec<_>>());
         println!(
             "\n\x1b[36m╔══════════════════════════════════════════════════════════════════╗\x1b[0m"
         );

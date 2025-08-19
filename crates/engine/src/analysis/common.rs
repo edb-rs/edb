@@ -43,9 +43,9 @@
 
 use foundry_compilers::artifacts::{Ast, Source, SourceUnit};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use tracing::warn;
 use std::{collections::HashMap, path::PathBuf};
 use thiserror::Error;
+use tracing::warn;
 
 use crate::{
     utils::ASTPruner, Artifact, SourceStepRef, SourceSteps, StepHook, VariableRef, USID, UVID,

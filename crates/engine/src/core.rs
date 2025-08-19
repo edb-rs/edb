@@ -9,6 +9,7 @@
 use alloy_primitives::Address;
 use eyre::Result;
 use foundry_block_explorers::Client;
+use foundry_compilers::{artifacts::SolcInput, solc::Solc};
 use indicatif::{ProgressBar, ProgressStyle};
 use revm::{
     context::{
@@ -31,6 +32,7 @@ use crate::{
     analysis::AnalysisResult,
     analyze,
     inspector::{CallTracer, SnapshotInspector, StateSnapshot, TraceReplayResult},
+    instrument,
     rpc::{start_server, RpcServerHandle},
     utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
     ExecutionFrameId, ExecutionStepInspector, ExecutionStepRecord, ExecutionStepRecords,
@@ -79,10 +81,9 @@ impl Engine {
     /// 2. Downloads verified source code for each contract
     /// 3. Collect opcode-level step execution results
     /// 4. Analyzes the source code to identify instrumentation points
-    /// 5. Instruments the source code
-    /// 6. Recompiles and redeploys the instrumented contracts
-    /// 7. Re-executes the transaction with state snapshots
-    /// 8. Starts a JSON-RPC server with the analysis results and snapshots
+    /// 5. Instruments and recompiles the source code
+    /// 6. Re-executes the transaction with state snapshots
+    /// 7. Starts a JSON-RPC server with the analysis results and snapshots
     pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
     where
         DB: Database + DatabaseCommit + Clone,
@@ -91,8 +92,7 @@ impl Engine {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
 
         // Step 0: Initialize context and database
-        let ForkResult { fork_info, context: ctx, target_tx_env: tx, target_tx_hash: tx_hash } =
-            fork_result;
+        let ForkResult { context: ctx, target_tx_env: tx, .. } = fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
         let replay_result = self.replay_and_collect_trace(ctx.clone(), tx.clone())?;
@@ -102,7 +102,7 @@ impl Engine {
             self.download_verified_source_code(&replay_result, ctx.chain_id().to::<u64>()).await?;
 
         // Step 3: Collect opcode-level step execution results
-        let opcode_snapshots = self.time_travel_at_opcode_level(
+        let opcode_time_travel = self.time_travel_at_opcode_level(
             ctx.clone(),
             tx.clone(),
             artifacts.keys().into_iter().cloned().collect(),
@@ -110,18 +110,18 @@ impl Engine {
 
         // Step 4: Analyze source code to identify instrumentation points
         let analysis_result = self.analyze_source_code(&artifacts)?;
-        unimplemented!("Implement logic to handle replay result");
 
         // Step 5: Instrument source code
+        let recompiled_artifacts =
+            self.instrument_and_recompile_source_code(&artifacts, &analysis_result)?;
+        unimplemented!("Implement logic to handle replay result");
 
-        // Step 6: Recompile instrumented contracts
+        // Step 6: Replace original bytecode with instrumented versions
 
-        // Step 7: Replace original bytecode with instrumented versions
-
-        // Step 8: Re-execute the transaction with snapshot collection
+        // Step 7: Re-execute the transaction with snapshot collection
         let snapshots: Vec<CacheDB<EmptyDB>> = vec![]; // Placeholder for collected snapshots
 
-        // Step 9: Start RPC server with analysis results and snapshots
+        // Step 8: Start RPC server with analysis results and snapshots
         info!("Starting JSON-RPC server on port {}", self.config.rpc_port);
         let rpc_handle = start_server(self.config.rpc_port, analysis_result, snapshots).await?;
 
@@ -256,6 +256,7 @@ impl Engine {
 
         let mut analysis_result = HashMap::new();
         for (address, artifact) in artifacts {
+            debug!("Analyzing contract at address: {}", address);
             let analysis = analyze(artifact)?;
             analysis_result.insert(*address, analysis);
         }
@@ -287,5 +288,39 @@ impl Engine {
         snapshots.print_summary();
 
         Ok(snapshots)
+    }
+
+    fn instrument_and_recompile_source_code(
+        &self,
+        artifacts: &HashMap<Address, Artifact>,
+        analysis_result: &HashMap<Address, AnalysisResult>,
+    ) -> Result<HashMap<Address, Artifact>> {
+        info!("Instrumenting source code based on analysis results");
+
+        let mut recompiled_artifacts = HashMap::new();
+        for (address, artifact) in artifacts {
+            let analysis = analysis_result
+                .get(address)
+                .ok_or_else(|| eyre::eyre!("No analysis result found for address {}", address))?;
+
+            let input = instrument(artifact, analysis)?;
+            let meta = artifact.meta.clone();
+
+            // prepare the compiler
+            let version = meta.compiler_version()?;
+            let compiler = Solc::find_or_install(&version)?;
+
+            // compile the source code
+            let output = match compiler.compile_exact(&input) {
+                Ok(output) => output,
+                Err(e) => {
+                    return Err(eyre::eyre!("failed to recompile contract: {}", e));
+                }
+            };
+
+            recompiled_artifacts.insert(*address, Artifact { meta, input, output });
+        }
+
+        Ok(recompiled_artifacts)
     }
 }

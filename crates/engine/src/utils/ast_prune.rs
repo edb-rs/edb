@@ -15,6 +15,7 @@ use semver::Version;
 pub fn compile_contract_source_to_source_unit(
     solc_version: Version,
     source: &str,
+    prune: bool,
 ) -> Result<SourceUnit> {
     let phantom_file_name = PathBuf::from("Contract.sol");
     let sources = Sources::from_iter([(phantom_file_name.clone(), Source::new(source))]);
@@ -34,7 +35,7 @@ pub fn compile_contract_source_to_source_unit(
         .clone()
         .expect("AST is not selected as output");
 
-    ASTPruner::convert(&mut ast)
+    ASTPruner::convert(&mut ast, prune)
 }
 
 /// We prune the AST to remove or refine nodes that are not strongly related to analysis.
@@ -58,8 +59,10 @@ pub struct ASTPruner {}
 
 impl ASTPruner {
     /// Convert the AST to a SourceUnit.
-    pub fn convert(ast: &mut Ast) -> Result<SourceUnit> {
-        Self::prune(ast)?;
+    pub fn convert(ast: &mut Ast, prune: bool) -> Result<SourceUnit> {
+        if prune {
+            Self::prune(ast)?;
+        }
         let serialized = serde_json::to_string(ast)?;
 
         Ok(serde_json::from_str(&serialized)?)
@@ -213,7 +216,7 @@ mod tests {
         let mut artifact =
             compiler.compile(&client, addr).await?.ok_or_eyre("missing compiler output")?;
         for (_, contract) in artifact.output.sources.iter_mut() {
-            ASTPruner::convert(contract.ast.as_mut().ok_or_eyre("AST does not exist")?)?;
+            ASTPruner::convert(contract.ast.as_mut().ok_or_eyre("AST does not exist")?, true)?;
         }
 
         Ok(())
@@ -285,7 +288,7 @@ mod tests {
         let solc_version = Version::parse("0.8.0").expect("Invalid version");
 
         // Compile the contract source code
-        let result = compile_contract_source_to_source_unit(solc_version, source_code);
+        let result = compile_contract_source_to_source_unit(solc_version, source_code, true);
 
         // Assert that the compilation was successful
         assert!(result.is_ok(), "Compilation failed: {result:?}");
