@@ -613,7 +613,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();
@@ -651,7 +651,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();
@@ -716,7 +716,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();
@@ -798,7 +798,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();
@@ -862,7 +862,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();
@@ -944,7 +944,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();
@@ -1036,7 +1036,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();
@@ -1117,7 +1117,7 @@ contract TestContract {
 
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source);
+        let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Compilation should succeed");
 
         let ast = result.unwrap();

@@ -43,6 +43,7 @@
 
 use foundry_compilers::artifacts::{Ast, Source, SourceUnit};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use tracing::warn;
 use std::{collections::HashMap, path::PathBuf};
 use thiserror::Error;
 
@@ -375,10 +376,35 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
         .par_iter()
         .map(|(path, source)| {
             let mut ast = source.ast.clone().expect("AST is not selected as output");
-            let unit = ASTPruner::convert(&mut ast).expect("Failed to convert AST");
+            let unit = ASTPruner::convert(&mut ast, false).expect("Failed to convert AST");
 
             // do analysis
-            let steps = analyze_source(&unit)?;
+            let mut steps = analyze_source(&unit)?;
+
+            // sort steps in reverse order
+            steps.sort_unstable_by_key(|step| step.source_step.source_location.start);
+            steps.reverse();
+
+            // ensure we do not have overlapped steps
+            // XXX (ZZ): the check failed for the following command, need to investigate
+            //  ./target/debug/edb replay 0xd253e3b563bf7b8894da2a69db836a4e98e337157564483d8ac72117df355a9d
+            //  overlap happens on USDC (0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48)
+            for (i, step) in steps.iter().enumerate() {
+                if i > 0 {
+                    let prev = &steps[i - 1];
+                    let end =
+                        step.source_step.source_location.start.map(|start| {
+                            start + step.source_step.source_location.length.unwrap_or(0)
+                        });
+
+                    if end > prev.source_step.source_location.start {
+                        warn!("Overlapping steps detected: {:?}", step);
+                        // return Err(AnalysisError::StepPartitionError(eyre::eyre!(
+                        //     "Overlapping steps detected"
+                        // )));
+                    }
+                }
+            }
 
             let result = SourceResult {
                 id: source.id,
