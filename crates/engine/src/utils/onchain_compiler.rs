@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use alloy_primitives::Address;
-use edb_utils::{Cache, EDBCache};
+use edb_common::{Cache, EDBCache};
 use eyre::Result;
 use foundry_block_explorers::{contract::Metadata, errors::EtherscanError, Client};
 use foundry_compilers::{

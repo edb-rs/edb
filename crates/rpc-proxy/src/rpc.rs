@@ -730,7 +730,7 @@ impl RpcHandler {
 mod tests {
     use super::*;
     use crate::cache::CacheManager;
-    use edb_utils::logging;
+    use edb_common::logging;
     use tempfile::TempDir;
     use tracing::{debug, info};
     use wiremock::{
@@ -1124,7 +1124,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_provider_tried_once_per_request() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing that each provider is only tried once per request with Option 1");
 
         // Create 3 mock servers that will all return errors

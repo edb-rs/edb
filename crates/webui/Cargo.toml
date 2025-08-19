@@ -39,4 +39,4 @@ eyre.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-edb-utils = { path = "../utils" }
+edb-common = { path = "../common" }

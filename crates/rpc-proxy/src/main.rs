@@ -106,7 +106,7 @@ struct MonitorArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
-    edb_utils::logging::init_logging("edb-rpc-proxy", true)?;
+    edb_common::logging::init_logging("edb-rpc-proxy", true)?;
 
     let args = Args::parse();
 

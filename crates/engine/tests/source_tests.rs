@@ -3,7 +3,7 @@ use tracing::{debug, info, warn};
 
 #[test]
 fn test_source_api_keys_default() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Running test");
     let keys = SourceApiKeys::default();
 
@@ -16,7 +16,7 @@ fn test_source_api_keys_default() {
 
 #[test]
 fn test_source_api_keys_from_env() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Running test");
     // Save current env vars
     let saved_etherscan = std::env::var("ETHERSCAN_API_KEY").ok();
@@ -38,7 +38,7 @@ fn test_source_api_keys_from_env() {
 
 #[test]
 fn test_source_api_keys_clone() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Running test");
     let keys = SourceApiKeys {
         etherscan: Some("key1".to_string()),

@@ -69,7 +69,7 @@ cargo check --all
 cargo test --all --all-features
 
 # Run specific test suites
-cargo test -p edb-utils --test forking_tests
+cargo test -p edb-common --test forking_tests
 cargo test -p edb-engine --test config_tests
 
 # Format code
@@ -105,7 +105,7 @@ cargo run -- --rpc-url https://mainnet.infura.io/v3/YOUR_KEY replay 0x<transacti
 RUST_LOG=debug cargo run -- replay 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
 
 # Run forking integration tests
-ETH_RPC_URL=https://eth.llamarpc.com cargo test -p edb-utils --test forking_tests -- --ignored
+ETH_RPC_URL=https://eth.llamarpc.com cargo test -p edb-common --test forking_tests -- --ignored
 ```
 
 ## Development Areas

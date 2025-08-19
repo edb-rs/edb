@@ -4,8 +4,8 @@
 //! blockchain data for more reliable and faster forking tests.
 
 use alloy_primitives::TxHash;
+use edb_common::fork_and_prepare;
 use edb_rpc_proxy::proxy::ProxyServerBuilder;
-use edb_utils::fork_and_prepare;
 use std::{path::PathBuf, time::Duration};
 use tokio::time::sleep;
 use tracing::{debug, info};
@@ -142,7 +142,7 @@ async fn get_cache_stats(proxy_url: &str) -> Result<serde_json::Value, Box<dyn s
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_with_proxy_cache() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Testing fork and prepare with proxy caching");
 
     let proxy_url = setup_test_proxy_with_cache(3000).await.expect("Failed to setup test proxy");
@@ -188,7 +188,7 @@ async fn test_fork_with_proxy_cache() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_multiple_transactions_with_cache() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Testing multiple transactions with proxy caching");
 
     let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
@@ -232,7 +232,7 @@ async fn test_multiple_transactions_with_cache() {
 
 #[tokio::test]
 async fn test_proxy_endpoints() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     debug!("Testing proxy endpoint functionality");
 
     let proxy_url = setup_test_proxy_with_cache(30).await.expect("Failed to setup test proxy");
@@ -276,7 +276,7 @@ async fn test_proxy_endpoints() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_and_prepare_quick_mode() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Testing fork and prepare in quick mode with caching");
 
     // Setup proxy with cache for more reliable testing
@@ -350,7 +350,7 @@ async fn test_fork_and_prepare_quick_mode() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_at_specific_hardfork_boundaries() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Testing fork at different hardfork boundaries");
 
     // Setup proxy with cache for more reliable testing

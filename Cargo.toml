@@ -5,7 +5,7 @@ members = [
     "crates/webui/",
     "crates/edb/",
     "crates/rpc-proxy/",
-    "crates/utils/",
+    "crates/common/",
     "crates/integration-tests/",
 ]
 resolver = "2"

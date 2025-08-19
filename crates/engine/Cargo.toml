@@ -15,7 +15,7 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-edb-utils = { path = "../utils" }
+edb-common = { path = "../common" }
 
 # alloy - using individual crates like Foundry does
 alloy-chains.workspace = true

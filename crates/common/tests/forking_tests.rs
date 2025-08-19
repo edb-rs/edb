@@ -2,7 +2,7 @@
 
 use alloy_primitives::{address, b256, TxHash, U256};
 use alloy_rpc_types::Transaction;
-use edb_utils::{fork_and_prepare, get_tx_env_from_tx, ForkInfo};
+use edb_common::{fork_and_prepare, get_tx_env_from_tx, ForkInfo};
 use revm::primitives::hardfork::SpecId;
 use tracing::{debug, info};
 
@@ -16,7 +16,7 @@ const TEST_TX_HASH_2: &str = "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_info_creation() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     debug!("Testing ForkInfo struct creation and properties");
 
     let fork_info = ForkInfo {
@@ -34,7 +34,7 @@ async fn test_fork_info_creation() {
 
 #[test]
 fn test_get_tx_env_from_tx() {
-    edb_utils::logging::ensure_test_logging(None);
+    edb_common::logging::ensure_test_logging(None);
     info!("Testing transaction environment extraction");
 
     // Create a mock transaction for testing

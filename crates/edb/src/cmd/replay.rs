@@ -1,8 +1,8 @@
 //! Replay command - replay_transaction function and tests
 
 use alloy_primitives::TxHash;
+use edb_common::fork_and_prepare;
 use edb_engine::{Engine, EngineConfig};
-use edb_utils::fork_and_prepare;
 use eyre::Result;
 
 /// Replay an existing transaction following the correct architecture

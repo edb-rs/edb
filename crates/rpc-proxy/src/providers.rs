@@ -380,7 +380,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_provider_initialization() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing provider initialization with health checks");
 
         // Start mock servers
@@ -419,7 +419,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_round_robin_selection() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing round-robin provider selection");
 
         // Start 3 healthy mock servers
@@ -455,7 +455,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_provider_failure_handling() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         debug!("Testing provider failure detection and handling");
 
         let mock = MockServer::start().await;
@@ -485,7 +485,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_weighted_provider_selection() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         debug!("Testing weighted provider selection based on response time");
 
         // Start 3 healthy mock servers with different response times

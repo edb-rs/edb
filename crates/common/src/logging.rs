@@ -35,7 +35,7 @@ use tracing_subscriber::{
 ///
 /// # Examples
 /// ```rust
-/// use edb_utils::logging;
+/// use edb_common::logging;
 ///
 /// #[tokio::main]
 /// async fn main() -> eyre::Result<()> {
@@ -200,7 +200,7 @@ static TEST_LOGGING_INIT: Once = Once::new();
 ///
 /// # Usage
 /// ```rust
-/// use edb_utils::logging;
+/// use edb_common::logging;
 /// use tracing::info;
 ///
 /// #[test]

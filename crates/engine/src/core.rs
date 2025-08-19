@@ -29,7 +29,7 @@ use std::{
 };
 use tracing::{debug, error, info, warn};
 
-use edb_utils::{CachePath, EDBCachePath, EDBContext, ForkResult, DEFAULT_ETHERSCAN_CACHE_TTL};
+use edb_common::{CachePath, EDBCachePath, EDBContext, ForkResult, DEFAULT_ETHERSCAN_CACHE_TTL};
 
 use crate::{
     analysis::AnalysisResult,

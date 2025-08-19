@@ -16,7 +16,7 @@ workspace = true
 
 [dependencies]
 # EDB internal crates
-edb-utils = { path = "../utils" }
+edb-common = { path = "../common" }
 edb-rpc-proxy = { path = "../rpc-proxy" }
 
 # Test dependencies

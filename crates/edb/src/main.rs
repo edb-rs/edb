@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     // Initialize logging
-    edb_utils::logging::init_logging("edb", true)?;
+    edb_common::logging::init_logging("edb", true)?;
 
     // Parse CLI arguments
     let cli = Cli::parse();

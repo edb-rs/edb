@@ -1,7 +1,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use alloy_primitives::{Address, TxHash};
-use edb_utils::{fork_and_prepare, CachePath, EDBCachePath, EDBContext, ForkResult};
+use edb_common::{fork_and_prepare, CachePath, EDBCachePath, EDBContext, ForkResult};
 use eyre::Result;
 use foundry_block_explorers::Client;
 use revm::{

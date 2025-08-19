@@ -1959,9 +1959,9 @@ dependencies = [
  "assert_cmd",
  "clap",
  "dotenv",
+ "edb-common",
  "edb-engine",
  "edb-tui",
- "edb-utils",
  "edb-webui",
  "eyre",
  "foundry-compilers",
@@ -1971,6 +1971,36 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.19",
+]
+
+[[package]]
+name = "edb-common"
+version = "0.0.1"
+dependencies = [
+ "alloy-chains",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types",
+ "alloy-transport-http",
+ "chrono",
+ "dirs-next",
+ "eyre",
+ "foundry-block-explorers",
+ "foundry-compilers",
+ "futures",
+ "indicatif",
+ "once_cell",
+ "rand 0.8.5",
+ "reqwest",
+ "revm",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tokio",
+ "tracing",
+ "tracing-appender",
  "tracing-subscriber 0.3.19",
 ]
 
@@ -1990,7 +2020,7 @@ dependencies = [
  "alloy-transport-http",
  "axum",
  "derive_more 2.0.1",
- "edb-utils",
+ "edb-common",
  "eyre",
  "foundry-block-explorers",
  "foundry-compilers",
@@ -2022,8 +2052,8 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "chrono",
+ "edb-common",
  "edb-rpc-proxy",
- "edb-utils",
  "eyre",
  "reqwest",
  "revm",
@@ -2047,7 +2077,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossterm",
- "edb-utils",
+ "edb-common",
  "eyre",
  "futures",
  "jsonrpsee",
@@ -2069,7 +2099,7 @@ name = "edb-tui"
 version = "0.0.1"
 dependencies = [
  "crossterm",
- "edb-utils",
+ "edb-common",
  "eyre",
  "jsonrpsee",
  "ratatui",
@@ -2080,41 +2110,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "edb-utils"
-version = "0.0.1"
-dependencies = [
- "alloy-chains",
- "alloy-network",
- "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-types",
- "alloy-transport-http",
- "chrono",
- "dirs-next",
- "eyre",
- "foundry-block-explorers",
- "foundry-compilers",
- "futures",
- "indicatif",
- "once_cell",
- "rand 0.8.5",
- "reqwest",
- "revm",
- "serde",
- "serde_json",
- "serial_test",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber 0.3.19",
-]
-
-[[package]]
 name = "edb-webui"
 version = "0.0.1"
 dependencies = [
  "axum",
- "edb-utils",
+ "edb-common",
  "eyre",
  "jsonrpsee",
  "serde",

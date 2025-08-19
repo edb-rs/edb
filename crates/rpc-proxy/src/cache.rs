@@ -1,6 +1,6 @@
 //! In-memory cache manager for RPC responses with disk persistence
 
-use edb_utils::{
+use edb_common::{
     cache::{CachePath, EDBCachePath},
     forking,
 };
@@ -433,7 +433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_get_set() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing cache get/set operations");
 
         let (manager, _temp_dir) = create_test_cache_manager(10);
@@ -451,7 +451,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_eviction() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing cache eviction behavior");
 
         let (manager, _temp_dir) = create_test_cache_manager(3);
@@ -474,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_eviction_order() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing cache eviction order");
 
         let (manager, _temp_dir) = create_test_cache_manager(3);
@@ -501,7 +501,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_persistence() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing cache persistence across restarts");
 
         let temp_dir = TempDir::new().unwrap();
@@ -522,7 +522,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detailed_stats() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing detailed cache statistics");
 
         let (manager, _temp_dir) = create_test_cache_manager(100);
@@ -553,7 +553,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_entry_timestamps() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         debug!("Testing cache entry timestamp behavior");
 
         let entry1 = CacheEntry::new(serde_json::json!({"test": 1}));
@@ -565,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_merge_and_size_management() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing cache merge functionality and size management");
 
         let temp_dir = TempDir::new().unwrap();
@@ -608,7 +608,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_size_management_disk_larger() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing size management when disk cache is larger");
 
         let temp_dir = TempDir::new().unwrap();
@@ -641,7 +641,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_size_management_memory_larger() {
-        edb_utils::logging::ensure_test_logging(None);
+        edb_common::logging::ensure_test_logging(None);
         info!("Testing size management when memory cache is larger");
 
         let temp_dir = TempDir::new().unwrap();

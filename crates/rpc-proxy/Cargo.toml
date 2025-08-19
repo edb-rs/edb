@@ -64,7 +64,7 @@ crossterm.workspace = true
 ratatui.workspace = true
 
 # EDB internal
-edb-utils = { path = "../utils" }
+edb-common = { path = "../common" }
 
 [dev-dependencies]
 tempfile = "3.0"

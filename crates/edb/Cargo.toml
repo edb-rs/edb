@@ -23,7 +23,7 @@ workspace = true
 edb-engine = { path = "../engine" }
 edb-tui = { path = "../tui" }
 edb-webui = { path = "../webui" }
-edb-utils = { path = "../utils" }
+edb-common = { path = "../common" }
 
 # alloy - using individual crates like Foundry does
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }

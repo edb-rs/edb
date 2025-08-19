@@ -20,7 +20,7 @@
 //! 3. Store the committed state as our snapshot
 
 use alloy_primitives::{Address, Bytes, U256};
-use edb_utils::EDBContext;
+use edb_common::EDBContext;
 use eyre::Result;
 use revm::{
     context::{ContextTr, CreateScheme, TxEnv},
