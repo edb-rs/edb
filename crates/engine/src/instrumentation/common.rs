@@ -1,25 +1,21 @@
 //! Common utilities for instrumentation
 
-use std::{
-    hash::Hash,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 
-use crate::{source, AnalysisResult, Artifact, SourceResult, StepAnalysisResult};
-use axum::routing::post;
+use crate::{AnalysisResult, Artifact, SourceResult, StepAnalysisResult};
 use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
 
 pub fn instrument(artifact: &Artifact, analysis: &AnalysisResult) -> Result<SolcInput> {
     let mut instrumented_input = artifact.input.clone();
-    for (path, analysis_data) in &analysis.sources {
-        let source = instrumented_input
-            .sources
-            .get(path)
-            .ok_or(eyre::eyre!("Source code for path {:?} not found in input sources", path))?;
+    for (_, analysis_data) in &analysis.sources {
+        let source = instrumented_input.sources.get(&analysis_data.path).ok_or(eyre::eyre!(
+            "Source code for path {:?} not found in input sources",
+            analysis_data.path
+        ))?;
 
-        let instrumented_source = instrument_inner(path, source, analysis_data)?;
-        instrumented_input.sources.insert(path.clone(), instrumented_source);
+        let instrumented_source = instrument_inner(&analysis_data.path, source, analysis_data)?;
+        instrumented_input.sources.insert(analysis_data.path.clone(), instrumented_source);
     }
 
     Ok(instrumented_input)

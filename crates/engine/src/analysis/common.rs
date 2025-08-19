@@ -48,7 +48,8 @@ use thiserror::Error;
 use tracing::warn;
 
 use crate::{
-    utils::ASTPruner, Artifact, SourceStepRef, SourceSteps, StepHook, VariableRef, USID, UVID,
+    utils::ASTPruner, AnnotationsToChange, Artifact, SourceStepRef, SourceSteps, StepHook,
+    VariableRef, USID, UVID,
 };
 
 /// Main analysis result containing debugging information from source code analysis.
@@ -116,6 +117,8 @@ pub struct SourceResult {
     pub unit: SourceUnit,
     /// List of analyzed execution steps in this file
     pub steps: Vec<StepAnalysisResult>,
+    /// List of annotations (state variable visibility, function visibility and mutability) to change
+    pub annotations: Vec<AnnotationsToChange>,
 }
 
 /// Analysis result for a single execution step.
@@ -443,6 +446,7 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
                 ast,
                 unit,
                 steps,
+                annotations: vec![],
             };
 
             Ok((source.id as usize, result))
