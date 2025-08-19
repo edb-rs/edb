@@ -228,7 +228,7 @@ fn find_proxy_binary() -> Result<std::path::PathBuf> {
 }
 
 async fn wait_for_proxy_ready(port: u16) -> Result<()> {
-    let max_attempts = 30; // 30 seconds total
+    let max_attempts = 120; // 120 seconds total
 
     for attempt in 1..=max_attempts {
         match proxy_health_check(port).await {

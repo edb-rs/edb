@@ -18,13 +18,22 @@ use revm::{
     database::{CacheDB, EmptyDB},
     Database, DatabaseCommit, InspectEvm, MainBuilder,
 };
-use std::{collections::HashMap, hash::Hash, path::PathBuf, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    time::Duration,
+};
 use tracing::{debug, error, info, warn};
 
 use edb_utils::{CachePath, EDBCachePath, EDBContext, ForkResult, DEFAULT_ETHERSCAN_CACHE_TTL};
 
 use crate::{
-    analysis::AnalysisResult, analyze, inspector::{CallTracer, TraceReplayResult}, rpc::{start_server, RpcServerHandle}, utils::{next_etherscan_api_key, Artifact, OnchainCompiler}
+    analysis::AnalysisResult,
+    analyze,
+    inspector::{CallTracer, SnapshotInspector, StateSnapshot, TraceReplayResult},
+    rpc::{start_server, RpcServerHandle},
+    utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
+    ExecutionFrameId, ExecutionStepInspector, ExecutionStepRecord, ExecutionStepRecords,
 };
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
@@ -68,15 +77,17 @@ impl Engine {
     /// It focuses on the core debugging workflow:
     /// 1. Replays the target transaction to collect touched contracts
     /// 2. Downloads verified source code for each contract
-    /// 3. Analyzes the source code to identify instrumentation points
-    /// 4. Instruments the source code
-    /// 5. Recompiles and redeploys the instrumented contracts
-    /// 6. Re-executes the transaction with state snapshots
-    /// 7. Starts a JSON-RPC server with the analysis results and snapshots
-    pub async fn prepare<DB: Database + DatabaseCommit + Clone>(
-        &self,
-        fork_result: ForkResult<DB>,
-    ) -> Result<RpcServerHandle> {
+    /// 3. Collect opcode-level step execution results
+    /// 4. Analyzes the source code to identify instrumentation points
+    /// 5. Instruments the source code
+    /// 6. Recompiles and redeploys the instrumented contracts
+    /// 7. Re-executes the transaction with state snapshots
+    /// 8. Starts a JSON-RPC server with the analysis results and snapshots
+    pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
+    where
+        DB: Database + DatabaseCommit + Clone,
+        <DB as Database>::Error: Clone,
+    {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
 
         // Step 0: Initialize context and database
@@ -84,28 +95,33 @@ impl Engine {
             fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
-        let (replay_result, ctx) = self.replay_and_collect_trace(ctx, tx.clone())?;
+        let replay_result = self.replay_and_collect_trace(ctx.clone(), tx.clone())?;
 
         // Step 2: Download verified source code for each contract
         let artifacts =
             self.download_verified_source_code(&replay_result, ctx.chain_id().to::<u64>()).await?;
 
-        // Step 3: Analyze source code to identify instrumentation points
-        let analysis_result = self.analyze_source_code(
-            &artifacts,
+        // Step 3: Collect opcode-level step execution results
+        let opcode_snapshots = self.time_travel_at_opcode_level(
+            ctx.clone(),
+            tx.clone(),
+            artifacts.keys().into_iter().cloned().collect(),
         )?;
+
+        // Step 4: Analyze source code to identify instrumentation points
+        let analysis_result = self.analyze_source_code(&artifacts)?;
         unimplemented!("Implement logic to handle replay result");
 
-        // Step 4: Instrument source code
+        // Step 5: Instrument source code
 
-        // Step 5: Recompile instrumented contracts
+        // Step 6: Recompile instrumented contracts
 
-        // Step 6: Replace original bytecode with instrumented versions
+        // Step 7: Replace original bytecode with instrumented versions
 
-        // Step 7: Re-execute the transaction with snapshot collection
+        // Step 8: Re-execute the transaction with snapshot collection
         let snapshots: Vec<CacheDB<EmptyDB>> = vec![]; // Placeholder for collected snapshots
 
-        // Step 8: Start RPC server with analysis results and snapshots
+        // Step 9: Start RPC server with analysis results and snapshots
         info!("Starting JSON-RPC server on port {}", self.config.rpc_port);
         let rpc_handle = start_server(self.config.rpc_port, analysis_result, snapshots).await?;
 
@@ -113,11 +129,15 @@ impl Engine {
     }
 
     /// Replay the target transaction and collect call trace with all touched addresses
-    fn replay_and_collect_trace<DB: Database>(
+    fn replay_and_collect_trace<DB>(
         &self,
         ctx: EDBContext<DB>,
         tx: TxEnv,
-    ) -> Result<(TraceReplayResult, EDBContext<DB>)> {
+    ) -> Result<TraceReplayResult>
+    where
+        DB: Database + Clone,
+        <DB as Database>::Error: Clone,
+    {
         info!("Replaying transaction to collect call trace and touched addresses");
 
         let mut tracer = CallTracer::new();
@@ -133,18 +153,21 @@ impl Engine {
             }
         }
 
-        let ctx = evm.ctx;
         let result = tracer.into_replay_result();
 
         for (address, deployed) in &result.visited_addresses {
             if *deployed {
-                info!("Contract {} was deployed during transaction replay", address);
+                debug!("Contract {} was deployed during transaction replay", address);
             } else {
-                info!("Address {} was touched during transaction replay", address);
+                debug!("Address {} was touched during transaction replay", address);
             }
         }
 
-        Ok((result, ctx))
+        // Print the trace tree structure for debugging
+        #[cfg(debug_assertions)]
+        result.execution_trace.print_trace_tree();
+
+        Ok(result)
     }
 
     /// Download and compile verified source code for each contract
@@ -238,5 +261,31 @@ impl Engine {
         }
 
         Ok(analysis_result)
+    }
+
+    fn time_travel_at_opcode_level<DB>(
+        &self,
+        ctx: EDBContext<DB>,
+        tx: TxEnv,
+        touched_addresses: HashSet<Address>,
+    ) -> Result<ExecutionStepRecords>
+    where
+        DB: Database + Clone,
+        <DB as Database>::Error: Clone,
+    {
+        info!("Collecting opcode-level step execution results");
+
+        let mut inspector = ExecutionStepInspector::with_excluded_addresses(touched_addresses);
+        let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
+
+        evm.inspect_one_tx(tx)
+            .map_err(|e| eyre::eyre!("Failed to inspect the target transaction: {:?}", e))?;
+
+        let snapshots = inspector.into_step_records();
+
+        #[cfg(debug_assertions)]
+        snapshots.print_summary();
+
+        Ok(snapshots)
     }
 }

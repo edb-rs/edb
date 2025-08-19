@@ -13,8 +13,8 @@ use axum::{
 use eyre::Result;
 use revm::database::CacheDB;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr};
 use std::sync::Arc;
+use std::{collections::HashMap, net::SocketAddr};
 
 /// Handle to the running RPC server
 #[derive(Debug)]
