@@ -20,7 +20,7 @@ use revm::{
     Context, Database, DatabaseCommit, ExecuteCommitEvm, MainBuilder, MainContext,
 };
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use revm::{
     // Use re-exported primitives from revm
@@ -78,6 +78,7 @@ pub async fn fork_and_prepare(
     rpc_url: &str,
     target_tx_hash: TxHash,
     quick: bool,
+    relax_execution: bool,
 ) -> Result<ForkResult<DebugDB<impl Database + DatabaseCommit + Clone>>> {
     info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
 
@@ -87,7 +88,9 @@ pub async fn fork_and_prepare(
         .get_chain_id()
         .await
         .map_err(|e| eyre::eyre!("Failed to get chain ID: {:?}", e))?;
-    debug_assert_eq!(chain_id, 1, "Expected mainnet chain ID 1, got {chain_id}");
+    if chain_id != 1 {
+        warn!("We currently only support mainnet (chain ID 1), got {chain_id}. Use it at your own risk.");
+    }
 
     // Get the target transaction to find which block it's in
     let target_tx = provider
@@ -156,6 +159,13 @@ pub async fn fork_and_prepare(
         .modify_cfg_chained(|c| {
             c.chain_id = chain_id;
             c.spec = spec_id;
+            if relax_execution {
+                c.disable_base_fee = true;
+                c.disable_block_gas_limit = true;
+                c.tx_gas_limit_cap = None;
+                c.limit_contract_initcode_size = None;
+                c.limit_contract_code_size = None;
+            }
         });
 
     let mut evm = ctx.build_mainnet();
@@ -244,7 +254,11 @@ pub async fn fork_and_prepare(
     }
 
     // Get the target transaction environment
-    let target_tx_env = get_tx_env_from_tx(&target_tx, chain_id)?;
+    let mut target_tx_env = get_tx_env_from_tx(&target_tx, chain_id)?;
+    if relax_execution {
+        target_tx_env.gas_limit = u64::MAX; // Relax gas limit for execution
+        target_tx_env.gas_price = 0; // Relax gas price for execution
+    }
 
     // Extract the context from the EVM
     let context = evm.ctx;

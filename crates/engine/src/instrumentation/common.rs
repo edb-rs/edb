@@ -2,12 +2,12 @@
 
 use std::path::PathBuf;
 
-use crate::{AnalysisResult, Artifact, SourceResult, StepAnalysisResult};
+use crate::{AnalysisResult, SourceResult, StepAnalysisResult};
 use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
 
-pub fn instrument(artifact: &Artifact, analysis: &AnalysisResult) -> Result<SolcInput> {
-    let mut instrumented_input = artifact.input.clone();
+pub fn instrument(input: &SolcInput, analysis: &AnalysisResult) -> Result<SolcInput> {
+    let mut instrumented_input = input.clone();
     for (_, analysis_data) in &analysis.sources {
         let source = instrumented_input.sources.get(&analysis_data.path).ok_or(eyre::eyre!(
             "Source code for path {:?} not found in input sources",
@@ -58,7 +58,7 @@ fn instrument_before_step(
     path: &PathBuf,
 ) {
     let checkpoint_call = format!(
-        "address(0x0000000000000000000000000000000000023333).call(abi.encode(\"{}\", {}));\n",
+        "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode(\"{}\", {}));\n",
         path.as_os_str().to_string_lossy(),
         step_result.source_step.usid,
     );

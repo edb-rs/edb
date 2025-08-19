@@ -16,5 +16,8 @@ pub use rpc::*;
 pub mod source;
 pub use source::*;
 
+pub mod tweak;
+pub use tweak::*;
+
 pub mod utils;
 pub use utils::*;

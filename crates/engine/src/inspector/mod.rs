@@ -3,7 +3,9 @@
 mod call_tracer;
 mod snapshot_inspector;
 mod step_inspector;
+mod tweak_inspector;
 
 pub use call_tracer::*;
 pub use snapshot_inspector::*;
 pub use step_inspector::*;
+pub use tweak_inspector::*;

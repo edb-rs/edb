@@ -9,7 +9,10 @@
 use alloy_primitives::Address;
 use eyre::Result;
 use foundry_block_explorers::Client;
-use foundry_compilers::{artifacts::SolcInput, solc::Solc};
+use foundry_compilers::{
+    artifacts::{Severity, SolcInput},
+    solc::Solc,
+};
 use indicatif::{ProgressBar, ProgressStyle};
 use revm::{
     context::{
@@ -178,7 +181,6 @@ impl Engine {
     ) -> Result<HashMap<Address, Artifact>> {
         info!("Downloading verified source code for touched contracts");
 
-        let api_key_env = std::env::var("ETHERSCAN_API_KEY").ok();
         let compiler = OnchainCompiler::new(None)?;
 
         let compiler_cache_root =
@@ -206,11 +208,7 @@ impl Engine {
             console_bar.set_message(format!("contract {}: 0x{}...", i + 1, short_addr));
 
             // We use the default API key if none is provided
-            let api_key = if let Some(api_key) = &api_key_env {
-                api_key.clone()
-            } else {
-                next_etherscan_api_key()
-            };
+            let api_key = self.get_etherscan_api_key();
 
             let etherscan = Client::builder()
                 .with_api_key(api_key)
@@ -248,6 +246,7 @@ impl Engine {
         Ok(artifacts)
     }
 
+    /// Analyze the source code for instrumentation points and variable usage
     fn analyze_source_code(
         &self,
         artifacts: &HashMap<Address, Artifact>,
@@ -264,6 +263,8 @@ impl Engine {
         Ok(analysis_result)
     }
 
+    /// Time travel (i.e., snapshotting) at the opcode level for contracts we do not
+    /// have source code.
     fn time_travel_at_opcode_level<DB>(
         &self,
         ctx: EDBContext<DB>,
@@ -290,6 +291,7 @@ impl Engine {
         Ok(snapshots)
     }
 
+    /// Instrument and recompile the source code
     fn instrument_and_recompile_source_code(
         &self,
         artifacts: &HashMap<Address, Artifact>,
@@ -303,7 +305,7 @@ impl Engine {
                 .get(address)
                 .ok_or_else(|| eyre::eyre!("No analysis result found for address {}", address))?;
 
-            let input = instrument(artifact, analysis)?;
+            let input = instrument(&artifact.input, analysis)?;
             let meta = artifact.meta.clone();
 
             // prepare the compiler
@@ -317,10 +319,37 @@ impl Engine {
                     return Err(eyre::eyre!("failed to recompile contract: {}", e));
                 }
             };
+            if output.errors.iter().any(|e| e.is_error()) {
+                return Err(eyre::eyre!(
+                    "Recompilation failed for contract {}: {}",
+                    address,
+                    output
+                        .errors
+                        .iter()
+                        .filter(|e| e.is_error())
+                        .map(|e| format!("\n{}", e))
+                        .collect::<Vec<_>>()
+                        .join(""),
+                ));
+            }
+
+            println!(
+                "Recompiled Contract {}: {} vs {}",
+                address,
+                artifact.output.contracts.len(),
+                output.contracts.len()
+            );
 
             recompiled_artifacts.insert(*address, Artifact { meta, input, output });
         }
 
         Ok(recompiled_artifacts)
+    }
+}
+
+// Helper functions
+impl Engine {
+    fn get_etherscan_api_key(&self) -> String {
+        self.config.etherscan_api_key.clone().unwrap_or(next_etherscan_api_key())
     }
 }
