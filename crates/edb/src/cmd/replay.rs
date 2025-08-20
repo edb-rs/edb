@@ -15,7 +15,7 @@ pub async fn replay_transaction(
 
     // Step 1: Fork the chain and replay earlier transactions in the block
     // Fork and prepare the database/environment for the target transaction
-    let fork_result = fork_and_prepare(rpc_url, tx_hash, cli.quick, false).await?;
+    let fork_result = fork_and_prepare(rpc_url, tx_hash, cli.quick).await?;
 
     tracing::info!(
         "Forked chain and prepared database for transaction replay at block {}",

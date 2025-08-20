@@ -3,8 +3,10 @@
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
 
 use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EdbContext, EdbDB};
+use alloy_network::Network;
 use alloy_primitives::{TxHash, TxKind, B256, U256};
 use alloy_provider::{
+    fillers::{FillProvider, TxFiller},
     layers::{CacheProvider, SharedCache},
     Provider, ProviderBuilder,
 };
@@ -15,10 +17,10 @@ use revm::{
     context::{ContextTr, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
     database::{AlloyDB, CacheDB, StateBuilder},
-    Context, Database, DatabaseCommit, ExecuteCommitEvm, MainBuilder, MainContext,
+    Context, Database, DatabaseCommit, DatabaseRef, ExecuteCommitEvm, MainBuilder, MainContext,
 };
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, field::debug, info, warn};
 
 use revm::{
     // Use re-exported primitives from revm
@@ -45,7 +47,8 @@ pub struct ForkInfo {
 /// Result of forking operation containing comprehensive replay information
 pub struct ForkResult<DB>
 where
-    DB: Database + DatabaseCommit + Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
     /// Fork information
@@ -76,8 +79,7 @@ pub async fn fork_and_prepare(
     rpc_url: &str,
     target_tx_hash: TxHash,
     quick: bool,
-    relax_execution: bool,
-) -> Result<ForkResult<EdbDB<impl Database + DatabaseCommit + Clone>>> {
+) -> Result<ForkResult<EdbDB<impl Clone + Database + DatabaseCommit + DatabaseRef>>> {
     info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
 
     let provider = ProviderBuilder::new().connect(rpc_url).await?;
@@ -136,12 +138,11 @@ pub async fn fork_and_prepare(
     // Create revm database: we start with AlloyDB.
     let state_db = WrapDatabaseAsync::new(AlloyDB::new(provider, (target_block_number - 1).into()))
         .ok_or(eyre::eyre!("Failed to create AlloyDB"))?;
-    let cache_db: CacheDB<_> = CacheDB::new(Arc::new(state_db));
-    // let debug_db = EdbDB::new(StateBuilder::new_with_database(cache_db).build());
-    let debug_db = EdbDB::new(cache_db);
+    let debug_db = EdbDB::new(CacheDB::new(Arc::new(state_db)));
+    let cache_db: CacheDB<_> = CacheDB::new(debug_db);
 
     let ctx = Context::mainnet()
-        .with_db(debug_db)
+        .with_db(cache_db)
         .modify_block_chained(|b| {
             b.number = U256::from(target_block_number);
             b.timestamp = U256::from(block.header.timestamp);
@@ -157,13 +158,6 @@ pub async fn fork_and_prepare(
         .modify_cfg_chained(|c| {
             c.chain_id = chain_id;
             c.spec = spec_id;
-            if relax_execution {
-                c.disable_base_fee = true;
-                c.disable_block_gas_limit = true;
-                c.tx_gas_limit_cap = None;
-                c.limit_contract_initcode_size = None;
-                c.limit_contract_code_size = None;
-            }
         });
 
     let mut evm = ctx.build_mainnet();
@@ -252,11 +246,7 @@ pub async fn fork_and_prepare(
     }
 
     // Get the target transaction environment
-    let mut target_tx_env = get_tx_env_from_tx(&target_tx, chain_id)?;
-    if relax_execution {
-        target_tx_env.gas_limit = u64::MAX; // Relax gas limit for execution
-        target_tx_env.gas_price = 0; // Relax gas price for execution
-    }
+    let target_tx_env = get_tx_env_from_tx(&target_tx, chain_id)?;
 
     // Extract the context from the EVM
     let context = evm.ctx;

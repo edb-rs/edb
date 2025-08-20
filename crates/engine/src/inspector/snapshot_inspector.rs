@@ -24,9 +24,9 @@ use edb_common::EdbContext;
 use eyre::Result;
 use revm::{
     context::{ContextTr, CreateScheme, TxEnv},
-    database::{Database, DatabaseCommit},
+    database::{CacheDB, Database, DatabaseCommit},
     interpreter::{CallScheme, InstructionResult},
-    Inspector,
+    DatabaseRef, Inspector,
 };
 use std::collections::VecDeque;
 use tracing::{debug, info};
@@ -57,7 +57,7 @@ pub enum SnapshotTrigger {
 
 /// A complete snapshot of EVM state at a specific point in execution
 #[derive(Debug, Clone)]
-pub struct StateSnapshot<DB: Database + DatabaseCommit + Clone> {
+pub struct StateSnapshot<DB: Database + DatabaseCommit + DatabaseRef + Clone> {
     /// Unique identifier for this snapshot
     pub id: usize,
     /// What triggered this snapshot
@@ -65,7 +65,7 @@ pub struct StateSnapshot<DB: Database + DatabaseCommit + Clone> {
     /// Current call depth when snapshot was taken
     pub call_depth: usize,
     /// Complete database state at this point
-    pub database: DB,
+    pub database: CacheDB<DB>,
     /// Block environment at this point
     pub block_env: revm::context::BlockEnv,
     /// Transaction environment at this point
@@ -80,7 +80,7 @@ pub struct StateSnapshot<DB: Database + DatabaseCommit + Clone> {
     pub contract_address: Option<Address>,
 }
 
-impl<DB: Database + DatabaseCommit + Clone> StateSnapshot<DB> {
+impl<DB: Database + DatabaseCommit + DatabaseRef + Clone> StateSnapshot<DB> {
     /// Get a description of this snapshot
     pub fn description(&self) -> String {
         match &self.trigger {
@@ -104,7 +104,7 @@ impl<DB: Database + DatabaseCommit + Clone> StateSnapshot<DB> {
 ///
 /// This inspector maintains a list of state snapshots that can be used to reconstruct
 /// the EVM state at any point during transaction execution.
-pub struct SnapshotInspector<DB: Database + DatabaseCommit + Clone> {
+pub struct SnapshotInspector<DB: Database + DatabaseCommit + DatabaseRef + Clone> {
     /// List of captured snapshots in execution order
     snapshots: VecDeque<StateSnapshot<DB>>,
     /// Current snapshot ID counter
@@ -115,7 +115,7 @@ pub struct SnapshotInspector<DB: Database + DatabaseCommit + Clone> {
     max_snapshots: Option<usize>,
 }
 
-impl<DB: Database + DatabaseCommit + Clone> SnapshotInspector<DB> {
+impl<DB: Database + DatabaseCommit + DatabaseRef + Clone> SnapshotInspector<DB> {
     /// Create a new snapshot inspector
     pub fn new() -> Self {
         Self {
@@ -219,7 +219,7 @@ impl<DB: Database + DatabaseCommit + Clone> SnapshotInspector<DB> {
     }
 }
 
-impl<DB: Database + DatabaseCommit + Clone> Default for SnapshotInspector<DB> {
+impl<DB: Database + DatabaseCommit + DatabaseRef + Clone> Default for SnapshotInspector<DB> {
     fn default() -> Self {
         Self::new()
     }
@@ -228,7 +228,9 @@ impl<DB: Database + DatabaseCommit + Clone> Default for SnapshotInspector<DB> {
 // Implementation of Inspector trait for SnapshotInspector
 impl<DB> Inspector<EdbContext<DB>> for SnapshotInspector<DB>
 where
-    DB: Database + DatabaseCommit + Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
 {
     /// Called when a call operation starts
     fn call(

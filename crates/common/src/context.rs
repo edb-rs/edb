@@ -3,15 +3,33 @@
 
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
+    database::CacheDB,
     database_interface::DBErrorMarker,
     primitives::{Address, HashMap, B256, U256},
     state::{Account, AccountInfo, Bytecode},
-    Context, Database, DatabaseCommit,
+    Context, Database, DatabaseCommit, DatabaseRef,
 };
 use std::fmt;
 
 /// Type alias for the EDB context
-pub type EdbContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
+pub type EdbContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, CacheDB<DB>>;
+
+/// Relax the constraints on the context
+pub fn relax_context_constraints<DB: Database + DatabaseRef>(
+    context: &mut EdbContext<DB>,
+    tx: &mut TxEnv,
+) {
+    let cfg = &mut context.cfg;
+    cfg.disable_base_fee = true;
+    cfg.disable_block_gas_limit = true;
+    cfg.tx_gas_limit_cap = None;
+    cfg.limit_contract_initcode_size = None;
+    cfg.limit_contract_code_size = None;
+
+    tx.gas_limit = u64::MAX; // Relax gas limit for execution
+    tx.gas_price = 0; // Relax gas price for execution
+    tx.gas_priority_fee = None; // Relax gas priority fee for execution
+}
 
 /// A cloneable error type for EdbDB
 #[derive(Clone, Debug)]
@@ -101,5 +119,29 @@ where
 {
     fn commit(&mut self, changes: HashMap<Address, Account>) {
         self.inner.commit(changes)
+    }
+}
+
+impl<DB> DatabaseRef for EdbDB<DB>
+where
+    DB: DatabaseRef + Database,
+    <DB as Database>::Error: std::error::Error,
+{
+    type Error = EdbDBError;
+
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        self.inner.basic_ref(address).map_err(EdbDBError::from_error)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
+        self.inner.code_by_hash_ref(code_hash).map_err(EdbDBError::from_error)
+    }
+
+    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+        self.inner.storage_ref(address, index).map_err(EdbDBError::from_error)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        self.inner.block_hash_ref(number).map_err(EdbDBError::from_error)
     }
 }

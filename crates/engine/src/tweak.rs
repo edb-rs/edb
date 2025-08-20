@@ -1,24 +1,39 @@
 use std::{path::PathBuf, time::Duration};
 
-use alloy_primitives::{Address, TxHash};
-use edb_common::{fork_and_prepare, CachePath, EdbCachePath, EdbContext, ForkResult};
+use alloy_primitives::{keccak256, Address, Bytes, TxHash, B256};
+use edb_common::{
+    fork_and_prepare, relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
+};
 use eyre::Result;
 use foundry_block_explorers::Client;
 use foundry_compilers::Artifact as _;
 use revm::{
     context::{Cfg, ContextTr},
-    Database, DatabaseCommit,
+    database::CacheDB,
+    primitives::KECCAK_EMPTY,
+    state::Bytecode,
+    Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
 
-use crate::{next_etherscan_api_key, Artifact, TweakInspectorBuilder};
+use crate::{next_etherscan_api_key, tweak, Artifact, TweakInspectorBuilder};
 
-pub struct CodeTweaker<'a, DB: Database + DatabaseCommit> {
+pub struct CodeTweaker<'a, DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
     ctx: &'a mut EdbContext<DB>,
     rpc_url: String,
     etherscan_api_key: Option<String>,
 }
 
-impl<'a, DB: Database + DatabaseCommit> CodeTweaker<'a, DB> {
+impl<'a, DB> CodeTweaker<'a, DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
     pub fn new(
         ctx: &'a mut EdbContext<DB>,
         rpc_url: String,
@@ -28,11 +43,37 @@ impl<'a, DB: Database + DatabaseCommit> CodeTweaker<'a, DB> {
     }
 
     pub async fn tweak(&mut self, addr: &Address, artifact: &Artifact, quick: bool) -> Result<()> {
-        let creation_tx = self.get_creation_tx(addr).await?;
+        let tweaked_code = self.get_tweaked_code(addr, artifact, quick).await?;
+
+        let db = self.ctx.db_mut();
+
+        let mut info = db
+            .basic(*addr)
+            .map_err(|e| eyre::eyre!("Failed to get account info for {}: {}", addr, e))?
+            .unwrap_or_default();
+        let code_hash = if tweaked_code.as_ref().is_empty() {
+            KECCAK_EMPTY
+        } else {
+            B256::from_slice(&keccak256(tweaked_code.as_ref())[..])
+        };
+        info.code_hash = code_hash;
+        info.code = Some(Bytecode::new_raw(tweaked_code));
+        db.insert_account_info(*addr, info);
+        Ok(())
+    }
+
+    async fn get_tweaked_code(
+        &self,
+        addr: &Address,
+        artifact: &Artifact,
+        quick: bool,
+    ) -> Result<Bytes> {
+        let creation_tx_hash = self.get_creation_tx(addr).await?;
 
         // Create replay environment
-        let ForkResult { context: replay_ctx, target_tx_env: creation_tx, .. } =
-            fork_and_prepare(&self.rpc_url, creation_tx, quick, false).await?;
+        let ForkResult { context: mut replay_ctx, target_tx_env: mut creation_tx_env, .. } =
+            fork_and_prepare(&self.rpc_url, creation_tx_hash, quick).await?;
+        relax_context_constraints(&mut replay_ctx, &mut creation_tx_env);
 
         // Get init code
         let init_code = artifact
@@ -43,7 +84,7 @@ impl<'a, DB: Database + DatabaseCommit> CodeTweaker<'a, DB> {
             .as_ref()
             .clone();
 
-        let inspector = TweakInspectorBuilder::new()
+        let mut inspector = TweakInspectorBuilder::new()
             .target_address(*addr)
             .init_code(init_code)
             .constructor_args(artifact.constructor_arguments().clone())
@@ -52,7 +93,12 @@ impl<'a, DB: Database + DatabaseCommit> CodeTweaker<'a, DB> {
                 eyre::eyre!("Failed to build tweak inspector for address {}: {}", addr, e)
             })?;
 
-        Ok(())
+        let mut evm = replay_ctx.build_mainnet_with_inspector(&mut inspector);
+
+        evm.inspect_one_tx(creation_tx_env)
+            .map_err(|e| eyre::eyre!("Failed to inspect the target transaction: {:?}", e))?;
+
+        inspector.into_deployed_code()
     }
 
     async fn get_creation_tx(&self, addr: &Address) -> Result<TxHash> {

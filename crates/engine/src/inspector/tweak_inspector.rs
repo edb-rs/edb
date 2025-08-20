@@ -4,10 +4,13 @@
 //! with custom bytecode when the deployment would create a specific target address.
 
 use alloy_primitives::{Address, Bytes};
+use edb_common::EdbContext;
+use eyre::Result;
 use revm::{
-    context::{ContextTr, CreateScheme, JournalTr},
+    context::{CreateScheme, JournalTr},
+    database::CacheDB,
     interpreter::{CreateInputs, CreateOutcome},
-    Inspector,
+    Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use tracing::{debug, info};
 
@@ -52,6 +55,11 @@ impl TweakInspector {
         self.found_target
     }
 
+    /// Generate the deployed code
+    pub fn into_deployed_code(self) -> Result<Bytes> {
+        self.deployed_code.ok_or(eyre::eyre!("No deployed code found"))
+    }
+
     /// Combine init code with constructor arguments
     fn get_full_init_code(&self) -> Bytes {
         let mut full_code = self.init_code.to_vec();
@@ -60,10 +68,19 @@ impl TweakInspector {
     }
 }
 
-impl<CTX: ContextTr + JournalTr> Inspector<CTX> for TweakInspector {
-    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+impl<DB> Inspector<EdbContext<DB>> for TweakInspector
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    fn create(
+        &mut self,
+        context: &mut EdbContext<DB>,
+        inputs: &mut CreateInputs,
+    ) -> Option<CreateOutcome> {
         // Get the nonce from the caller account
-        let account = context.load_account(inputs.caller).ok()?;
+        let account = context.journaled_state.load_account(inputs.caller).ok()?;
         let nonce = account.info.nonce;
 
         // Calculate what address would be created using the built-in method
@@ -104,7 +121,7 @@ impl<CTX: ContextTr + JournalTr> Inspector<CTX> for TweakInspector {
 
     fn create_end(
         &mut self,
-        context: &mut CTX,
+        _context: &mut EdbContext<DB>,
         inputs: &CreateInputs,
         outcome: &mut CreateOutcome,
     ) {

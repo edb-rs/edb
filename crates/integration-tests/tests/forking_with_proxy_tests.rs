@@ -154,7 +154,7 @@ async fn test_fork_with_proxy_cache() {
     println!("Testing fork with proxy caching...");
     let start = std::time::Instant::now();
 
-    let result = fork_and_prepare(&proxy_url, tx_hash, false, false).await;
+    let result = fork_and_prepare(&proxy_url, tx_hash, false).await;
     let duration = start.elapsed();
 
     assert!(result.is_ok(), "Fork failed: {:?}", result.err());
@@ -167,7 +167,7 @@ async fn test_fork_with_proxy_cache() {
 
         // Test second fork (should be faster due to caching)
         let start2 = std::time::Instant::now();
-        let result2 = fork_and_prepare(&proxy_url, tx_hash, false, false).await;
+        let result2 = fork_and_prepare(&proxy_url, tx_hash, false).await;
         let duration2 = start2.elapsed();
 
         assert!(result2.is_ok(), "Fork failed: {:?}", result2.err());
@@ -205,7 +205,7 @@ async fn test_multiple_transactions_with_cache() {
         println!("Testing transaction {}: {}", i + 1, tx_hash_str);
         let start = std::time::Instant::now();
 
-        let result = fork_and_prepare(&proxy_url, tx_hash, false, false).await;
+        let result = fork_and_prepare(&proxy_url, tx_hash, false).await;
         let duration = start.elapsed();
 
         match result {
@@ -291,7 +291,7 @@ async fn test_fork_and_prepare_quick_mode() {
 
     // Test with quick mode enabled (should be faster)
     let start_quick = std::time::Instant::now();
-    let result_quick = fork_and_prepare(&proxy_url, tx_hash, true, false).await;
+    let result_quick = fork_and_prepare(&proxy_url, tx_hash, true).await;
     let duration_quick = start_quick.elapsed();
 
     match result_quick {
@@ -312,7 +312,7 @@ async fn test_fork_and_prepare_quick_mode() {
 
     // Compare with normal mode (should have same fork info but different state)
     let start_normal = std::time::Instant::now();
-    let result_normal = fork_and_prepare(&proxy_url, tx_hash, false, false).await;
+    let result_normal = fork_and_prepare(&proxy_url, tx_hash, false).await;
     let duration_normal = start_normal.elapsed();
 
     match result_normal {
@@ -385,7 +385,7 @@ async fn test_fork_at_specific_hardfork_boundaries() {
         let tx_hash: TxHash = test.tx_hash.parse().expect("valid tx hash");
 
         let start = std::time::Instant::now();
-        match fork_and_prepare(&proxy_url, tx_hash, false, false).await {
+        match fork_and_prepare(&proxy_url, tx_hash, false).await {
             Ok(fork_result) => {
                 let duration = start.elapsed();
 

@@ -20,7 +20,7 @@ use revm::{
         Host, TxEnv,
     },
     database::{CacheDB, EmptyDB},
-    Database, DatabaseCommit, InspectEvm, MainBuilder,
+    Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -89,7 +89,8 @@ impl Engine {
     /// 7. Starts a JSON-RPC server with the analysis results and snapshots
     pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
     where
-        DB: Database + DatabaseCommit + Clone,
+        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        <CacheDB<DB> as Database>::Error: Clone,
         <DB as Database>::Error: Clone,
     {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
@@ -138,7 +139,8 @@ impl Engine {
         tx: TxEnv,
     ) -> Result<TraceReplayResult>
     where
-        DB: Database + Clone,
+        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        <CacheDB<DB> as Database>::Error: Clone,
         <DB as Database>::Error: Clone,
     {
         info!("Replaying transaction to collect call trace and touched addresses");
@@ -272,7 +274,8 @@ impl Engine {
         touched_addresses: HashSet<Address>,
     ) -> Result<ExecutionStepRecords>
     where
-        DB: Database + Clone,
+        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        <CacheDB<DB> as Database>::Error: Clone,
         <DB as Database>::Error: Clone,
     {
         info!("Collecting opcode-level step execution results");
