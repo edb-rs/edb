@@ -27,13 +27,13 @@ use std::{
 use tracing::{debug, error, info, warn};
 
 use edb_common::{
-    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkInfo, ForkResult,
+    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
     DEFAULT_ETHERSCAN_CACHE_TTL,
 };
 
 use crate::{
     analysis::AnalysisResult,
-    analyze,
+    analyze, disassemble, format_instruction,
     inspector::{CallTracer, TraceReplayResult},
     instrument,
     rpc::RpcServerHandle,
@@ -58,10 +58,6 @@ where
     pub ctx: EdbContext<DB>,
     /// Transaction environment for the target transaction
     pub tx: TxEnv,
-    /// Hash of the target transaction being debugged
-    pub tx_hash: TxHash,
-    /// Fork information including block number and chain details
-    pub fork_info: ForkInfo,
     /// Merged snapshots from both opcode-level and hook-based collection
     pub snapshots: Snapshots<DB>,
     /// Original contract artifacts with source code and metadata
@@ -160,7 +156,7 @@ impl Engine {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
 
         // Step 0: Initialize context and database
-        let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, fork_info } =
+        let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, .. } =
             fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
@@ -198,8 +194,6 @@ impl Engine {
         let _context = EngineContext {
             ctx,
             tx,
-            tx_hash,
-            fork_info,
             snapshots,
             artifacts,
             recompiled_artifacts,

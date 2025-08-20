@@ -69,6 +69,43 @@ impl DerefMut for Trace {
     }
 }
 
+// Convenient explicit iterator methods (optional but nice)
+impl Trace {
+    pub fn iter(&self) -> std::slice::Iter<'_, TraceEntry> {
+        self.inner.iter()
+    }
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, TraceEntry> {
+        self.inner.iter_mut()
+    }
+}
+
+// IntoIterator for owned Trace (moves out its contents)
+impl IntoIterator for Trace {
+    type Item = TraceEntry;
+    type IntoIter = std::vec::IntoIter<TraceEntry>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+// IntoIterator for &Trace (shared iteration)
+impl<'a> IntoIterator for &'a Trace {
+    type Item = &'a TraceEntry;
+    type IntoIter = std::slice::Iter<'a, TraceEntry>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
+// IntoIterator for &mut Trace (mutable iteration)
+impl<'a> IntoIterator for &'a mut Trace {
+    type Item = &'a mut TraceEntry;
+    type IntoIter = std::slice::IterMut<'a, TraceEntry>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter_mut()
+    }
+}
+
 /// Single trace entry representing a call or creation
 #[derive(Debug, Clone)]
 pub struct TraceEntry {
@@ -96,6 +133,8 @@ pub struct TraceEntry {
     pub created_contract: bool,
     /// Create scheme for contract creation
     pub create_scheme: Option<CreateScheme>,
+    /// The underlying running bytecode
+    pub bytecode: Option<Bytes>,
 }
 
 /// Complete call tracer that captures execution flow
@@ -168,8 +207,18 @@ impl CallTracer {
 }
 
 impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
-    fn step(&mut self, _interp: &mut Interpreter, _context: &mut CTX) {
-        // We trace calls/creates, not individual steps
+    fn step(&mut self, interp: &mut Interpreter, _context: &mut CTX) {
+        let Some(entry) = self.trace.last_mut() else {
+            debug!("Trace is empty, cannot step");
+            return;
+        };
+
+        if entry.bytecode.is_some() {
+            // We already update the bytecode for the current entry
+            return;
+        }
+
+        entry.bytecode = Some(interp.bytecode.bytes());
     }
 
     fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
@@ -201,6 +250,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             result: None, // Will be filled in call_end
             created_contract: false,
             create_scheme: None,
+            bytecode: None, // Will be set in step
         };
 
         // Add to trace and update stack
@@ -260,6 +310,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             result: None,            // Will be filled in create_end
             created_contract: false, // Will be updated in create_end
             create_scheme: Some(inputs.scheme),
+            bytecode: None, // Will be set in step
         };
 
         // Add to trace and update stack
