@@ -160,10 +160,9 @@ pub async fn fork_and_prepare(
             c.chain_id = chain_id;
             c.spec = spec_id;
             if relax_execution {
-                // Note: These fields may not be available in all revm versions
-                // c.disable_base_fee = true;
-                // c.disable_block_gas_limit = true;
-                // c.tx_gas_limit_cap = None;
+                c.disable_base_fee = true;
+                c.disable_block_gas_limit = true;
+                c.tx_gas_limit_cap = None;
                 c.limit_contract_initcode_size = None;
                 c.limit_contract_code_size = None;
             }

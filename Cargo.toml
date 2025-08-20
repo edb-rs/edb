@@ -117,6 +117,7 @@ foundry-compilers = { version = "0.18.2", default-features = false }
 # revm - matching Foundry's version exactly (updated to 28.0.0)
 revm = { version = "28.0.0", default-features = false }
 revm-inspectors = { version = "0.28.0", default-features = false }
+revm-context = { version = "9.0.1", default-features = false }
 op-revm = "9.0.1"
 
 # async

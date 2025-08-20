@@ -21,7 +21,6 @@ use revm::{
     },
     Inspector,
 };
-use serde::de;
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},

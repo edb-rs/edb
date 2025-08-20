@@ -1995,6 +1995,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "revm",
+ "revm-context",
  "serde",
  "serde_json",
  "serial_test",
