@@ -98,6 +98,20 @@ where
     }
 }
 
+impl<DB> IntoIterator for HookSnapshots<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    type Item = (ExecutionFrameId, Option<HookSnapshot<DB>>);
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.snapshots.into_iter()
+    }
+}
+
 impl<DB> HookSnapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -338,8 +352,8 @@ where
 
                         // Log the replacement
                         debug!(
-                            "Replaced creation bytecode with hooked version for caller {:?}",
-                            inputs.caller
+                            "Replaced creation bytecode with hooked version for {:?} -> {:?}",
+                            inputs.caller, predicted_address
                         );
 
                         break; // Found a match, no need to check other hooks

@@ -15,6 +15,9 @@ pub use instrumentation::*;
 pub mod rpc;
 pub use rpc::*;
 
+pub mod snapshot;
+pub use snapshot::*;
+
 pub mod source;
 pub use source::*;
 

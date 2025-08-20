@@ -27,7 +27,7 @@ use std::{
 use tracing::{debug, error, info, warn};
 
 use edb_common::{
-    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
+    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkInfo, ForkResult,
     DEFAULT_ETHERSCAN_CACHE_TTL,
 };
 
@@ -36,11 +36,43 @@ use crate::{
     analyze,
     inspector::{CallTracer, TraceReplayResult},
     instrument,
-    rpc::{start_server, RpcServerHandle},
+    rpc::RpcServerHandle,
     utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
-    CodeTweaker, HookSnapshot, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector,
-    OpcodeSnapshots,
+    CodeTweaker, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector, OpcodeSnapshots,
+    Snapshots, Trace,
 };
+
+/// Complete debugging context containing all analysis results and state snapshots
+///
+/// This struct encapsulates all the data produced during the debugging workflow,
+/// including the original transaction context, collected snapshots, analyzed source code,
+/// and recompiled artifacts. It serves as the primary data structure passed to the
+/// JSON-RPC server for time travel debugging.
+pub struct EngineContext<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    /// EVM execution context with forked database state
+    pub ctx: EdbContext<DB>,
+    /// Transaction environment for the target transaction
+    pub tx: TxEnv,
+    /// Hash of the target transaction being debugged
+    pub tx_hash: TxHash,
+    /// Fork information including block number and chain details
+    pub fork_info: ForkInfo,
+    /// Merged snapshots from both opcode-level and hook-based collection
+    pub snapshots: Snapshots<DB>,
+    /// Original contract artifacts with source code and metadata
+    pub artifacts: HashMap<Address, Artifact>,
+    /// Recompiled artifacts with instrumented source code
+    pub recompiled_artifacts: HashMap<Address, Artifact>,
+    /// Analysis results identifying instrumentation points
+    pub analysis_results: HashMap<Address, AnalysisResult>,
+    /// Execution trace showing call hierarchy and frame structure
+    pub trace: Trace,
+}
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
 #[derive(Debug, Clone)]
@@ -64,16 +96,19 @@ impl Default for EngineConfig {
 }
 
 impl EngineConfig {
+    /// Set the Etherscan API key for source code download
     pub fn with_etherscan_api_key(mut self, key: String) -> Self {
         self.etherscan_api_key = Some(key);
         self
     }
 
+    /// Enable or disable quick mode for faster analysis
     pub fn with_quick_mode(mut self, quick: bool) -> Self {
         self.quick = quick;
         self
     }
 
+    /// Set the RPC proxy URL for blockchain interactions
     pub fn with_rpc_proxy_url(mut self, url: String) -> Self {
         self.rpc_proxy_url = url;
         self
@@ -125,7 +160,7 @@ impl Engine {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
 
         // Step 0: Initialize context and database
-        let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, .. } =
+        let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, fork_info } =
             fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
@@ -143,11 +178,11 @@ impl Engine {
         )?;
 
         // Step 4: Analyze source code to identify instrumentation points
-        let analysis_result = self.analyze_source_code(&artifacts)?;
+        let analysis_results = self.analyze_source_code(&artifacts)?;
 
         // Step 5: Instrument source code
         let recompiled_artifacts =
-            self.instrument_and_recompile_source_code(&artifacts, &analysis_result)?;
+            self.instrument_and_recompile_source_code(&artifacts, &analysis_results)?;
 
         // Step 6: Replace original bytecode with instrumented versions
         let contracts_in_tx = self.tweak_bytecode(&mut ctx, &recompiled_artifacts, tx_hash).await?;
@@ -156,10 +191,24 @@ impl Engine {
         let hook_creation =
             self.collect_creation_hooks(&artifacts, &recompiled_artifacts, contracts_in_tx)?;
         let hook_snapshots = self.capture_hook_snapshots(ctx.clone(), tx.clone(), hook_creation)?;
-        unimplemented!("Implement logic to handle replay result");
 
         // Step 8: Start RPC server with analysis results and snapshots
-        // info!("Starting JSON-RPC server on port {}", 1219);
+        let snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
+        // Let's pack the debug context
+        let _context = EngineContext {
+            ctx,
+            tx,
+            tx_hash,
+            fork_info,
+            snapshots,
+            artifacts,
+            recompiled_artifacts,
+            analysis_results,
+            trace: replay_result.execution_trace,
+        };
+        unimplemented!("Implement logic to handle replay result");
+
+        info!("Starting JSON-RPC server on port {}", 1219);
         // let rpc_handle = start_server(1219, analysis_result, snapshots).await?;
 
         // Ok(rpc_handle)
@@ -471,6 +520,25 @@ impl Engine {
         }
 
         Ok(hook_creation)
+    }
+
+    // Create snapshots for time travel
+    fn get_time_travel_snapshots<DB>(
+        &self,
+        opcode_snapshots: OpcodeSnapshots<DB>,
+        hook_snapshots: HookSnapshots<DB>,
+    ) -> Result<Snapshots<DB>>
+    where
+        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        <CacheDB<DB> as Database>::Error: Clone,
+        <DB as Database>::Error: Clone,
+    {
+        let snapshots = Snapshots::merge(opcode_snapshots, hook_snapshots);
+
+        #[cfg(debug_assertions)]
+        snapshots.print_summary();
+
+        Ok(snapshots)
     }
 }
 

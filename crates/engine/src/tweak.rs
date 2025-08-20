@@ -1,6 +1,6 @@
 use std::{path::PathBuf, time::Duration};
 
-use alloy_primitives::{keccak256, Address, Bytes, TxHash, B256};
+use alloy_primitives::{Address, Bytes, TxHash};
 use edb_common::{
     fork_and_prepare, relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
 };
