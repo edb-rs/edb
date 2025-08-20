@@ -79,7 +79,9 @@ pub async fn fork_and_prepare(
     rpc_url: &str,
     target_tx_hash: TxHash,
     quick: bool,
-) -> Result<ForkResult<EdbDB<impl Clone + Database + DatabaseCommit + DatabaseRef>>> {
+) -> Result<
+    ForkResult<EdbDB<impl Clone + Database + DatabaseCommit + DatabaseRef + Send + Sync + 'static>>,
+> {
     info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
 
     let provider = ProviderBuilder::new().connect(rpc_url).await?;

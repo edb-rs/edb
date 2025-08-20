@@ -17,13 +17,15 @@ workspace = true
 [dependencies]
 # async
 tokio = { workspace = true, features = ["full"] }
+futures.workspace = true
 
 # tui
-crossterm.workspace = true
+crossterm = { workspace = true, features = ["event-stream"] }
 ratatui.workspace = true
 
 # rpc client
 jsonrpsee = { workspace = true, features = ["client", "http-client"] }
+reqwest = { workspace = true, features = ["json"] }
 
 # serialization
 serde = { workspace = true, features = ["derive"] }

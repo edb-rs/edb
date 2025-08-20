@@ -33,10 +33,11 @@ use edb_common::{
 
 use crate::{
     analysis::AnalysisResult,
-    analyze, disassemble, format_instruction,
+    analyze,
     inspector::{CallTracer, TraceReplayResult},
     instrument,
     rpc::RpcServerHandle,
+    start_debug_server,
     utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
     CodeTweaker, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector, OpcodeSnapshots,
     Snapshots, Trace,
@@ -48,6 +49,7 @@ use crate::{
 /// including the original transaction context, collected snapshots, analyzed source code,
 /// and recompiled artifacts. It serves as the primary data structure passed to the
 /// JSON-RPC server for time travel debugging.
+#[derive(Debug, Clone)]
 pub struct EngineContext<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -149,7 +151,7 @@ impl Engine {
     /// 7. Starts a JSON-RPC server with the analysis results and snapshots
     pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
     where
-        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        DB: Database + DatabaseCommit + DatabaseRef + Clone + 'static,
         <CacheDB<DB> as Database>::Error: Clone,
         <DB as Database>::Error: Clone,
     {
@@ -191,7 +193,7 @@ impl Engine {
         // Step 8: Start RPC server with analysis results and snapshots
         let snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         // Let's pack the debug context
-        let _context = EngineContext {
+        let context = EngineContext {
             ctx,
             tx,
             snapshots,
@@ -200,12 +202,11 @@ impl Engine {
             analysis_results,
             trace: replay_result.execution_trace,
         };
-        unimplemented!("Implement logic to handle replay result");
 
-        info!("Starting JSON-RPC server on port {}", 1219);
-        // let rpc_handle = start_server(1219, analysis_result, snapshots).await?;
+        let rpc_handle = start_debug_server(context).await?;
+        info!("Debug RPC server started on port {}", rpc_handle.port());
 
-        // Ok(rpc_handle)
+        Ok(rpc_handle)
     }
 
     /// Replay the target transaction and collect call trace with all touched addresses

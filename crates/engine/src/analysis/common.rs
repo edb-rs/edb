@@ -80,7 +80,7 @@ use crate::{
 ///     println!("Found step: {}", step.variant_name());
 /// }
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct AnalysisResult {
     /// Maps source index to their corresponding source analysis results
     pub sources: HashMap<usize, SourceResult>,
@@ -103,7 +103,7 @@ pub struct AnalysisResult {
 /// - `ast`: Parsed Abstract Syntax Tree
 /// - `unit`: Processed source unit ready for analysis
 /// - `steps`: List of analyzed execution steps in this file
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceResult {
     /// Unique identifier for this source file
     pub id: u32,
@@ -143,7 +143,7 @@ pub struct SourceResult {
 /// // Pretty print the step analysis
 /// println!("{}", step_result.pretty_display(&source_result.source));
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StepAnalysisResult {
     /// Reference to the source step being analyzed
     pub source_step: SourceStepRef,
