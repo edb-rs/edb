@@ -22,11 +22,35 @@ pub enum CodeMode {
     Opcodes,
 }
 
+/// Type of cursor in code panel
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorType {
+    /// Following execution position (server-controlled)
+    Execution,
+    /// User's navigation cursor (for setting breakpoints)
+    User,
+}
+
+/// Server-controlled display preferences
+#[derive(Debug, Clone)]
+pub struct CodeDisplayInfo {
+    /// Whether source code is available from server
+    pub has_source_code: bool,
+    /// Server's preferred display mode
+    pub preferred_display: CodeMode,
+    /// Whether opcodes are available (always true)
+    pub opcodes_available: bool,
+    /// List of available source files for this address
+    pub available_files: Vec<String>,
+}
+
 /// Code panel implementation (stub)
 #[derive(Debug)]
 pub struct CodePanel {
-    /// Current code display mode
+    /// Current code display mode (respects server preferences)
     mode: CodeMode,
+    /// Server-provided display information
+    display_info: CodeDisplayInfo,
     /// Mock source code lines
     source_lines: Vec<String>,
     /// Mock opcode lines
@@ -35,8 +59,12 @@ pub struct CodePanel {
     source_paths: Vec<String>,
     /// Currently selected source path index
     selected_path_index: usize,
-    /// Current highlighted line (1-based)
-    current_line: Option<usize>,
+    /// Current execution line (server-controlled, 1-based)
+    current_execution_line: Option<usize>,
+    /// User cursor line (user-controlled for breakpoints, 1-based)
+    user_cursor_line: Option<usize>,
+    /// Which cursor is active (for navigation)
+    active_cursor: CursorType,
     /// Scroll offset
     scroll_offset: usize,
     /// Whether this panel is focused
@@ -46,8 +74,20 @@ pub struct CodePanel {
 impl CodePanel {
     /// Create a new code panel
     pub fn new() -> Self {
+        // Mock server response - says source is available
+        let display_info = CodeDisplayInfo {
+            has_source_code: true,
+            preferred_display: CodeMode::Source,
+            opcodes_available: true,
+            available_files: vec![
+                "contracts/SimpleToken.sol".to_string(),
+                "contracts/interfaces/IERC20.sol".to_string(),
+            ],
+        };
+
         Self {
-            mode: CodeMode::Source,
+            mode: display_info.preferred_display, // Use server preference
+            display_info,
             source_lines: vec![
                 "// SPDX-License-Identifier: MIT".to_string(),
                 "pragma solidity ^0.8.0;".to_string(),
@@ -82,14 +122,23 @@ impl CodePanel {
                 "SafeMath.sol".to_string(),
             ],
             selected_path_index: 0,
-            current_line: Some(9),
+            current_execution_line: Some(9),
+            user_cursor_line: Some(9), // Initially follows execution
+            active_cursor: CursorType::Execution,
             scroll_offset: 0,
             focused: false,
         }
     }
 
-    /// Toggle between source and opcode display
+    /// Toggle between source and opcode display (only if source available)
     fn toggle_mode(&mut self) {
+        // Only allow toggle if source code is actually available
+        if !self.display_info.has_source_code {
+            // No source code - stuck in opcodes mode
+            self.mode = CodeMode::Opcodes;
+            return;
+        }
+
         self.mode = match self.mode {
             CodeMode::Source => CodeMode::Opcodes,
             CodeMode::Opcodes => CodeMode::Source,
@@ -154,12 +203,29 @@ impl Panel for CodePanel {
             CodeMode::Source => "Source",
             CodeMode::Opcodes => "Opcodes",
         };
+
+        // Show source availability status
+        let availability =
+            if self.display_info.has_source_code { "✓" } else { "✗ Opcodes Only" };
+
         let path_str = if self.source_paths.is_empty() {
             "No source".to_string()
         } else {
             self.source_paths[self.selected_path_index].clone()
         };
-        format!("{} - {}", mode_str, path_str)
+
+        // Show file count if multiple files available
+        let file_count = if self.display_info.available_files.len() > 1 {
+            format!(
+                " [{}/{}]",
+                self.selected_path_index + 1,
+                self.display_info.available_files.len()
+            )
+        } else {
+            String::new()
+        };
+
+        format!("{} {} - {}{}", mode_str, availability, path_str, file_count)
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
@@ -189,16 +255,31 @@ impl Panel for CodePanel {
             .iter()
             .map(|(line_idx, line)| {
                 let line_num = line_idx + 1;
-                let is_current = self.current_line.map_or(false, |current| current == line_num);
+                let is_execution =
+                    self.current_execution_line.map_or(false, |exec| exec == line_num);
+                let is_user_cursor = self.user_cursor_line.map_or(false, |user| user == line_num);
 
-                let line_content = if self.mode == CodeMode::Source {
-                    format!("{:3} | {}", line_num, line)
+                // Determine cursor indicator
+                let cursor_indicator = if is_execution && is_user_cursor {
+                    "◉" // Both cursors on same line
+                } else if is_execution {
+                    "►" // Execution cursor
+                } else if is_user_cursor {
+                    "◯" // User cursor
                 } else {
-                    line.to_string()
+                    " " // No cursor
                 };
 
-                let style = if is_current {
+                let line_content = if self.mode == CodeMode::Source {
+                    format!("{:3} {} | {}", line_num, cursor_indicator, line)
+                } else {
+                    format!("{} {}", cursor_indicator, line)
+                };
+
+                let style = if is_execution {
                     Style::default().bg(Color::Yellow).fg(Color::Black)
+                } else if is_user_cursor {
+                    Style::default().bg(Color::DarkGray).fg(Color::White)
                 } else {
                     Style::default()
                 };
@@ -216,16 +297,47 @@ impl Panel for CodePanel {
 
         frame.render_widget(list, area);
 
-        // Add help text at the bottom if focused
+        // Add cursor status and help text at the bottom if focused
         if self.focused && area.height > 12 {
+            // Status line
+            let status_area = Rect {
+                x: area.x + 1,
+                y: area.y + area.height - 4,
+                width: area.width - 2,
+                height: 1,
+            };
+
+            let exec_line =
+                self.current_execution_line.map_or("None".to_string(), |l| l.to_string());
+            let user_line = self.user_cursor_line.map_or("None".to_string(), |l| l.to_string());
+            let active_cursor_indicator = match self.active_cursor {
+                CursorType::Execution => "► Exec",
+                CursorType::User => "◯ User",
+            };
+
+            let status_text = format!(
+                "► Exec: {} │ ◯ User: {} │ Active: {} │ Files: {}/{}",
+                exec_line,
+                user_line,
+                active_cursor_indicator,
+                self.selected_path_index + 1,
+                self.display_info.available_files.len()
+            );
+            let status_paragraph =
+                Paragraph::new(status_text).style(Style::default().fg(Color::Cyan));
+            frame.render_widget(status_paragraph, status_area);
+
+            // Help line
             let help_area = Rect {
                 x: area.x + 1,
                 y: area.y + area.height - 3,
                 width: area.width - 2,
                 height: 1,
             };
+            let o_toggle =
+                if self.display_info.has_source_code { "O: Toggle mode" } else { "O: (No source)" };
             let help_text =
-                "O: Toggle source/opcodes • Tab: Switch paths • ↑/↓: Scroll • B: Breakpoint";
+                format!("{} • Space: Switch cursor • ↑/↓: Move cursor • B: Breakpoint", o_toggle);
             let help_paragraph =
                 Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(help_paragraph, help_area);
@@ -250,11 +362,45 @@ impl Panel for CodePanel {
                 self.prev_source_path();
                 Ok(EventResponse::Handled)
             }
+            KeyCode::Char(' ') => {
+                // Toggle between execution and user cursor
+                self.active_cursor = match self.active_cursor {
+                    CursorType::Execution => CursorType::User,
+                    CursorType::User => CursorType::Execution,
+                };
+                debug!("Switched active cursor to: {:?}", self.active_cursor);
+                Ok(EventResponse::Handled)
+            }
             KeyCode::Up => {
+                // ONLY move user cursor - execution cursor is read-only
+                // Execution cursor can only be moved by debug commands in terminal
+                if self.active_cursor == CursorType::User {
+                    if let Some(line) = self.user_cursor_line {
+                        self.user_cursor_line = Some(line.saturating_sub(1).max(1));
+                    }
+                } else {
+                    // When execution cursor is active, just scroll the view
+                    debug!(
+                        "Execution cursor is read-only - use debug commands in terminal to move"
+                    );
+                }
                 self.scroll_up();
                 Ok(EventResponse::Handled)
             }
             KeyCode::Down => {
+                // ONLY move user cursor - execution cursor is read-only
+                // Execution cursor can only be moved by debug commands in terminal
+                if self.active_cursor == CursorType::User {
+                    if let Some(line) = self.user_cursor_line {
+                        let max_lines = self.get_display_lines().len();
+                        self.user_cursor_line = Some((line + 1).min(max_lines));
+                    }
+                } else {
+                    // When execution cursor is active, just scroll the view
+                    debug!(
+                        "Execution cursor is read-only - use debug commands in terminal to move"
+                    );
+                }
                 self.scroll_down();
                 Ok(EventResponse::Handled)
             }

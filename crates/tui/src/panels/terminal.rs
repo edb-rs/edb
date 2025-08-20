@@ -15,6 +15,7 @@ use ratatui::{
     Frame,
 };
 use std::collections::VecDeque;
+use std::time::Instant;
 use tracing::debug;
 
 /// Maximum number of output lines to keep in history
@@ -44,6 +45,8 @@ pub struct TerminalPanel {
     connected: bool,
     /// Current snapshot info (current_index, total_count)
     snapshot_info: Option<(usize, usize)>,
+    /// Last Ctrl+C press time for double-press detection
+    last_ctrl_c: Option<Instant>,
 }
 
 impl TerminalPanel {
@@ -59,6 +62,7 @@ impl TerminalPanel {
             color_scheme: ColorScheme::default(),
             connected: true,
             snapshot_info: Some((127, 348)),
+            last_ctrl_c: None,
         };
 
         // Add welcome message with fancy styling
@@ -79,7 +83,7 @@ impl TerminalPanel {
     }
 
     /// Execute a command
-    fn execute_command(&mut self, command: &str) -> Result<()> {
+    fn execute_command(&mut self, command: &str) -> Result<EventResponse> {
         debug!("Executing command: {}", command);
 
         // Add command to history
@@ -98,6 +102,10 @@ impl TerminalPanel {
         // Handle built-in commands
         match command.trim() {
             "" => {}
+            "quit" | "q" | "exit" => {
+                self.add_output("🚪 Exiting debugger...");
+                return Ok(EventResponse::Exit);
+            }
             "help" | "h" => {
                 self.show_help();
             }
@@ -121,7 +129,7 @@ impl TerminalPanel {
             }
         }
 
-        Ok(())
+        Ok(EventResponse::Handled)
     }
 
     /// Handle debug commands
@@ -217,8 +225,8 @@ impl TerminalPanel {
         self.add_output("  help, h          - Show this help");
         self.add_output("  clear, cls       - Clear output");
         self.add_output("  history          - Show command history");
+        self.add_output("  quit, q, exit    - Exit debugger");
         self.add_output("  Tab              - Switch panels");
-        self.add_output("  Ctrl+C, q        - Exit debugger");
         self.add_output("");
     }
 
@@ -477,8 +485,8 @@ impl Panel for TerminalPanel {
                 self.input_buffer.clear();
                 self.cursor_position = 0;
                 self.history_position = None;
-                self.execute_command(&command)?;
-                Ok(EventResponse::Handled)
+                let response = self.execute_command(&command)?;
+                Ok(response)
             }
             KeyCode::Backspace => {
                 if self.cursor_position > 0 {
@@ -519,19 +527,30 @@ impl Panel for TerminalPanel {
                 self.cursor_position = self.input_buffer.len();
                 Ok(EventResponse::Handled)
             }
-            KeyCode::Char('c')
-                if event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                self.input_buffer.clear();
-                self.cursor_position = 0;
-                self.history_position = None;
-                self.add_output("^C");
-                Ok(EventResponse::Handled)
-            }
             KeyCode::Char('l')
                 if event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
                 self.output_lines.clear();
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('c')
+                if event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                // Handle Ctrl+C double-press for exit
+                let now = Instant::now();
+                if let Some(last_time) = self.last_ctrl_c {
+                    if now.duration_since(last_time).as_secs() < 2 {
+                        // Double-press within 2 seconds = exit
+                        self.add_output("🚪 Exiting debugger (Ctrl+C double-press)...");
+                        return Ok(EventResponse::Exit);
+                    }
+                }
+                // First press - clear input and record time
+                self.last_ctrl_c = Some(now);
+                self.input_buffer.clear();
+                self.cursor_position = 0;
+                self.history_position = None;
+                self.add_output("^C (press again quickly to exit)");
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char(c) => {

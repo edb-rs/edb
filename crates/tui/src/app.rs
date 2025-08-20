@@ -209,6 +209,35 @@ impl App {
                 return Ok(EventResponse::Handled);
             }
 
+            // Global exit shortcuts
+            KeyCode::Char('c')
+                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                // First Ctrl+C clears input, second exits (handled by terminal panel)
+                if self.current_panel == PanelType::Terminal {
+                    // Forward to terminal to handle double-press logic
+                    if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
+                        return panel.handle_key_event(key);
+                    } else {
+                        return Ok(EventResponse::NotHandled);
+                    }
+                } else {
+                    // From other panels, Ctrl+C switches to terminal
+                    self.current_panel = PanelType::Terminal;
+                    return Ok(EventResponse::Handled);
+                }
+            }
+            KeyCode::Char('d')
+                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                // Ctrl+D is immediate exit (EOF signal)
+                return Ok(EventResponse::Exit);
+            }
+            KeyCode::Char('q') if key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => {
+                // Alt+Q for quick exit
+                return Ok(EventResponse::Exit);
+            }
+
             // Ctrl+number for direct panel access
             KeyCode::Char('1')
                 if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>

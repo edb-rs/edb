@@ -366,7 +366,6 @@ where
         println!("\n\x1b[33m📖 Legend:\x1b[0m");
         println!("  \x1b[92m🎯 Hook\x1b[0m    - Strategic instrumentation breakpoint");
         println!("  \x1b[94m⚙️  Opcode\x1b[0m  - Fine-grained instruction-level snapshot");
-        println!("  \x1b[96m📍 Mixed\x1b[0m  - Frame contains both hook and opcode snapshots");
     }
 
     /// Print detailed information for a single frame
@@ -382,6 +381,7 @@ where
 
         // Determine frame type and color
         let (frame_type, color, icon) = if hook_count > 0 && opcode_count > 0 {
+            error!("Frame {} has both hook and opcode snapshots, which is unexpected.", frame_id);
             ("Mixed", "\x1b[96m", "📍")
         } else if hook_count > 0 {
             ("Hook", "\x1b[92m", "🎯")
