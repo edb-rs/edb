@@ -15,8 +15,8 @@ version = "0.0.1"
 edition = "2021"
 # Remember to update clippy.toml as well
 rust-version = "1.88"
-authors = ["The MEDGA Team"]
-license = "MIT OR Apache-2.0"
+authors = ["Zhuo Zhang", "Wuqi Zhang"]
+license = "AGPL-3.0"
 homepage = "https://medga.org/"
 repository = "https://github.com/MedGa-eth/EDB"
 exclude = ["benches/", "tests/", "test-data/", "testdata/"]

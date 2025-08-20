@@ -1,3 +1,6 @@
+
+// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+// SPDX-License-Identifier: AGPL-3.0
 //! EDB Utils - Shared functionality for EDB components
 //!
 //! This crate provides shared utilities used by both the edb binary

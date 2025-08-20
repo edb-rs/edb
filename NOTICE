@@ -1,0 +1,42 @@
+EDB - Ethereum Debugger
+Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+
+This product includes software developed by Zhuo Zhang and Wuqi Zhang.
+
+===============================================================================
+THIRD-PARTY SOFTWARE NOTICES
+===============================================================================
+
+This software incorporates components from the following projects:
+
+Alloy (https://github.com/alloy-rs/alloy)
+- License: Apache-2.0 OR MIT
+- Copyright: Alloy Contributors
+
+Foundry (https://github.com/foundry-rs/foundry)
+- License: Apache-2.0 OR MIT  
+- Copyright: Foundry Contributors
+
+REVM (https://github.com/bluealloy/revm)
+- License: MIT
+- Copyright: Dragan Rakita
+
+Tokio (https://tokio.rs/)
+- License: MIT
+- Copyright: Tokio Contributors
+
+Axum (https://github.com/tokio-rs/axum)
+- License: MIT
+- Copyright: Axum Contributors
+
+Ratatui (https://github.com/ratatui-org/ratatui)
+- License: MIT
+- Copyright: Ratatui Contributors
+
+For a complete list of dependencies and their licenses, see the Cargo.toml files
+in each crate directory.
+
+===============================================================================
+
+The AGPL-3.0 license applies only to the original work by Zhuo Zhang and Wuqi Zhang.
+All third-party dependencies retain their original licenses.

@@ -1,3 +1,6 @@
+
+// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+// SPDX-License-Identifier: AGPL-3.0
 //! Terminal User Interface for EDB
 //!
 //! This crate provides a terminal-based interface for interacting with the EDB engine.

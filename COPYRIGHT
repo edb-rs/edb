@@ -1,0 +1,35 @@
+EDB - Ethereum Debugger
+Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+Authors:
+- Zhuo Zhang
+- Wuqi Zhang
+
+For commercial licensing inquiries, please contact the authors.
+
+---
+
+This software includes dependencies under various open source licenses:
+- Alloy (Apache-2.0/MIT)
+- Foundry (Apache-2.0/MIT)
+- REVM (MIT)
+- Tokio (MIT)
+- And other dependencies as listed in Cargo.toml files
+
+Each dependency retains its original license. The AGPL-3.0 license applies
+only to the original work created by the authors of EDB.

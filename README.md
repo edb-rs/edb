@@ -211,7 +211,20 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 
 ## License
 
-This project is dual-licensed under MIT and Apache 2.0.
+Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+
+EDB is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+
+This means:
+- ✅ You can use, modify, and distribute this software
+- ✅ You can use it for commercial purposes
+- ⚠️ You must disclose your source code when distributing
+- ⚠️ You must use the same license (AGPL-3.0)
+- ⚠️ You must state changes made to the code
+
+For commercial licensing options without AGPL restrictions, please contact the authors.
+
+See the [LICENSE](LICENSE) file for the full license text.
 
 ## Acknowledgments
 
