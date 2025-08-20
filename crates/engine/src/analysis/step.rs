@@ -1,9 +1,11 @@
 use std::{
     collections::BTreeMap,
     fmt::Display,
+    num::TryFromIntError,
     sync::{Arc, Mutex},
 };
 
+use alloy_primitives::ruint::FromUintError;
 use derive_more::{Deref, DerefMut};
 use foundry_compilers::artifacts::{
     ast::SourceLocation, BlockOrStatement, Expression, ExpressionOrVariableDeclarationStatement,
@@ -19,7 +21,7 @@ lazy_static! {
 }
 
 /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct USID(u64);
 
 impl USID {
@@ -40,6 +42,20 @@ impl From<USID> for u64 {
 impl From<USID> for alloy_primitives::U256 {
     fn from(usid: USID) -> Self {
         Self::from(usid.0)
+    }
+}
+
+impl From<u64> for USID {
+    fn from(value: u64) -> Self {
+        USID(value)
+    }
+}
+
+impl TryFrom<alloy_primitives::U256> for USID {
+    type Error = FromUintError<u64>;
+
+    fn try_from(value: alloy_primitives::U256) -> Result<Self, FromUintError<u64>> {
+        value.try_into().map(USID)
     }
 }
 

@@ -6,20 +6,17 @@
 //! The engine accepts a forked database and EVM configuration as inputs (prepared by edb binary)
 //! and focuses on the instrumentation and analysis workflow.a
 
-use alloy_primitives::{Address, TxHash};
+use alloy_primitives::{Address, Bytes, TxHash};
 use eyre::Result;
 use foundry_block_explorers::Client;
-use foundry_compilers::{
-    artifacts::{Severity, SolcInput},
-    solc::Solc,
-};
+use foundry_compilers::{artifacts::Contract, solc::Solc};
 use indicatif::{ProgressBar, ProgressStyle};
 use revm::{
     context::{
         result::{ExecutionResult, HaltReason},
         Host, TxEnv,
     },
-    database::{CacheDB, EmptyDB},
+    database::CacheDB,
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
 use std::{
@@ -29,17 +26,20 @@ use std::{
 };
 use tracing::{debug, error, info, warn};
 
-use edb_common::{CachePath, EdbCachePath, EdbContext, ForkResult, DEFAULT_ETHERSCAN_CACHE_TTL};
+use edb_common::{
+    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
+    DEFAULT_ETHERSCAN_CACHE_TTL,
+};
 
 use crate::{
     analysis::AnalysisResult,
     analyze,
-    inspector::{CallTracer, SnapshotInspector, StateSnapshot, TraceReplayResult},
+    inspector::{CallTracer, TraceReplayResult},
     instrument,
     rpc::{start_server, RpcServerHandle},
     utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
-    CodeTweaker, ExecutionFrameId, ExecutionStepInspector, ExecutionStepRecord,
-    ExecutionStepRecords,
+    CodeTweaker, HookSnapshot, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector,
+    OpcodeSnapshots,
 };
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
@@ -136,7 +136,7 @@ impl Engine {
             self.download_verified_source_code(&replay_result, ctx.chain_id().to::<u64>()).await?;
 
         // Step 3: Collect opcode-level step execution results
-        let opcode_time_travel = self.time_travel_at_opcode_level(
+        let opcode_snapshots = self.capture_opcode_level_snapshots(
             ctx.clone(),
             tx.clone(),
             artifacts.keys().into_iter().cloned().collect(),
@@ -150,17 +150,19 @@ impl Engine {
             self.instrument_and_recompile_source_code(&artifacts, &analysis_result)?;
 
         // Step 6: Replace original bytecode with instrumented versions
-        self.tweak_bytecode(&mut ctx, &recompiled_artifacts, tx_hash).await?;
-        unimplemented!("Implement logic to handle replay result");
+        let contracts_in_tx = self.tweak_bytecode(&mut ctx, &recompiled_artifacts, tx_hash).await?;
 
         // Step 7: Re-execute the transaction with snapshot collection
-        let snapshots: Vec<CacheDB<EmptyDB>> = vec![]; // Placeholder for collected snapshots
+        let hook_creation =
+            self.collect_creation_hooks(&artifacts, &recompiled_artifacts, contracts_in_tx)?;
+        let hook_snapshots = self.capture_hook_snapshots(ctx.clone(), tx.clone(), hook_creation)?;
+        unimplemented!("Implement logic to handle replay result");
 
         // Step 8: Start RPC server with analysis results and snapshots
-        info!("Starting JSON-RPC server on port {}", 1219);
-        let rpc_handle = start_server(1219, analysis_result, snapshots).await?;
+        // info!("Starting JSON-RPC server on port {}", 1219);
+        // let rpc_handle = start_server(1219, analysis_result, snapshots).await?;
 
-        Ok(rpc_handle)
+        // Ok(rpc_handle)
     }
 
     /// Replay the target transaction and collect call trace with all touched addresses
@@ -296,14 +298,46 @@ impl Engine {
         Ok(analysis_result)
     }
 
+    /// Time travel (i.e., snapshotting) at hooks for contracts we have source code
+    fn capture_hook_snapshots<'a, DB>(
+        &self,
+        mut ctx: EdbContext<DB>,
+        mut tx: TxEnv,
+        creation_hooks: Vec<(&'a Contract, &'a Contract, &'a Bytes)>,
+    ) -> Result<HookSnapshots<DB>>
+    where
+        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        <CacheDB<DB> as Database>::Error: Clone,
+        <DB as Database>::Error: Clone,
+    {
+        // We need to relax execution constraints for hook snapshots
+        relax_context_constraints(&mut ctx, &mut tx);
+
+        info!("Collecting hook snapshots for source code contracts");
+
+        let mut inspector = HookSnapshotInspector::new();
+        inspector.with_creation_hooks(creation_hooks)?;
+        let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
+
+        evm.inspect_one_tx(tx)
+            .map_err(|e| eyre::eyre!("Failed to inspect the target transaction: {:?}", e))?;
+
+        let snapshots = inspector.into_snapshots();
+
+        #[cfg(debug_assertions)]
+        snapshots.print_summary();
+
+        Ok(snapshots)
+    }
+
     /// Time travel (i.e., snapshotting) at the opcode level for contracts we do not
     /// have source code.
-    fn time_travel_at_opcode_level<DB>(
+    fn capture_opcode_level_snapshots<DB>(
         &self,
         ctx: EdbContext<DB>,
         tx: TxEnv,
         touched_addresses: HashSet<Address>,
-    ) -> Result<ExecutionStepRecords>
+    ) -> Result<OpcodeSnapshots<DB>>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone,
         <CacheDB<DB> as Database>::Error: Clone,
@@ -311,13 +345,14 @@ impl Engine {
     {
         info!("Collecting opcode-level step execution results");
 
-        let mut inspector = ExecutionStepInspector::with_excluded_addresses(touched_addresses);
+        let mut inspector = OpcodeSnapshotInspector::new(&ctx);
+        inspector.with_excluded_addresses(touched_addresses);
         let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
 
         evm.inspect_one_tx(tx)
             .map_err(|e| eyre::eyre!("Failed to inspect the target transaction: {:?}", e))?;
 
-        let snapshots = inspector.into_step_records();
+        let snapshots = inspector.into_snapshots();
 
         #[cfg(debug_assertions)]
         snapshots.print_summary();
@@ -386,7 +421,7 @@ impl Engine {
         ctx: &mut EdbContext<DB>,
         artifacts: &HashMap<Address, Artifact>,
         tx_hash: TxHash,
-    ) -> Result<()>
+    ) -> Result<Vec<Address>>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone,
         <CacheDB<DB> as Database>::Error: Clone,
@@ -395,10 +430,13 @@ impl Engine {
         let mut tweaker =
             CodeTweaker::new(ctx, self.rpc_proxy_url.clone(), self.etherscan_api_key.clone());
 
+        let mut contracts_in_tx = Vec::new();
+
         for (address, artifact) in artifacts {
             let creation_tx_hash = tweaker.get_creation_tx(address).await?;
             if creation_tx_hash == tx_hash {
                 debug!("Skip tweaking contract {}, since it was created by the transaction under investigation", address);
+                contracts_in_tx.push(*address);
                 continue;
             }
 
@@ -407,7 +445,32 @@ impl Engine {
             })?;
         }
 
-        Ok(())
+        Ok(contracts_in_tx)
+    }
+
+    // Collect creation code that will be hooked
+    fn collect_creation_hooks<'a>(
+        &self,
+        artifacts: &'a HashMap<Address, Artifact>,
+        recompiled_artifacts: &'a HashMap<Address, Artifact>,
+        contracts_in_tx: Vec<Address>,
+    ) -> Result<Vec<(&'a Contract, &'a Contract, &'a Bytes)>> {
+        info!("Collecting creation hooks for contracts in transaction");
+
+        let mut hook_creation = Vec::new();
+        for address in contracts_in_tx {
+            let Some(artifact) = artifacts.get(&address) else {
+                eyre::bail!("No original artifact found for address {}", address);
+            };
+
+            let Some(recompiled_artifact) = recompiled_artifacts.get(&address) else {
+                eyre::bail!("No recompiled artifact found for address {}", address);
+            };
+
+            hook_creation.extend(artifact.find_creation_hooks(&recompiled_artifact));
+        }
+
+        Ok(hook_creation)
     }
 }
 

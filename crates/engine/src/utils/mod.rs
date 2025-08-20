@@ -1,3 +1,6 @@
+mod artifact;
+pub use artifact::*;
+
 mod ast_prune;
 pub use ast_prune::*;
 

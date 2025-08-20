@@ -13,47 +13,7 @@ use foundry_compilers::{
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::etherscan_rate_limit_guard;
-
-/// Artifact for a compiled contract.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Artifact {
-    /// Metadata about the contract.
-    pub meta: Metadata,
-    /// Input for the Solidity compiler.
-    pub input: SolcInput,
-    /// Output from the Solidity compiler.
-    pub output: CompilerOutput,
-}
-
-impl Artifact {
-    /// Returns the contract name.
-    pub fn contract_name(&self) -> &str {
-        self.meta.contract_name.as_str()
-    }
-
-    /// Returns the compiler version.
-    pub fn compiler_version(&self) -> &str {
-        self.meta.compiler_version.as_str()
-    }
-
-    /// Returns the constructor arguments.
-    pub fn constructor_arguments(&self) -> &Bytes {
-        &self.meta.constructor_arguments
-    }
-
-    /// Subject contract
-    pub fn contract(&self) -> Option<&Contract> {
-        let contract_name = self.contract_name();
-
-        self.output
-            .contracts
-            .values()
-            .into_iter()
-            .find(|c| c.contains_key(contract_name))
-            .and_then(|contracts| contracts.get(contract_name))
-    }
-}
+use crate::{etherscan_rate_limit_guard, Artifact};
 
 /// Onchain compiler.
 #[derive(Debug, Clone)]

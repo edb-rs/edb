@@ -34,16 +34,16 @@ fn instrument_inner(
         for hook in hooks {
             match hook {
                 crate::StepHook::BeforeStep(_) => {
-                    instrument_before_step(&mut source_text, step_result, path);
+                    instrument_before_step(&mut source_text, step_result);
                 }
                 crate::StepHook::VariableInScope(_) => {
-                    instrument_variable_in_scope(&mut source_text, step_result, path);
+                    instrument_variable_in_scope(&mut source_text, step_result);
                 }
                 crate::StepHook::VariableOutOfScope(_) => {
-                    instrument_variable_out_of_scope(&mut source_text, step_result, path);
+                    instrument_variable_out_of_scope(&mut source_text, step_result);
                 }
                 crate::StepHook::VariableUpdate(_) => {
-                    instrument_variable_update(&mut source_text, step_result, path);
+                    instrument_variable_update(&mut source_text, step_result);
                 }
             }
         }
@@ -52,14 +52,9 @@ fn instrument_inner(
     Ok(Source::new(source_text))
 }
 
-fn instrument_before_step(
-    source_text: &mut String,
-    step_result: &StepAnalysisResult,
-    path: &PathBuf,
-) {
+fn instrument_before_step(source_text: &mut String, step_result: &StepAnalysisResult) {
     let checkpoint_call = format!(
-        "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode(\"{}\", {}));\n",
-        path.as_os_str().to_string_lossy(),
+        "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode({}));\n",
         step_result.source_step.usid,
     );
 
@@ -67,26 +62,14 @@ fn instrument_before_step(
     source_text.insert_str(start, checkpoint_call.as_str());
 }
 
-fn instrument_variable_in_scope(
-    source_text: &mut String,
-    step_result: &StepAnalysisResult,
-    path: &PathBuf,
-) {
+fn instrument_variable_in_scope(source_text: &mut String, step_result: &StepAnalysisResult) {
     // TODO (ZZ): Implement variable in scope instrumentation
 }
 
-fn instrument_variable_out_of_scope(
-    source_text: &mut String,
-    step_result: &StepAnalysisResult,
-    path: &PathBuf,
-) {
+fn instrument_variable_out_of_scope(source_text: &mut String, step_result: &StepAnalysisResult) {
     // TODO (ZZ): Implement variable out of scope instrumentation
 }
 
-fn instrument_variable_update(
-    source_text: &mut String,
-    step_result: &StepAnalysisResult,
-    path: &PathBuf,
-) {
+fn instrument_variable_update(source_text: &mut String, step_result: &StepAnalysisResult) {
     // TODO (ZZ): Implement variable update instrumentation
 }
