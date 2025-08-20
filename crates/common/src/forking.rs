@@ -2,9 +2,7 @@
 //!
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
 
-use crate::{
-    get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, DebugDB, EDBContext,
-};
+use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EdbContext, EdbDB};
 use alloy_primitives::{TxHash, TxKind, B256, U256};
 use alloy_provider::{
     layers::{CacheProvider, SharedCache},
@@ -53,7 +51,7 @@ where
     /// Fork information
     pub fork_info: ForkInfo,
     /// Revm context with executed state
-    pub context: EDBContext<DB>,
+    pub context: EdbContext<DB>,
     /// Transaction environment for the target transaction
     pub target_tx_env: TxEnv,
     /// Target transaction hash
@@ -79,7 +77,7 @@ pub async fn fork_and_prepare(
     target_tx_hash: TxHash,
     quick: bool,
     relax_execution: bool,
-) -> Result<ForkResult<DebugDB<impl Database + DatabaseCommit + Clone>>> {
+) -> Result<ForkResult<EdbDB<impl Database + DatabaseCommit + Clone>>> {
     info!("forking chain and executing transactions with revm for {:?}", target_tx_hash);
 
     let provider = ProviderBuilder::new().connect(rpc_url).await?;
@@ -139,8 +137,8 @@ pub async fn fork_and_prepare(
     let state_db = WrapDatabaseAsync::new(AlloyDB::new(provider, (target_block_number - 1).into()))
         .ok_or(eyre::eyre!("Failed to create AlloyDB"))?;
     let cache_db: CacheDB<_> = CacheDB::new(Arc::new(state_db));
-    // let debug_db = DebugDB::new(StateBuilder::new_with_database(cache_db).build());
-    let debug_db = DebugDB::new(cache_db);
+    // let debug_db = EdbDB::new(StateBuilder::new_with_database(cache_db).build());
+    let debug_db = EdbDB::new(cache_db);
 
     let ctx = Context::mainnet()
         .with_db(debug_db)

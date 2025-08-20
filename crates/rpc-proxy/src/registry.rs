@@ -10,13 +10,13 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, info, warn};
 
 #[derive(Clone)]
-struct EDBInstance {
+struct EdbInstance {
     pid: u32,
     registered_at: u64,
     last_heartbeat: u64,
 }
 
-impl EDBInstance {
+impl EdbInstance {
     fn new(pid: u32) -> Self {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
@@ -41,14 +41,14 @@ impl EDBInstance {
 /// - Registration and heartbeat tracking
 /// - Grace period management for auto-shutdown
 /// - Process liveness detection
-pub struct EDBRegistry {
-    instances: Arc<RwLock<HashMap<u32, EDBInstance>>>,
+pub struct EdbRegistry {
+    instances: Arc<RwLock<HashMap<u32, EdbInstance>>>,
     grace_period: u64,
     grace_period_start: Arc<RwLock<Option<u64>>>,
     shutdown_tx: broadcast::Sender<()>,
 }
 
-impl EDBRegistry {
+impl EdbRegistry {
     /// Creates a new EDB instance registry
     ///
     /// # Arguments
@@ -56,7 +56,7 @@ impl EDBRegistry {
     /// * `shutdown_tx` - Channel to send shutdown signals
     ///
     /// # Returns
-    /// A new EDBRegistry instance
+    /// A new EdbRegistry instance
     pub fn new(grace_period: u64, shutdown_tx: broadcast::Sender<()>) -> Self {
         Self {
             instances: Arc::new(RwLock::new(HashMap::new())),
@@ -76,7 +76,7 @@ impl EDBRegistry {
     /// JSON-RPC response confirming registration
     pub async fn register_edb_instance(&self, pid: u32, _timestamp: u64) -> Value {
         let mut instances = self.instances.write().await;
-        let instance = EDBInstance::new(pid);
+        let instance = EdbInstance::new(pid);
 
         instances.insert(pid, instance);
         info!("Registered EDB instance: PID {}", pid);

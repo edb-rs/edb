@@ -20,7 +20,7 @@
 //! 3. Store the committed state as our snapshot
 
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::EDBContext;
+use edb_common::EdbContext;
 use eyre::Result;
 use revm::{
     context::{ContextTr, CreateScheme, TxEnv},
@@ -143,7 +143,7 @@ impl<DB: Database + DatabaseCommit + Clone> SnapshotInspector<DB> {
     ///
     /// This is the critical method that properly captures the state with all
     /// journaled changes applied, not just the initial database state.
-    fn take_snapshot(&mut self, context: &EDBContext<DB>, trigger: SnapshotTrigger) -> Result<()> {
+    fn take_snapshot(&mut self, context: &EdbContext<DB>, trigger: SnapshotTrigger) -> Result<()> {
         let mut inner = context.journal().to_inner();
         let changes = inner.finalize();
         let mut snap = context.db().clone();
@@ -226,14 +226,14 @@ impl<DB: Database + DatabaseCommit + Clone> Default for SnapshotInspector<DB> {
 }
 
 // Implementation of Inspector trait for SnapshotInspector
-impl<DB> Inspector<EDBContext<DB>> for SnapshotInspector<DB>
+impl<DB> Inspector<EdbContext<DB>> for SnapshotInspector<DB>
 where
     DB: Database + DatabaseCommit + Clone,
 {
     /// Called when a call operation starts
     fn call(
         &mut self,
-        context: &mut EDBContext<DB>,
+        context: &mut EdbContext<DB>,
         call: &mut revm::interpreter::CallInputs,
     ) -> Option<revm::interpreter::CallOutcome> {
         self.call_depth += 1;
@@ -256,7 +256,7 @@ where
     /// Called when a call operation ends
     fn call_end(
         &mut self,
-        context: &mut EDBContext<DB>,
+        context: &mut EdbContext<DB>,
         call: &revm::interpreter::CallInputs,
         outcome: &mut revm::interpreter::CallOutcome,
     ) {
@@ -278,7 +278,7 @@ where
     /// Called when a create operation starts
     fn create(
         &mut self,
-        context: &mut EDBContext<DB>,
+        context: &mut EdbContext<DB>,
         create: &mut revm::interpreter::CreateInputs,
     ) -> Option<revm::interpreter::CreateOutcome> {
         self.call_depth += 1;
@@ -300,7 +300,7 @@ where
     /// Called when a create operation ends
     fn create_end(
         &mut self,
-        context: &mut EDBContext<DB>,
+        context: &mut EdbContext<DB>,
         create: &revm::interpreter::CreateInputs,
         outcome: &mut revm::interpreter::CreateOutcome,
     ) {

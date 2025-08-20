@@ -49,7 +49,7 @@ _This document is created by Claude with ❤️._
 │  ├─ RpcHandler (request routing and caching logic)              │
 │  ├─ CacheManager (LRU + persistence)                            │
 │  ├─ ProviderManager (weighted selection + health monitoring)    │
-│  ├─ EDBRegistry (instance lifecycle management)                 │
+│  ├─ EdbRegistry (instance lifecycle management)                 │
 │  ├─ HealthService (service monitoring)                          │
 │  └─ MetricsCollector (performance tracking)                     │
 ├─────────────────────────────────────────────────────────────────┤
@@ -158,7 +158,7 @@ impl ProxyServer {
 // Shared read-heavy data structures
 Arc<RwLock<HashMap<String, CacheEntry>>>     // Cache entries
 Arc<RwLock<Vec<ProviderInfo>>>               // Provider health status
-Arc<RwLock<HashMap<u32, EDBInstance>>>       // EDB instance registry
+Arc<RwLock<HashMap<u32, EdbInstance>>>       // EDB instance registry
 
 // Lock-free atomic operations
 AtomicUsize                                   // Round-robin counter
@@ -212,7 +212,7 @@ ProxyServerBuilder::new()
 // Service composition
 struct ProxyServer {
     rpc_handler: Arc<RpcHandler>,        // Core request handling
-    registry: Arc<EDBRegistry>,          // Instance management
+    registry: Arc<EdbRegistry>,          // Instance management
     health_service: Arc<HealthService>,  // Health endpoints
     metrics_collector: Arc<MetricsCollector>, // Performance tracking
     shutdown_tx: broadcast::Sender<()>,  // Shutdown coordination
@@ -490,7 +490,7 @@ pub struct App {
     pub proxy_client: ProxyClient,
     pub cache_stats: Option<CacheStats>,
     pub provider_info: Vec<ProviderInfo>,
-    pub active_instances: Vec<EDBInstance>,
+    pub active_instances: Vec<EdbInstance>,
     pub cache_metrics: Option<CacheMetrics>,
     pub should_refresh: bool,
 }

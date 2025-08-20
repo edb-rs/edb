@@ -11,15 +11,15 @@ use revm::{
 use std::fmt;
 
 /// Type alias for the EDB context
-pub type EDBContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
+pub type EdbContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
 
-/// A cloneable error type for DebugDB
+/// A cloneable error type for EdbDB
 #[derive(Clone, Debug)]
-pub struct DebugDBError {
+pub struct EdbDBError {
     message: String,
 }
 
-impl DebugDBError {
+impl EdbDBError {
     /// Create a new error with a message
     pub fn new(message: impl Into<String>) -> Self {
         Self { message: message.into() }
@@ -31,25 +31,25 @@ impl DebugDBError {
     }
 }
 
-impl fmt::Display for DebugDBError {
+impl fmt::Display for EdbDBError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "DebugDB Error: {}", self.message)
+        write!(f, "EdbDB Error: {}", self.message)
     }
 }
 
-impl std::error::Error for DebugDBError {}
+impl std::error::Error for EdbDBError {}
 
-impl DBErrorMarker for DebugDBError {}
+impl DBErrorMarker for EdbDBError {}
 
 /// A wrapper database that provides a cloneable error type
 /// This allows the database to be used in contexts requiring Clone
 #[derive(Clone)]
-pub struct DebugDB<DB> {
+pub struct EdbDB<DB> {
     inner: DB,
 }
 
-impl<DB> DebugDB<DB> {
-    /// Create a new DebugDB wrapping an inner database
+impl<DB> EdbDB<DB> {
+    /// Create a new EdbDB wrapping an inner database
     pub fn new(inner: DB) -> Self {
         Self { inner }
     }
@@ -70,31 +70,31 @@ impl<DB> DebugDB<DB> {
     }
 }
 
-impl<DB> Database for DebugDB<DB>
+impl<DB> Database for EdbDB<DB>
 where
     DB: Database,
     <DB as Database>::Error: std::error::Error,
 {
-    type Error = DebugDBError;
+    type Error = EdbDBError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.inner.basic(address).map_err(DebugDBError::from_error)
+        self.inner.basic(address).map_err(EdbDBError::from_error)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.inner.code_by_hash(code_hash).map_err(DebugDBError::from_error)
+        self.inner.code_by_hash(code_hash).map_err(EdbDBError::from_error)
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.inner.storage(address, index).map_err(DebugDBError::from_error)
+        self.inner.storage(address, index).map_err(EdbDBError::from_error)
     }
 
     fn block_hash(&mut self, block: u64) -> Result<B256, Self::Error> {
-        self.inner.block_hash(block).map_err(DebugDBError::from_error)
+        self.inner.block_hash(block).map_err(EdbDBError::from_error)
     }
 }
 
-impl<DB> DatabaseCommit for DebugDB<DB>
+impl<DB> DatabaseCommit for EdbDB<DB>
 where
     DB: DatabaseCommit + Database,
     <DB as Database>::Error: std::error::Error,

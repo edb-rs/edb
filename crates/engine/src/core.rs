@@ -29,7 +29,7 @@ use std::{
 };
 use tracing::{debug, error, info, warn};
 
-use edb_common::{CachePath, EDBCachePath, EDBContext, ForkResult, DEFAULT_ETHERSCAN_CACHE_TTL};
+use edb_common::{CachePath, EdbCachePath, EdbContext, ForkResult, DEFAULT_ETHERSCAN_CACHE_TTL};
 
 use crate::{
     analysis::AnalysisResult,
@@ -134,7 +134,7 @@ impl Engine {
     /// Replay the target transaction and collect call trace with all touched addresses
     fn replay_and_collect_trace<DB>(
         &self,
-        ctx: EDBContext<DB>,
+        ctx: EdbContext<DB>,
         tx: TxEnv,
     ) -> Result<TraceReplayResult>
     where
@@ -184,7 +184,7 @@ impl Engine {
         let compiler = OnchainCompiler::new(None)?;
 
         let compiler_cache_root =
-            EDBCachePath::new(None as Option<PathBuf>).compiler_chain_cache_dir(chain_id);
+            EdbCachePath::new(None as Option<PathBuf>).compiler_chain_cache_dir(chain_id);
 
         // Create fancy progress bar with blockchain-themed styling
         // NOTE: For multi-threaded usage, wrap in Arc<ProgressBar> to share across threads
@@ -267,7 +267,7 @@ impl Engine {
     /// have source code.
     fn time_travel_at_opcode_level<DB>(
         &self,
-        ctx: EDBContext<DB>,
+        ctx: EdbContext<DB>,
         tx: TxEnv,
         touched_addresses: HashSet<Address>,
     ) -> Result<ExecutionStepRecords>

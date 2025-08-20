@@ -1,9 +1,10 @@
 use std::{path::PathBuf, time::Duration};
 
 use alloy_primitives::{Address, TxHash};
-use edb_common::{fork_and_prepare, CachePath, EDBCachePath, EDBContext, ForkResult};
+use edb_common::{fork_and_prepare, CachePath, EdbCachePath, EdbContext, ForkResult};
 use eyre::Result;
 use foundry_block_explorers::Client;
+use foundry_compilers::Artifact as _;
 use revm::{
     context::{Cfg, ContextTr},
     Database, DatabaseCommit,
@@ -12,14 +13,14 @@ use revm::{
 use crate::{next_etherscan_api_key, Artifact, TweakInspectorBuilder};
 
 pub struct CodeTweaker<'a, DB: Database + DatabaseCommit> {
-    ctx: &'a mut EDBContext<DB>,
+    ctx: &'a mut EdbContext<DB>,
     rpc_url: String,
     etherscan_api_key: Option<String>,
 }
 
 impl<'a, DB: Database + DatabaseCommit> CodeTweaker<'a, DB> {
     pub fn new(
-        ctx: &'a mut EDBContext<DB>,
+        ctx: &'a mut EdbContext<DB>,
         rpc_url: String,
         etherscan_api_key: Option<String>,
     ) -> Self {
@@ -33,10 +34,19 @@ impl<'a, DB: Database + DatabaseCommit> CodeTweaker<'a, DB> {
         let ForkResult { context: replay_ctx, target_tx_env: creation_tx, .. } =
             fork_and_prepare(&self.rpc_url, creation_tx, quick, false).await?;
 
+        // Get init code
+        let init_code = artifact
+            .contract()
+            .ok_or(eyre::eyre!("Failed to get contract"))?
+            .get_bytecode_bytes()
+            .ok_or(eyre::eyre!("Failed to get bytecode for contract {}", artifact.contract_name()))?
+            .as_ref()
+            .clone();
+
         let inspector = TweakInspectorBuilder::new()
-            .target_address(addr.clone())
-            // .init_code(artifact.output);
-            .constructor_args(artifact.meta.constructor_arguments.clone())
+            .target_address(*addr)
+            .init_code(init_code)
+            .constructor_args(artifact.constructor_arguments().clone())
             .build()
             .map_err(|e| {
                 eyre::eyre!("Failed to build tweak inspector for address {}: {}", addr, e)
@@ -50,7 +60,7 @@ impl<'a, DB: Database + DatabaseCommit> CodeTweaker<'a, DB> {
 
         // Cache directory
         let etherscan_cache_dir =
-            EDBCachePath::new(None as Option<PathBuf>).etherscan_chain_cache_dir(chain_id);
+            EdbCachePath::new(None as Option<PathBuf>).etherscan_chain_cache_dir(chain_id);
 
         let etherscan_api_key = self.etherscan_api_key.clone().unwrap_or(next_etherscan_api_key());
 

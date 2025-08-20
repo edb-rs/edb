@@ -2,12 +2,12 @@
 
 use std::path::PathBuf;
 
-use alloy_primitives::Address;
-use edb_common::{Cache, EDBCache};
+use alloy_primitives::{Address, Bytes};
+use edb_common::{Cache, EdbCache};
 use eyre::Result;
 use foundry_block_explorers::{contract::Metadata, errors::EtherscanError, Client};
 use foundry_compilers::{
-    artifacts::{output_selection::OutputSelection, CompilerOutput, SolcInput, Source},
+    artifacts::{output_selection::OutputSelection, CompilerOutput, Contract, SolcInput, Source},
     solc::{Solc, SolcLanguage},
 };
 use serde::{Deserialize, Serialize};
@@ -26,11 +26,40 @@ pub struct Artifact {
     pub output: CompilerOutput,
 }
 
+impl Artifact {
+    /// Returns the contract name.
+    pub fn contract_name(&self) -> &str {
+        self.meta.contract_name.as_str()
+    }
+
+    /// Returns the compiler version.
+    pub fn compiler_version(&self) -> &str {
+        self.meta.compiler_version.as_str()
+    }
+
+    /// Returns the constructor arguments.
+    pub fn constructor_arguments(&self) -> &Bytes {
+        &self.meta.constructor_arguments
+    }
+
+    /// Subject contract
+    pub fn contract(&self) -> Option<&Contract> {
+        let contract_name = self.contract_name();
+
+        self.output
+            .contracts
+            .values()
+            .into_iter()
+            .find(|c| c.contains_key(contract_name))
+            .and_then(|contracts| contracts.get(contract_name))
+    }
+}
+
 /// Onchain compiler.
 #[derive(Debug, Clone)]
 pub struct OnchainCompiler {
     /// Cache for the compiled contracts.
-    pub cache: Option<EDBCache<Option<Artifact>>>,
+    pub cache: Option<EdbCache<Option<Artifact>>>,
 }
 
 impl OnchainCompiler {
@@ -38,7 +67,7 @@ impl OnchainCompiler {
     pub fn new(cache_root: Option<PathBuf>) -> Result<Self> {
         Ok(Self {
             // None for no expiry
-            cache: EDBCache::new(cache_root, None)?,
+            cache: EdbCache::new(cache_root, None)?,
         })
     }
 

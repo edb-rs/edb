@@ -1,4 +1,3 @@
-
 // Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
 // SPDX-License-Identifier: AGPL-3.0
 //! EDB RPC Proxy Server Library

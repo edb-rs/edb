@@ -55,11 +55,11 @@ pub trait CachePath {
 
 /// Cache path for edb.
 #[derive(Debug, Default)]
-pub struct EDBCachePath {
+pub struct EdbCachePath {
     root: Option<PathBuf>,
 }
 
-impl EDBCachePath {
+impl EdbCachePath {
     /// New cache path.
     pub fn new(root: Option<impl Into<PathBuf>>) -> Self {
         Self {
@@ -70,13 +70,13 @@ impl EDBCachePath {
     }
 }
 
-impl CachePath for EDBCachePath {
+impl CachePath for EdbCachePath {
     fn edb_cache_dir(&self) -> Option<PathBuf> {
         self.root.clone()
     }
 }
 
-impl CachePath for Option<EDBCachePath> {
+impl CachePath for Option<EdbCachePath> {
     fn edb_cache_dir(&self) -> Option<PathBuf> {
         self.as_ref()?.edb_cache_dir()
     }
@@ -121,13 +121,13 @@ pub trait Cache {
 ///  - `cache_ttl` is the time-to-live of the cache files. If it is `None`, the cache files will
 ///    never expire.
 #[derive(Debug, Clone)]
-pub struct EDBCache<T> {
+pub struct EdbCache<T> {
     cache_dir: PathBuf,
     cache_ttl: Option<Duration>,
     phantom: PhantomData<T>,
 }
 
-impl<T> EDBCache<T>
+impl<T> EdbCache<T>
 where
     T: Serialize + DeserializeOwned,
 {
@@ -156,7 +156,7 @@ where
     }
 }
 
-impl<T> Cache for EDBCache<T>
+impl<T> Cache for EdbCache<T>
 where
     T: Serialize + DeserializeOwned,
 {
@@ -199,7 +199,7 @@ where
     }
 }
 
-impl<T> Cache for Option<EDBCache<T>>
+impl<T> Cache for Option<EdbCache<T>>
 where
     T: Serialize + DeserializeOwned,
 {

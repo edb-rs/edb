@@ -1,7 +1,7 @@
 //! In-memory cache manager for RPC responses with disk persistence
 
 use edb_common::{
-    cache::{CachePath, EDBCachePath},
+    cache::{CachePath, EdbCachePath},
     forking,
 };
 use eyre::Result;
@@ -281,7 +281,7 @@ impl CacheManager {
 
         let chain_id = *chain_ids.iter().next().unwrap();
 
-        let cache_path = EDBCachePath::new(cache_dir)
+        let cache_path = EdbCachePath::new(cache_dir)
             .rpc_chain_cache_dir(chain_id)
             .unwrap_or_else(|| PathBuf::from("."))
             .join("rpc.json");

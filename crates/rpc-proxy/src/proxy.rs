@@ -5,7 +5,7 @@ use crate::{
     health::HealthService,
     metrics::MetricsCollector,
     providers::{ProviderManager, DEFAULT_MAINNET_RPCS},
-    registry::EDBRegistry,
+    registry::EdbRegistry,
     rpc::RpcHandler,
 };
 use axum::{
@@ -168,7 +168,7 @@ pub struct ProxyServer {
     /// RPC request handler with caching capabilities
     pub rpc_handler: Arc<RpcHandler>,
     /// Registry for tracking connected EDB instances
-    pub registry: Arc<EDBRegistry>,
+    pub registry: Arc<EdbRegistry>,
     /// Health check service for monitoring
     pub health_service: Arc<HealthService>,
     /// Metrics collector for performance tracking
@@ -231,7 +231,7 @@ impl ProxyServer {
         let (shutdown_tx, _) = broadcast::channel(1);
 
         // Create registry with shutdown channel
-        let registry = Arc::new(EDBRegistry::new(grace_period, shutdown_tx.clone()));
+        let registry = Arc::new(EdbRegistry::new(grace_period, shutdown_tx.clone()));
 
         // Start background tasks (if grace period is active)
         if grace_period > 0 {
