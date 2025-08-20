@@ -51,14 +51,11 @@ where
             .basic(*addr)
             .map_err(|e| eyre::eyre!("Failed to get account info for {}: {}", addr, e))?
             .unwrap_or_default();
-        let code_hash = if tweaked_code.as_ref().is_empty() {
-            KECCAK_EMPTY
-        } else {
-            B256::from_slice(&keccak256(tweaked_code.as_ref())[..])
-        };
-        info.code_hash = code_hash;
+        // Code hash will be update within `db.insert_account_info(&mut info);`
+        info.code_hash = KECCAK_EMPTY;
         info.code = Some(Bytecode::new_raw(tweaked_code));
         db.insert_account_info(*addr, info);
+
         Ok(())
     }
 
@@ -101,7 +98,7 @@ where
         inspector.into_deployed_code()
     }
 
-    async fn get_creation_tx(&self, addr: &Address) -> Result<TxHash> {
+    pub async fn get_creation_tx(&self, addr: &Address) -> Result<TxHash> {
         let chain_id = self.ctx.cfg().chain_id();
 
         // Cache directory

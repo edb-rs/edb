@@ -23,11 +23,11 @@ pub async fn replay_transaction(
     );
 
     // Step 2: Build inputs for the engine
-    let engine_config = EngineConfig {
-        rpc_port: cli.proxy_port,
-        etherscan_api_key: cli.etherscan_api_key.clone(),
-        quick: cli.quick,
-    };
+    let mut engine_config =
+        EngineConfig::default().with_quick_mode(cli.quick).with_rpc_proxy_url(rpc_url.into());
+    if let Some(api_key) = &cli.etherscan_api_key {
+        engine_config = engine_config.with_etherscan_api_key(api_key.clone());
+    }
 
     // Step 3: Call engine::prepare with forked database and EVM config
     tracing::info!("Calling engine::prepare with prepared inputs");

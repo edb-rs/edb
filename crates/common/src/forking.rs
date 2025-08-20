@@ -173,12 +173,11 @@ pub async fn fork_and_prepare(
 
         // Actually execute each transaction with revm
         let console_bar = Arc::new(ProgressBar::new(preceding_txs.len() as u64));
+        let template = format!("{{spinner:.green}} 🔮 Replaying blockchain history for {} [{{bar:40.cyan/blue}}] {{pos:>3}}/{{len:3}} ⛽ {{msg}}", &target_tx_hash.to_string()[2..10]);
         console_bar.set_style(
-            indicatif::ProgressStyle::with_template(
-                "{spinner:.green} 🔮 Replaying blockchain history [{bar:40.cyan/blue}] {pos:>3}/{len:3} ⛽ {msg}"
-            )?
-            .progress_chars("🟩🟦⬜")
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            indicatif::ProgressStyle::with_template(&template)?
+                .progress_chars("🟩🟦⬜")
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
         );
 
         for (i, tx) in preceding_txs.iter().enumerate() {

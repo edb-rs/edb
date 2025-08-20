@@ -6,7 +6,7 @@
 //! The engine accepts a forked database and EVM configuration as inputs (prepared by edb binary)
 //! and focuses on the instrumentation and analysis workflow.a
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, TxHash};
 use eyre::Result;
 use foundry_block_explorers::Client;
 use foundry_compilers::{
@@ -38,14 +38,15 @@ use crate::{
     instrument,
     rpc::{start_server, RpcServerHandle},
     utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
-    ExecutionFrameId, ExecutionStepInspector, ExecutionStepRecord, ExecutionStepRecords,
+    CodeTweaker, ExecutionFrameId, ExecutionStepInspector, ExecutionStepRecord,
+    ExecutionStepRecords,
 };
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
-    /// Port for the JSON-RPC server
-    pub rpc_port: u16,
+    /// RPC Provider URL
+    pub rpc_proxy_url: String,
     /// Etherscan API key for source code download
     pub etherscan_api_key: Option<String>,
     /// Quick mode - skip certain operations for faster analysis
@@ -54,21 +55,49 @@ pub struct EngineConfig {
 
 impl Default for EngineConfig {
     fn default() -> Self {
-        Self { rpc_port: 8545, etherscan_api_key: None, quick: false }
+        Self {
+            rpc_proxy_url: "http://localhost:8545".into(),
+            etherscan_api_key: None,
+            quick: false,
+        }
+    }
+}
+
+impl EngineConfig {
+    pub fn with_etherscan_api_key(mut self, key: String) -> Self {
+        self.etherscan_api_key = Some(key);
+        self
+    }
+
+    pub fn with_quick_mode(mut self, quick: bool) -> Self {
+        self.quick = quick;
+        self
+    }
+
+    pub fn with_rpc_proxy_url(mut self, url: String) -> Self {
+        self.rpc_proxy_url = url;
+        self
     }
 }
 
 /// The main Engine struct that performs transaction analysis
 #[derive(Debug)]
 pub struct Engine {
-    /// Configuration for the engine
-    config: EngineConfig,
+    /// RPC Provider URL
+    pub rpc_proxy_url: String,
+    /// Port for the JSON-RPC server
+    pub host_port: Option<u16>,
+    /// Etherscan API key for source code download
+    pub etherscan_api_key: Option<String>,
+    /// Quick mode - skip certain operations for faster analysis
+    pub quick: bool,
 }
 
 impl Engine {
     /// Create a new Engine instance from configuration
     pub fn new(config: EngineConfig) -> Self {
-        Self { config }
+        let EngineConfig { rpc_proxy_url, etherscan_api_key, quick } = config;
+        Self { rpc_proxy_url, host_port: None, etherscan_api_key, quick }
     }
 
     /// Create an Engine with default configuration
@@ -96,7 +125,8 @@ impl Engine {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
 
         // Step 0: Initialize context and database
-        let ForkResult { context: ctx, target_tx_env: tx, .. } = fork_result;
+        let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, .. } =
+            fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
         let replay_result = self.replay_and_collect_trace(ctx.clone(), tx.clone())?;
@@ -118,16 +148,17 @@ impl Engine {
         // Step 5: Instrument source code
         let recompiled_artifacts =
             self.instrument_and_recompile_source_code(&artifacts, &analysis_result)?;
-        unimplemented!("Implement logic to handle replay result");
 
         // Step 6: Replace original bytecode with instrumented versions
+        self.tweak_bytecode(&mut ctx, &recompiled_artifacts, tx_hash).await?;
+        unimplemented!("Implement logic to handle replay result");
 
         // Step 7: Re-execute the transaction with snapshot collection
         let snapshots: Vec<CacheDB<EmptyDB>> = vec![]; // Placeholder for collected snapshots
 
         // Step 8: Start RPC server with analysis results and snapshots
-        info!("Starting JSON-RPC server on port {}", self.config.rpc_port);
-        let rpc_handle = start_server(self.config.rpc_port, analysis_result, snapshots).await?;
+        info!("Starting JSON-RPC server on port {}", 1219);
+        let rpc_handle = start_server(1219, analysis_result, snapshots).await?;
 
         Ok(rpc_handle)
     }
@@ -336,7 +367,7 @@ impl Engine {
                 ));
             }
 
-            println!(
+            debug!(
                 "Recompiled Contract {}: {} vs {}",
                 address,
                 artifact.output.contracts.len(),
@@ -348,11 +379,41 @@ impl Engine {
 
         Ok(recompiled_artifacts)
     }
+
+    /// Tweak the bytecode of the contracts
+    async fn tweak_bytecode<DB>(
+        &self,
+        ctx: &mut EdbContext<DB>,
+        artifacts: &HashMap<Address, Artifact>,
+        tx_hash: TxHash,
+    ) -> Result<()>
+    where
+        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        <CacheDB<DB> as Database>::Error: Clone,
+        <DB as Database>::Error: Clone,
+    {
+        let mut tweaker =
+            CodeTweaker::new(ctx, self.rpc_proxy_url.clone(), self.etherscan_api_key.clone());
+
+        for (address, artifact) in artifacts {
+            let creation_tx_hash = tweaker.get_creation_tx(address).await?;
+            if creation_tx_hash == tx_hash {
+                debug!("Skip tweaking contract {}, since it was created by the transaction under investigation", address);
+                continue;
+            }
+
+            tweaker.tweak(address, artifact, self.quick).await.map_err(|e| {
+                eyre::eyre!("Failed to tweak bytecode for contract {}: {}", address, e)
+            })?;
+        }
+
+        Ok(())
+    }
 }
 
 // Helper functions
 impl Engine {
     fn get_etherscan_api_key(&self) -> String {
-        self.config.etherscan_api_key.clone().unwrap_or(next_etherscan_api_key())
+        self.etherscan_api_key.clone().unwrap_or(next_etherscan_api_key())
     }
 }
