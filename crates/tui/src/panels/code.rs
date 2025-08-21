@@ -2,7 +2,7 @@
 //!
 //! This panel shows source code with syntax highlighting and current line indication.
 
-use super::{EventResponse, Panel, PanelType};
+use super::{BreakpointManager, EventResponse, Panel, PanelType};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -69,11 +69,18 @@ pub struct CodePanel {
     scroll_offset: usize,
     /// Whether this panel is focused
     focused: bool,
+    /// Shared breakpoint manager
+    breakpoint_manager: Option<BreakpointManager>,
 }
 
 impl CodePanel {
     /// Create a new code panel
     pub fn new() -> Self {
+        Self::new_with_breakpoints(None)
+    }
+
+    /// Create a new code panel with shared breakpoint manager
+    pub fn new_with_breakpoints(breakpoint_manager: Option<BreakpointManager>) -> Self {
         // Mock server response - for addresses WITH source code
         // In reality, if has_source_code is true, we show source
         // If has_source_code is false, we show opcodes
@@ -143,6 +150,7 @@ impl CodePanel {
             active_cursor: CursorType::Execution,
             scroll_offset: 0,
             focused: false,
+            breakpoint_manager,
         }
     }
 
@@ -276,10 +284,20 @@ impl Panel for CodePanel {
                     " " // No cursor
                 };
 
+                // Check if this line has a breakpoint
+                let has_breakpoint = self
+                    .breakpoint_manager
+                    .as_ref()
+                    .map_or(false, |mgr| mgr.has_breakpoint(line_num));
+                let breakpoint_indicator = if has_breakpoint { "●" } else { " " };
+
                 let line_content = if self.mode == CodeMode::Source {
-                    format!("{:3} {} | {}", line_num, cursor_indicator, line)
+                    format!(
+                        "{:3} {} {} | {}",
+                        line_num, breakpoint_indicator, cursor_indicator, line
+                    )
                 } else {
-                    format!("{} {}", cursor_indicator, line)
+                    format!("{} {} {}", breakpoint_indicator, cursor_indicator, line)
                 };
 
                 let style = if is_execution {
@@ -290,7 +308,21 @@ impl Panel for CodePanel {
                     Style::default()
                 };
 
-                ListItem::new(line_content).style(style)
+                // Apply red color to breakpoint indicator if present
+                let styled_content = if has_breakpoint {
+                    // Create a styled line with red breakpoint indicator
+                    if self.mode == CodeMode::Source {
+                        format!("{:3} ", line_num) + 
+                        &format!("\x1b[31m●\x1b[0m") + // Red bullet
+                        &format!(" {} | {}", cursor_indicator, line)
+                    } else {
+                        format!("\x1b[31m●\x1b[0m {} {}", cursor_indicator, line)
+                    }
+                } else {
+                    line_content
+                };
+
+                ListItem::new(styled_content).style(style)
             })
             .collect();
 
@@ -424,7 +456,19 @@ impl Panel for CodePanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('b') | KeyCode::Char('B') => {
-                debug!("Breakpoint toggle requested (not implemented)");
+                // Toggle breakpoint at user cursor position
+                if let Some(line) = self.user_cursor_line {
+                    if let Some(mgr) = &self.breakpoint_manager {
+                        let added = mgr.toggle_breakpoint(line);
+                        if added {
+                            debug!("Added breakpoint at line {}", line);
+                        } else {
+                            debug!("Removed breakpoint at line {}", line);
+                        }
+                    }
+                } else {
+                    debug!("No user cursor position for breakpoint");
+                }
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

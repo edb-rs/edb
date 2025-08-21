@@ -2,7 +2,7 @@
 //!
 //! This panel can switch between different display modes based on context.
 
-use super::{EventResponse, Panel, PanelType};
+use super::{BreakpointManager, EventResponse, Panel, PanelType};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -71,7 +71,8 @@ pub struct DisplayPanel {
     variables: Vec<String>,
     stack: Vec<String>,
     memory: Vec<String>,
-    breakpoints: Vec<String>,
+    /// Shared breakpoint manager
+    breakpoint_manager: Option<BreakpointManager>,
     /// Whether this panel is focused
     focused: bool,
 }
@@ -79,6 +80,11 @@ pub struct DisplayPanel {
 impl DisplayPanel {
     /// Create a new display panel
     pub fn new() -> Self {
+        Self::new_with_breakpoints(None)
+    }
+
+    /// Create a new display panel with shared breakpoint manager
+    pub fn new_with_breakpoints(breakpoint_manager: Option<BreakpointManager>) -> Self {
         Self {
             mode: DisplayMode::Variables,
             selected_index: 0,
@@ -106,11 +112,7 @@ impl DisplayPanel {
                     .to_string(),
                 "0x60: 0xa9059cbb000000000000000000000000456...def000000000000000003e8".to_string(),
             ],
-            breakpoints: vec![
-                "1: SimpleToken.sol:9 (enabled)".to_string(),
-                "2: SimpleToken.sol:15 (disabled)".to_string(),
-                "3: PC 0x123 (enabled)".to_string(),
-            ],
+            breakpoint_manager,
             focused: false,
         }
     }
@@ -133,7 +135,21 @@ impl DisplayPanel {
             DisplayMode::TransitionState => {
                 vec!["Transition state display not implemented".to_string()]
             }
-            DisplayMode::Breakpoints => self.breakpoints.clone(),
+            DisplayMode::Breakpoints => {
+                if let Some(mgr) = &self.breakpoint_manager {
+                    let breakpoints = mgr.get_all_breakpoints();
+                    if breakpoints.is_empty() {
+                        vec!["No breakpoints set".to_string()]
+                    } else {
+                        breakpoints
+                            .iter()
+                            .map(|line| format!("● Line {} (SimpleToken.sol)", line))
+                            .collect()
+                    }
+                } else {
+                    vec!["Breakpoint manager not available".to_string()]
+                }
+            }
         }
     }
 

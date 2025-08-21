@@ -4,7 +4,8 @@
 
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
 use crate::panels::{
-    CodePanel, DisplayPanel, EventResponse, Panel, PanelType, TerminalPanel, TracePanel,
+    BreakpointManager, CodePanel, DisplayPanel, EventResponse, Panel, PanelType, TerminalPanel,
+    TracePanel,
 };
 use crate::rpc::RpcClient;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent};
@@ -30,6 +31,8 @@ pub struct App {
     should_exit: bool,
     /// Main panel type for compact layout (Trace or Code)
     compact_main_panel: PanelType,
+    /// Shared breakpoint manager
+    breakpoint_manager: BreakpointManager,
 }
 
 impl App {
@@ -37,12 +40,19 @@ impl App {
     pub fn new(rpc_client: Arc<RpcClient>, _config: LayoutConfig) -> Result<Self> {
         let layout_manager = LayoutManager::new();
         let current_panel = PanelType::Terminal;
+        let breakpoint_manager = BreakpointManager::new();
 
-        // Initialize panels
+        // Initialize panels with shared breakpoint manager
         let mut panels: HashMap<PanelType, Box<dyn Panel>> = HashMap::new();
         panels.insert(PanelType::Trace, Box::new(TracePanel::new()));
-        panels.insert(PanelType::Code, Box::new(CodePanel::new()));
-        panels.insert(PanelType::Display, Box::new(DisplayPanel::new()));
+        panels.insert(
+            PanelType::Code,
+            Box::new(CodePanel::new_with_breakpoints(Some(breakpoint_manager.clone()))),
+        );
+        panels.insert(
+            PanelType::Display,
+            Box::new(DisplayPanel::new_with_breakpoints(Some(breakpoint_manager.clone()))),
+        );
         panels.insert(PanelType::Terminal, Box::new(TerminalPanel::new()));
 
         Ok(Self {
@@ -52,6 +62,7 @@ impl App {
             panels,
             should_exit: false,
             compact_main_panel: PanelType::Code, // Default to Code in compact mode
+            breakpoint_manager,
         })
     }
 
