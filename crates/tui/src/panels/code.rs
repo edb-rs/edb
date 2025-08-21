@@ -782,6 +782,10 @@ impl Panel for CodePanel {
         self.focused = false;
         debug!("Code panel lost focus");
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl Default for CodePanel {

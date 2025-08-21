@@ -1004,6 +1004,10 @@ impl Panel for TerminalPanel {
         self.focused = false;
         debug!("Terminal panel lost focus");
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl Default for TerminalPanel {

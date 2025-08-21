@@ -192,6 +192,10 @@ impl Panel for TracePanel {
         self.focused = false;
         debug!("Trace panel lost focus");
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl Default for TracePanel {

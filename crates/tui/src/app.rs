@@ -21,6 +21,15 @@ use std::{
 };
 use tracing::{debug, warn};
 
+/// Direction for panel boundary resize
+#[derive(Debug, Clone, Copy)]
+pub enum ResizeDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
 /// RPC connection status
 #[derive(Debug, Clone)]
 pub struct ConnectionStatus {
@@ -109,7 +118,7 @@ pub struct App {
     panels: HashMap<PanelType, Box<dyn Panel>>,
     /// Whether the application should exit
     should_exit: bool,
-    /// Main panel type for compact layout (Trace or Code)
+    /// Main panel type for compact layout (Trace/Code/Display cycle)
     compact_main_panel: PanelType,
     /// Shared breakpoint manager
     breakpoint_manager: BreakpointManager,
@@ -119,6 +128,9 @@ pub struct App {
     connection_status: ConnectionStatus,
     /// Last health check time for periodic monitoring
     last_health_check: Option<Instant>,
+    /// Panel resize ratios
+    vertical_split: u16, // Left panel width % (default: 50)
+    horizontal_split: u16, // Top panels height % (default: 60)
 }
 
 impl App {
@@ -165,6 +177,8 @@ impl App {
             execution_manager,
             connection_status: ConnectionStatus::new(),
             last_health_check: None,
+            vertical_split: 50,   // 50% left panel width
+            horizontal_split: 50, // 50% top panels height
         })
     }
 
@@ -236,28 +250,28 @@ impl App {
         // Render status bar
         self.render_status_bar(frame, layout_chunks[0]);
 
-        // Split main content area for 4-panel layout
+        // Split main content area for 4-panel layout using dynamic ratios
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(50), // Top row (Trace | Code)
-                Constraint::Percentage(50), // Bottom row (Display | Terminal)
+                Constraint::Percentage(self.horizontal_split), // Top row (Trace | Code)
+                Constraint::Percentage(100 - self.horizontal_split), // Bottom row (Display | Terminal)
             ])
             .split(layout_chunks[1]);
 
         let top_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(50), // Trace panel
-                Constraint::Percentage(50), // Code panel
+                Constraint::Percentage(self.vertical_split), // Trace panel
+                Constraint::Percentage(100 - self.vertical_split), // Code panel
             ])
             .split(main_chunks[0]);
 
         let bottom_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(50), // Display panel
-                Constraint::Percentage(50), // Terminal panel
+                Constraint::Percentage(self.vertical_split), // Display panel
+                Constraint::Percentage(100 - self.vertical_split), // Terminal panel
             ])
             .split(main_chunks[1]);
 
@@ -295,28 +309,26 @@ impl App {
         // Render status bar
         self.render_status_bar(frame, layout_chunks[0]);
 
-        // Split main content for 3-panel layout
+        // Split main content for 2-panel layout: Main (cycles Trace/Code/Display) + Terminal (fixed)
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(50), // Main panel (Trace/Code)
-                Constraint::Percentage(30), // Display panel
-                Constraint::Percentage(20), // Terminal panel
+                Constraint::Percentage(self.horizontal_split), // Main panel (Trace/Code/Display cycle)
+                Constraint::Percentage(100 - self.horizontal_split), // Terminal panel (fixed)
             ])
             .split(layout_chunks[1]);
 
         // Set focus for panels
         self.update_panel_focus();
 
-        // Render main panel (switch between Trace/Code)
+        // Render main panel (cycles between Trace/Code/Display)
         if let Some(panel) = self.panels.get_mut(&self.compact_main_panel) {
             panel.render(frame, chunks[0]);
         }
-        if let Some(panel) = self.panels.get_mut(&PanelType::Display) {
-            panel.render(frame, chunks[1]);
-        }
+
+        // Always render Terminal panel in compact mode
         if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-            panel.render(frame, chunks[2]);
+            panel.render(frame, chunks[1]);
         }
 
         Ok(())
@@ -440,7 +452,8 @@ impl App {
                         // In compact mode, Tab switches main panel between Trace/Code
                         self.compact_main_panel = match self.compact_main_panel {
                             PanelType::Trace => PanelType::Code,
-                            PanelType::Code => PanelType::Trace,
+                            PanelType::Code => PanelType::Display,
+                            PanelType::Display => PanelType::Trace,
                             _ => PanelType::Code, // Fallback
                         };
                         debug!("Switched compact main panel to: {:?}", self.compact_main_panel);
@@ -456,19 +469,28 @@ impl App {
 
             // Function keys for mobile layout
             KeyCode::F(1) => {
-                self.current_panel = PanelType::Trace;
+                if self.layout_manager.layout_type() != LayoutType::Compact {
+                    // In compact mode, we keep the current panel unchanged
+                    self.current_panel = PanelType::Trace;
+                }
                 return Ok(EventResponse::Handled);
             }
             KeyCode::F(2) => {
-                self.current_panel = PanelType::Code;
+                if self.layout_manager.layout_type() != LayoutType::Compact {
+                    self.current_panel = PanelType::Code;
+                }
                 return Ok(EventResponse::Handled);
             }
             KeyCode::F(3) => {
-                self.current_panel = PanelType::Display;
+                if self.layout_manager.layout_type() != LayoutType::Compact {
+                    self.current_panel = PanelType::Display;
+                }
                 return Ok(EventResponse::Handled);
             }
             KeyCode::F(4) => {
-                self.current_panel = PanelType::Terminal;
+                if self.layout_manager.layout_type() != LayoutType::Compact {
+                    self.current_panel = PanelType::Terminal;
+                }
                 return Ok(EventResponse::Handled);
             }
 
@@ -501,15 +523,58 @@ impl App {
                 return Ok(EventResponse::Exit);
             }
 
+            // Panel boundary resize with Ctrl+Shift+arrow keys
+            KeyCode::Left
+                if key.modifiers.contains(
+                    crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::SHIFT,
+                ) =>
+            {
+                if self.layout_manager.layout_type() == LayoutType::Full {
+                    self.handle_boundary_resize(ResizeDirection::Left);
+                }
+                return Ok(EventResponse::Handled);
+            }
+            KeyCode::Right
+                if key.modifiers.contains(
+                    crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::SHIFT,
+                ) =>
+            {
+                if self.layout_manager.layout_type() == LayoutType::Full {
+                    self.handle_boundary_resize(ResizeDirection::Right);
+                }
+                return Ok(EventResponse::Handled);
+            }
+            KeyCode::Up
+                if key.modifiers.contains(
+                    crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::SHIFT,
+                ) =>
+            {
+                if self.layout_manager.layout_type() != LayoutType::Mobile {
+                    self.handle_boundary_resize(ResizeDirection::Up);
+                }
+                return Ok(EventResponse::Handled);
+            }
+            KeyCode::Down
+                if key.modifiers.contains(
+                    crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::SHIFT,
+                ) =>
+            {
+                if self.layout_manager.layout_type() != LayoutType::Mobile {
+                    self.handle_boundary_resize(ResizeDirection::Down);
+                }
+                return Ok(EventResponse::Handled);
+            }
+
             KeyCode::Char(' ') => {
-                // Space key toggles main panel in compact mode
+                // Space key cycles main panel in compact mode (Trace → Code → Display → Trace)
                 if matches!(self.layout_manager.layout_type(), LayoutType::Compact) {
                     self.compact_main_panel = match self.compact_main_panel {
                         PanelType::Trace => PanelType::Code,
-                        PanelType::Code => PanelType::Trace,
-                        _ => PanelType::Code,
+                        PanelType::Code => PanelType::Display,
+                        PanelType::Display => PanelType::Trace,
+                        _ => PanelType::Trace, // Default fallback
                     };
-                    debug!("Toggled compact main panel to: {:?}", self.compact_main_panel);
+                    debug!("Cycled compact main panel to: {:?}", self.compact_main_panel);
                     return Ok(EventResponse::Handled);
                 }
                 // Otherwise, forward to current panel
@@ -517,59 +582,6 @@ impl App {
                     return panel.handle_key_event(key);
                 }
                 return Ok(EventResponse::NotHandled);
-            }
-
-            // Ctrl+number for direct panel access
-            KeyCode::Char('1')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                match self.layout_manager.layout_type() {
-                    LayoutType::Compact => {
-                        // In compact mode, Ctrl+1 focuses main panel (whichever is showing)
-                        self.current_panel = self.compact_main_panel;
-                    }
-                    _ => {
-                        self.current_panel = PanelType::Trace;
-                    }
-                }
-                return Ok(EventResponse::Handled);
-            }
-            KeyCode::Char('2')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                match self.layout_manager.layout_type() {
-                    LayoutType::Compact => {
-                        // In compact mode, Ctrl+2 focuses display panel
-                        self.current_panel = PanelType::Display;
-                    }
-                    _ => {
-                        self.current_panel = PanelType::Code;
-                    }
-                }
-                return Ok(EventResponse::Handled);
-            }
-            KeyCode::Char('3')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                match self.layout_manager.layout_type() {
-                    LayoutType::Compact => {
-                        // In compact mode, Ctrl+3 focuses terminal panel
-                        self.current_panel = PanelType::Terminal;
-                    }
-                    _ => {
-                        self.current_panel = PanelType::Display;
-                    }
-                }
-                return Ok(EventResponse::Handled);
-            }
-            KeyCode::Char('4')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                // Ctrl+4 only works in full layout
-                if matches!(self.layout_manager.layout_type(), LayoutType::Full) {
-                    self.current_panel = PanelType::Terminal;
-                }
-                return Ok(EventResponse::Handled);
             }
 
             _ => {
@@ -591,6 +603,55 @@ impl App {
             PanelType::Terminal => PanelType::Trace,
         };
         debug!("Switched to panel: {:?}", self.current_panel);
+    }
+
+    /// Handle panel boundary resize with Ctrl+Shift+arrow keys
+    pub fn handle_boundary_resize(&mut self, direction: ResizeDirection) {
+        const STEP: u16 = 5; // 5% increments
+
+        match direction {
+            ResizeDirection::Left => {
+                self.vertical_split = self.vertical_split.saturating_sub(STEP).max(20);
+            }
+            ResizeDirection::Right => {
+                self.vertical_split = (self.vertical_split + STEP).min(80);
+            }
+            ResizeDirection::Up => {
+                self.horizontal_split = self.horizontal_split.saturating_sub(STEP).max(30);
+            }
+            ResizeDirection::Down => {
+                self.horizontal_split = (self.horizontal_split + STEP).min(80);
+            }
+        }
+
+        // Show intuitive, contextual feedback in terminal
+        if let Some(terminal_panel) = self.panels.get_mut(&PanelType::Terminal) {
+            if let Some(terminal) = terminal_panel.as_any_mut().downcast_mut::<TerminalPanel>() {
+                let message = match direction {
+                    ResizeDirection::Left => format!(
+                        "Left panels narrowed to {}% (right panels expanded to {}%)",
+                        self.vertical_split,
+                        100 - self.vertical_split
+                    ),
+                    ResizeDirection::Right => format!(
+                        "Left panels expanded to {}% (right panels narrowed to {}%)",
+                        self.vertical_split,
+                        100 - self.vertical_split
+                    ),
+                    ResizeDirection::Up => format!(
+                        "Top panels shortened to {}% (bottom panels expanded to {}%)",
+                        self.horizontal_split,
+                        100 - self.horizontal_split
+                    ),
+                    ResizeDirection::Down => format!(
+                        "Top panels expanded to {}% (bottom panels shortened to {}%)",
+                        self.horizontal_split,
+                        100 - self.horizontal_split
+                    ),
+                };
+                terminal.add_system(&message);
+            }
+        }
     }
 
     /// Handle terminal resize

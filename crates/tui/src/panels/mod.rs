@@ -64,6 +64,9 @@ pub trait Panel: Debug + Send {
     fn title(&self) -> String {
         format!("{:?} Panel", self.panel_type())
     }
+
+    /// Allow downcasting to concrete types
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 // Re-export all panel implementations

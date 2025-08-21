@@ -310,6 +310,10 @@ impl Panel for DisplayPanel {
         self.focused = false;
         debug!("Display panel lost focus");
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl Default for DisplayPanel {
