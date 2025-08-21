@@ -240,8 +240,8 @@ impl App {
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(70), // Top row (Trace | Code)
-                Constraint::Percentage(30), // Bottom row (Display | Terminal)
+                Constraint::Percentage(50), // Top row (Trace | Code)
+                Constraint::Percentage(50), // Bottom row (Display | Terminal)
             ])
             .split(layout_chunks[1]);
 
@@ -420,12 +420,19 @@ impl App {
                 self.should_exit = true;
                 return Ok(EventResponse::Exit);
             }
-            KeyCode::Char('t')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                // Ctrl+T: Switch to terminal from any panel
-                self.current_panel = PanelType::Terminal;
-                return Ok(EventResponse::Handled);
+            KeyCode::Esc => {
+                // ESC: Context-aware navigation
+                if self.current_panel == PanelType::Terminal {
+                    // If we're in terminal, let the terminal handle ESC (INSERT -> VIM mode)
+                    if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
+                        return panel.handle_key_event(key);
+                    }
+                } else {
+                    // If we're in other panels, ESC returns to terminal
+                    self.current_panel = PanelType::Terminal;
+                    return Ok(EventResponse::Handled);
+                }
+                return Ok(EventResponse::NotHandled);
             }
             KeyCode::Tab => {
                 match self.layout_manager.layout_type() {

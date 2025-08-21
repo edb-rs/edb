@@ -15,8 +15,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
-use std::collections::VecDeque;
 use std::time::Instant;
+use std::{collections::VecDeque, fs::OpenOptions, io::Write};
 use tracing::debug;
 
 /// Maximum number of terminal lines to keep in history
@@ -85,6 +85,8 @@ pub struct TerminalPanel {
     last_ctrl_c: Option<Instant>,
     /// Number prefix for vim navigation (e.g., "5" in "5j")
     vim_number_prefix: String,
+    /// VIM mode cursor position: (line_index, column_index) in the displayed content
+    vim_cursor_position: (usize, usize),
     /// Shared execution state manager
     execution_manager: Option<ExecutionManager>,
 }
@@ -111,6 +113,7 @@ impl TerminalPanel {
             snapshot_info: Some((127, 348)),
             last_ctrl_c: None,
             vim_number_prefix: String::new(),
+            vim_cursor_position: (0, 0), // Start at top-left of displayed content
             execution_manager,
         };
 
@@ -381,16 +384,18 @@ impl TerminalPanel {
         self.add_output("📋 EDB Terminal Help");
         self.add_output("");
         self.add_output("🔄 Terminal Navigation (Vim-Style):");
-        self.add_output("  Esc              - Switch to VIM mode for scrolling");
-        self.add_output("  (VIM mode) ↑/↓   - Scroll down/up line by line");
-        self.add_output("  (VIM mode) j/k   - Scroll down/up line by line");
-        self.add_output("  (VIM mode) 5j/3↓ - Scroll multiple lines");
-        self.add_output("  (VIM mode) gg/G  - Go to top/bottom");
-        self.add_output("  (VIM mode) {/}   - Jump between commands");
-        self.add_output("  (VIM mode) i     - Return to INSERT mode");
+        self.add_output("  Esc              - Switch to VIM mode for navigation");
+        self.add_output("  (VIM mode) j/k/↑/↓ - Move cursor vertically (with auto-scroll)");
+        self.add_output("  (VIM mode) h/l/←/→ - Move cursor horizontally");
+        self.add_output("  (VIM mode) 5j/3↓   - Move multiple lines with number prefix");
+        self.add_output("  (VIM mode) gg/G    - Go to top/bottom");
+        self.add_output("  (VIM mode) {/}     - Jump between commands");
+        self.add_output("  (VIM mode) i       - Return to INSERT mode");
         self.add_output("");
         self.add_output("🧭 Panel Navigation:");
-        self.add_output("  Ctrl+T           - Switch to terminal from any panel");
+        self.add_output(
+            "  ESC              - Switch to terminal from any panel (or VIM mode in terminal)",
+        );
         self.add_output("  Tab              - Cycle through panels");
         self.add_output("  F1/F2/F3/F4      - Direct panel access (mobile layout)");
         self.add_output("");
@@ -604,11 +609,21 @@ impl TerminalPanel {
 
             // Vim navigation commands - both j/k and arrow keys
             KeyCode::Char('j') | KeyCode::Down => {
-                self.vim_scroll_down(1);
+                self.vim_move_cursor_down(1);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.vim_scroll_up(1);
+                self.vim_move_cursor_up(1);
+                Ok(EventResponse::Handled)
+            }
+
+            // Horizontal cursor movement in VIM mode
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.vim_move_cursor_left();
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.vim_move_cursor_right();
                 Ok(EventResponse::Handled)
             }
 
@@ -678,6 +693,107 @@ impl TerminalPanel {
         self.vim_number_prefix.clear();
     }
 
+    /// Move VIM cursor up (k key) with auto-scrolling
+    fn vim_move_cursor_up(&mut self, count: usize) {
+        let multiplier = if self.vim_number_prefix.is_empty() {
+            count
+        } else {
+            self.vim_number_prefix.parse::<usize>().unwrap_or(1) * count
+        };
+
+        // Move cursor up in the visible area
+        if self.vim_cursor_position.0 >= multiplier {
+            self.vim_cursor_position.0 -= multiplier;
+        } else {
+            // Need to scroll up to show more content above
+            let scroll_needed = multiplier - self.vim_cursor_position.0;
+            self.scroll_offset =
+                (self.scroll_offset + scroll_needed).min(self.lines.len().saturating_sub(1));
+            self.vim_cursor_position.0 = 0;
+        }
+
+        // Clamp horizontal position to new line length
+        self.vim_clamp_cursor_to_line();
+        self.vim_number_prefix.clear();
+    }
+
+    /// Move VIM cursor down (j key) with auto-scrolling  
+    fn vim_move_cursor_down(&mut self, count: usize) {
+        let multiplier = if self.vim_number_prefix.is_empty() {
+            count
+        } else {
+            self.vim_number_prefix.parse::<usize>().unwrap_or(1) * count
+        };
+
+        let visible_lines = self.get_visible_lines_for_vim();
+        let max_line_idx = visible_lines.len().saturating_sub(1);
+
+        if self.vim_cursor_position.0 + multiplier <= max_line_idx {
+            self.vim_cursor_position.0 += multiplier;
+        } else {
+            // Need to scroll down or hit bottom
+            let overflow = (self.vim_cursor_position.0 + multiplier) - max_line_idx;
+            if self.scroll_offset >= overflow {
+                self.scroll_offset -= overflow;
+                self.vim_cursor_position.0 = max_line_idx;
+            } else {
+                // Hit bottom of content
+                self.scroll_offset = 0;
+                self.vim_cursor_position.0 =
+                    self.get_visible_lines_for_vim().len().saturating_sub(1);
+            }
+        }
+
+        // Clamp horizontal position to new line length
+        self.vim_clamp_cursor_to_line();
+        self.vim_number_prefix.clear();
+    }
+
+    /// Move VIM cursor left (h key)
+    fn vim_move_cursor_left(&mut self) {
+        if self.vim_cursor_position.1 > 0 {
+            self.vim_cursor_position.1 -= 1;
+        }
+    }
+
+    /// Move VIM cursor right (l key)
+    fn vim_move_cursor_right(&mut self) {
+        // Get the current line to check its length
+        let visible_lines = self.get_visible_lines_for_vim();
+        if let Some(current_line) = visible_lines.get(self.vim_cursor_position.0) {
+            let line_length = current_line.content.chars().count();
+            if self.vim_cursor_position.1 < line_length.saturating_sub(1) {
+                self.vim_cursor_position.1 += 1;
+            }
+        }
+    }
+
+    /// Clamp VIM cursor horizontal position to the current line length
+    fn vim_clamp_cursor_to_line(&mut self) {
+        let visible_lines = self.get_visible_lines_for_vim();
+        if let Some(current_line) = visible_lines.get(self.vim_cursor_position.0) {
+            let line_length = current_line.content.chars().count();
+            if line_length > 0 {
+                self.vim_cursor_position.1 =
+                    self.vim_cursor_position.1.min(line_length.saturating_sub(1));
+            } else {
+                self.vim_cursor_position.1 = 0;
+            }
+        }
+    }
+
+    /// Get the currently visible lines for VIM cursor navigation
+    fn get_visible_lines_for_vim(&self) -> Vec<&TerminalLine> {
+        // In VIM mode, we only show terminal history (no input line)
+        let start_idx = if self.scroll_offset >= self.lines.len() {
+            0
+        } else {
+            self.lines.len().saturating_sub(self.scroll_offset + 1)
+        };
+
+        self.lines.iter().skip(start_idx).collect()
+    }
+
     /// Jump to previous command boundary
     fn vim_jump_to_prev_command(&mut self) {
         let current_line = self.lines.len().saturating_sub(self.scroll_offset + 1);
@@ -716,6 +832,53 @@ impl TerminalPanel {
         self.scroll_offset = 0;
     }
 
+    /// Render a line with VIM cursor (block cursor)
+    fn render_line_with_vim_cursor<'a>(&self, content: &'a str, base_style: Style) -> Line<'a> {
+        let chars: Vec<char> = content.chars().collect();
+        let cursor_col = self.vim_cursor_position.1;
+
+        if chars.is_empty() {
+            // Empty line - show cursor as a space with background
+            return Line::from(vec![Span::styled(
+                " ",
+                Style::default().bg(Color::White).fg(Color::Black),
+            )]);
+        }
+
+        if cursor_col >= chars.len() {
+            // Cursor at end of line - show the content plus a cursor space
+            return Line::from(vec![
+                Span::styled(content, base_style),
+                Span::styled(" ", Style::default().bg(Color::White).fg(Color::Black)),
+            ]);
+        }
+
+        // Cursor is within the line - split content around cursor
+        let before: String = chars.iter().take(cursor_col).collect();
+        let at_cursor = chars[cursor_col];
+        let after: String = chars.iter().skip(cursor_col + 1).collect();
+
+        let mut spans = Vec::new();
+
+        // Add content before cursor
+        if !before.is_empty() {
+            spans.push(Span::styled(before, base_style));
+        }
+
+        // Add cursor character with inverted colors (block cursor)
+        spans.push(Span::styled(
+            at_cursor.to_string(),
+            Style::default().bg(Color::White).fg(Color::Black),
+        ));
+
+        // Add content after cursor
+        if !after.is_empty() {
+            spans.push(Span::styled(after, base_style));
+        }
+
+        Line::from(spans)
+    }
+
     /// Render the unified bash-like terminal view
     fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, border_color: Color) {
         // Start with all terminal history
@@ -728,15 +891,14 @@ impl TerminalPanel {
                 if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
                 Icons::ARROW_RIGHT,
                 if self.focused {
-                    // Show cursor in the input
+                    // Show line cursor in INSERT mode
                     let chars: Vec<char> = self.input_buffer.chars().collect();
                     if self.cursor_position == chars.len() {
-                        format!("{}█", self.input_buffer)
+                        format!("{}│", self.input_buffer)
                     } else if self.cursor_position < chars.len() {
                         let before: String = chars.iter().take(self.cursor_position).collect();
-                        let _at_cursor = chars[self.cursor_position];
-                        let after: String = chars.iter().skip(self.cursor_position + 1).collect();
-                        format!("{}█{}", before, after)
+                        let after: String = chars.iter().skip(self.cursor_position).collect();
+                        format!("{}│{}", before, after)
                     } else {
                         self.input_buffer.clone()
                     }
@@ -756,30 +918,30 @@ impl TerminalPanel {
         let end_idx = total_content.saturating_sub(self.scroll_offset);
         let start_idx = end_idx.saturating_sub(content_height);
 
-        // Create unified terminal content items
+        // Create unified terminal content items with VIM cursor support
         let terminal_items: Vec<ListItem<'_>> = all_content
             .iter()
             .skip(start_idx)
             .take(content_height)
-            .map(|terminal_line| {
-                let styled_line = match terminal_line.line_type {
-                    LineType::Command => Line::from(Span::styled(
-                        &terminal_line.content,
-                        Style::default().fg(self.color_scheme.command_color),
-                    )),
-                    LineType::Output => Line::from(Span::styled(
-                        &terminal_line.content,
-                        Style::default().fg(self.color_scheme.output_color),
-                    )),
-                    LineType::Error => Line::from(Span::styled(
-                        &terminal_line.content,
-                        Style::default().fg(self.color_scheme.error_color),
-                    )),
-                    LineType::System => Line::from(Span::styled(
-                        &terminal_line.content,
-                        Style::default().fg(self.color_scheme.info_color),
-                    )),
+            .enumerate()
+            .map(|(display_row, terminal_line)| {
+                let base_style = match terminal_line.line_type {
+                    LineType::Command => Style::default().fg(self.color_scheme.command_color),
+                    LineType::Output => Style::default().fg(self.color_scheme.output_color),
+                    LineType::Error => Style::default().fg(self.color_scheme.error_color),
+                    LineType::System => Style::default().fg(self.color_scheme.info_color),
                 };
+
+                // Check if this line has the VIM cursor and we're in VIM mode
+                let styled_line = if self.mode == TerminalMode::Vim
+                    && self.focused
+                    && display_row == self.vim_cursor_position.0
+                {
+                    self.render_line_with_vim_cursor(&terminal_line.content, base_style)
+                } else {
+                    Line::from(Span::styled(&terminal_line.content, base_style))
+                };
+
                 ListItem::new(styled_line)
             })
             .collect();
@@ -829,72 +991,6 @@ impl TerminalPanel {
         }
     }
 
-    /// Render the input area for INSERT mode
-    fn render_input_area(&self, frame: &mut Frame<'_>, area: Rect, border_color: Color) {
-        let prompt = &format!(
-            "{} edb{} ",
-            if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
-            Icons::ARROW_RIGHT
-        );
-
-        // Create input text with cursor
-        let input_spans = if self.focused {
-            let mut spans =
-                vec![Span::styled(prompt, Style::default().fg(self.color_scheme.prompt_color))];
-
-            let chars: Vec<char> = self.input_buffer.chars().collect();
-            if self.cursor_position == chars.len() {
-                // Cursor at end
-                spans.push(Span::styled(
-                    &self.input_buffer,
-                    Style::default().fg(self.color_scheme.command_color),
-                ));
-                spans.push(Span::styled("█", Style::default().fg(self.color_scheme.cursor_color)));
-            } else if self.cursor_position < chars.len() {
-                // Cursor in middle
-                let before: String = chars.iter().take(self.cursor_position).collect();
-                let at_cursor = chars[self.cursor_position];
-                let after: String = chars.iter().skip(self.cursor_position + 1).collect();
-
-                spans.push(Span::styled(
-                    before,
-                    Style::default().fg(self.color_scheme.command_color),
-                ));
-                spans.push(Span::styled(
-                    at_cursor.to_string(),
-                    Style::default().fg(self.color_scheme.cursor_color),
-                ));
-                spans.push(Span::styled(
-                    after,
-                    Style::default().fg(self.color_scheme.command_color),
-                ));
-            } else {
-                spans.push(Span::styled(
-                    &self.input_buffer,
-                    Style::default().fg(self.color_scheme.command_color),
-                ));
-            }
-            spans
-        } else {
-            vec![
-                Span::styled(prompt, Style::default().fg(self.color_scheme.prompt_color)),
-                Span::styled(
-                    &self.input_buffer,
-                    Style::default().fg(self.color_scheme.command_color),
-                ),
-            ]
-        };
-
-        let input_paragraph = Paragraph::new(Line::from(input_spans)).block(
-            Block::default()
-                .title(format!("{} Command Input", Icons::CODE))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color)),
-        );
-
-        frame.render_widget(input_paragraph, area);
-    }
-
     /// Render mode-specific help text
     fn render_help_text(&self, frame: &mut Frame<'_>, area: Rect) {
         let help_area =
@@ -902,7 +998,7 @@ impl TerminalPanel {
 
         let help_text = match self.mode {
             TerminalMode::Insert => "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode",
-            TerminalMode::Vim => "VIM mode: j/k/↑/↓: Scroll • [n]j/[n]k: Multi-scroll • {/}: Commands • gg/G: Top/Bottom • i/Enter: INSERT",
+            TerminalMode::Vim => "VIM mode: j/k/↑/↓: Move cursor • h/l/←/→: Horizontal • gg/G: Top/Bottom • i/Enter: INSERT",
         };
 
         let help_paragraph = Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
@@ -1023,8 +1119,6 @@ impl Panel for TerminalPanel {
 
     fn on_focus(&mut self) {
         self.focused = true;
-        // Reset to INSERT mode when panel gains focus
-        self.mode = TerminalMode::Insert;
         debug!("Terminal panel gained focus");
     }
 

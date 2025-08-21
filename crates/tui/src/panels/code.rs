@@ -491,9 +491,9 @@ impl CodePanel {
                 height: 1,
             };
             let help_text = if self.show_file_selector {
-                "↑/↓: Navigate files • Enter: Select • Esc/F: Close • B: Breakpoint • Ctrl+T: Return terminal".to_string()
+                "↑/↓: Navigate files • Enter: Select • F: Close • B: Breakpoint".to_string()
             } else {
-                "↑/↓: Scroll • j/k: Move cursor • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint • Ctrl+T: Return terminal"
+                "↑/↓: Move cursor • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint"
                     .to_string()
             };
             let help_paragraph =
@@ -627,14 +627,39 @@ impl Panel for CodePanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::Up => {
-                // Arrow keys now ONLY scroll, they don't move cursors
-                // User cursor can be moved with 'j'/'k' keys if needed
-                self.scroll_up();
+                // Move user cursor up with automatic scrolling
+                if let Some(line) = self.user_cursor_line {
+                    if line > 1 {
+                        self.user_cursor_line = Some(line - 1);
+                        // Auto-scroll if cursor moves out of view
+                        if line - 1 < self.scroll_offset + 1 {
+                            self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                        }
+                    }
+                } else {
+                    // If no user cursor, start at current view position
+                    self.user_cursor_line = Some(self.scroll_offset + 1);
+                }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Down => {
-                // Arrow keys now ONLY scroll, they don't move cursors
-                self.scroll_down();
+                // Move user cursor down with automatic scrolling
+                let max_lines = self.get_display_lines().len();
+                if let Some(line) = self.user_cursor_line {
+                    if line < max_lines {
+                        self.user_cursor_line = Some(line + 1);
+                        // Auto-scroll if cursor moves out of view
+                        // We need to ensure cursor stays visible in the viewport
+                        // Assuming viewport is roughly 20-30 lines (will be properly calculated during render)
+                        let viewport_height = 25; // Conservative estimate
+                        if line + 1 > self.scroll_offset + viewport_height {
+                            self.scroll_offset = (line + 1).saturating_sub(viewport_height);
+                        }
+                    }
+                } else {
+                    // If no user cursor, start at current view position
+                    self.user_cursor_line = Some(self.scroll_offset + 1);
+                }
                 Ok(EventResponse::Handled)
             }
             KeyCode::PageUp => {
@@ -656,27 +681,6 @@ impl Panel for CodePanel {
             KeyCode::End => {
                 let max_lines = self.get_display_lines().len();
                 self.scroll_offset = max_lines.saturating_sub(1);
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('j') | KeyCode::Char('J') => {
-                // Move user cursor down (vim-style)
-                if let Some(line) = self.user_cursor_line {
-                    let max_lines = self.get_display_lines().len();
-                    self.user_cursor_line = Some((line + 1).min(max_lines));
-                } else {
-                    // If no user cursor, start at line 1
-                    self.user_cursor_line = Some(1);
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('k') | KeyCode::Char('K') => {
-                // Move user cursor up (vim-style)
-                if let Some(line) = self.user_cursor_line {
-                    self.user_cursor_line = Some(line.saturating_sub(1).max(1));
-                } else {
-                    // If no user cursor, start at line 1
-                    self.user_cursor_line = Some(1);
-                }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('b') | KeyCode::Char('B') => {

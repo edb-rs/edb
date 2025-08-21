@@ -243,7 +243,7 @@ impl Panel for DisplayPanel {
                 width: area.width - 2,
                 height: 1,
             };
-            let help_text = "Tab: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse • Ctrl+T: Return terminal";
+            let help_text = "Tab: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
             let help_paragraph =
                 Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(help_paragraph, help_area);

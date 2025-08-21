@@ -132,8 +132,7 @@ impl Panel for TracePanel {
                 width: area.width - 2,
                 height: 1,
             };
-            let help_text =
-                "↑/↓: Navigate • Enter: Select • Tab: Next panel • Ctrl+T: Return terminal";
+            let help_text = "↑/↓: Navigate • Enter: Select • Tab: Next panel";
             let help_paragraph =
                 Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(help_paragraph, help_area);
