@@ -3,7 +3,7 @@
 //! This module contains the core application state management and event handling.
 
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
-use crate::managers::{BreakpointManager, ExecutionManager};
+use crate::managers::{BreakpointManager, ExecutionManager, ThemeManager};
 use crate::panels::{
     CodePanel, DisplayPanel, EventResponse, Panel, PanelType, TerminalPanel, TracePanel,
 };
@@ -124,6 +124,8 @@ pub struct App {
     breakpoint_manager: BreakpointManager,
     /// Shared execution state manager
     execution_manager: ExecutionManager,
+    /// Shared theme manager
+    theme_manager: ThemeManager,
     /// RPC connection status and health monitoring
     connection_status: ConnectionStatus,
     /// Last health check time for periodic monitoring
@@ -140,30 +142,40 @@ impl App {
         let current_panel = PanelType::Terminal;
         let breakpoint_manager = BreakpointManager::new();
         let execution_manager = ExecutionManager::new();
+        let theme_manager = ThemeManager::new();
 
         // Initialize panels with shared breakpoint manager
         let mut panels: HashMap<PanelType, Box<dyn Panel>> = HashMap::new();
         panels.insert(
             PanelType::Trace,
-            Box::new(TracePanel::new_with_execution_manager(Some(execution_manager.clone()))),
+            Box::new(TracePanel::new_with_managers(
+                execution_manager.clone(),
+                theme_manager.clone(),
+            )),
         );
         panels.insert(
             PanelType::Code,
             Box::new(CodePanel::new_with_managers(
-                Some(breakpoint_manager.clone()),
-                Some(execution_manager.clone()),
+                breakpoint_manager.clone(),
+                execution_manager.clone(),
+                theme_manager.clone(),
             )),
         );
         panels.insert(
             PanelType::Display,
             Box::new(DisplayPanel::new_with_managers(
-                Some(breakpoint_manager.clone()),
-                Some(execution_manager.clone()),
+                breakpoint_manager.clone(),
+                execution_manager.clone(),
+                theme_manager.clone(),
             )),
         );
         panels.insert(
             PanelType::Terminal,
-            Box::new(TerminalPanel::new_with_execution_manager(Some(execution_manager.clone()))),
+            Box::new(TerminalPanel::new_with_managers(
+                breakpoint_manager.clone(),
+                execution_manager.clone(),
+                theme_manager.clone(),
+            )),
         );
 
         Ok(Self {
@@ -175,6 +187,7 @@ impl App {
             compact_main_panel: PanelType::Code, // Default to Code in compact mode
             breakpoint_manager,
             execution_manager,
+            theme_manager,
             connection_status: ConnectionStatus::new(),
             last_health_check: None,
             vertical_split: 50,   // 50% left panel width

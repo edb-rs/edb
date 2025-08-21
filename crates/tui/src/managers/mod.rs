@@ -4,6 +4,8 @@
 
 pub mod breakpoint;
 pub mod execution;
+pub mod theme;
 
 pub use breakpoint::BreakpointManager;
 pub use execution::ExecutionManager;
+pub use theme::ThemeManager;

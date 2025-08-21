@@ -3,16 +3,15 @@
 //! This panel shows the call trace and allows navigation through trace entries.
 
 use super::{EventResponse, Panel, PanelType};
-use crate::managers::ExecutionManager;
+use crate::managers::{ExecutionManager, ThemeManager};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
-use std::collections::VecDeque;
 use tracing::debug;
 
 /// Trace panel implementation (stub)
@@ -25,17 +24,17 @@ pub struct TracePanel {
     /// Whether this panel is focused
     focused: bool,
     /// Shared execution state manager
-    execution_manager: Option<ExecutionManager>,
+    execution_manager: ExecutionManager,
+    /// Theme manager for styling
+    theme_manager: ThemeManager,
 }
 
 impl TracePanel {
-    /// Create a new trace panel
-    pub fn new() -> Self {
-        Self::new_with_execution_manager(None)
-    }
-
-    /// Create a new trace panel with execution manager
-    pub fn new_with_execution_manager(execution_manager: Option<ExecutionManager>) -> Self {
+    /// Create a new trace panel with required managers
+    pub fn new_with_managers(
+        execution_manager: ExecutionManager,
+        theme_manager: ThemeManager,
+    ) -> Self {
         Self {
             trace_entries: vec![
                 "📞 CALL 0x123...abc → 0x456...def".to_string(),
@@ -50,6 +49,7 @@ impl TracePanel {
             selected_index: 0,
             focused: false,
             execution_manager,
+            theme_manager,
         }
     }
 
@@ -83,7 +83,11 @@ impl Panel for TracePanel {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let border_color = if self.focused { Color::Cyan } else { Color::Gray };
+        let border_color = if self.focused {
+            self.theme_manager.focused_border_color()
+        } else {
+            self.theme_manager.unfocused_border_color()
+        };
 
         if self.trace_entries.is_empty() {
             let paragraph = Paragraph::new("No trace data available").block(
@@ -103,9 +107,11 @@ impl Panel for TracePanel {
             .enumerate()
             .map(|(i, entry)| {
                 let style = if i == self.selected_index && self.focused {
-                    Style::default().bg(Color::Blue).fg(Color::White)
+                    Style::default()
+                        .bg(self.theme_manager.selected_bg_color())
+                        .fg(self.theme_manager.selected_fg_color())
                 } else if i == self.selected_index {
-                    Style::default().bg(Color::DarkGray)
+                    Style::default().bg(self.theme_manager.highlight_bg_color())
                 } else {
                     Style::default()
                 };
@@ -120,7 +126,7 @@ impl Panel for TracePanel {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color)),
             )
-            .highlight_style(Style::default().bg(Color::Blue));
+            .highlight_style(Style::default().bg(self.theme_manager.selected_bg_color()));
 
         frame.render_widget(list, area);
 
@@ -133,8 +139,8 @@ impl Panel for TracePanel {
                 height: 1,
             };
             let help_text = "↑/↓: Navigate • Enter: Select • Tab: Next panel";
-            let help_paragraph =
-                Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
+            let help_paragraph = Paragraph::new(help_text)
+                .style(Style::default().fg(self.theme_manager.help_text_color()));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -195,11 +201,5 @@ impl Panel for TracePanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-}
-
-impl Default for TracePanel {
-    fn default() -> Self {
-        Self::new()
     }
 }

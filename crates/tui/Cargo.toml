@@ -30,10 +30,12 @@ reqwest = { workspace = true, features = ["json"] }
 # serialization
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+toml.workspace = true
 
 # misc
 eyre.workspace = true
 tracing.workspace = true
+dirs.workspace = true
 
 [dev-dependencies]
 edb-common = { path = "../common" }

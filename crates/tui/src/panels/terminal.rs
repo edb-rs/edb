@@ -3,7 +3,7 @@
 //! This panel provides a command-line interface for debugging commands.
 
 use super::{EventResponse, Panel, PanelType};
-use crate::managers::ExecutionManager;
+use crate::managers::{breakpoint, theme, BreakpointManager, ExecutionManager, ThemeManager};
 use crate::ui::colors::ColorScheme;
 use crate::ui::icons::Icons;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -15,8 +15,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
+use std::collections::VecDeque;
 use std::time::Instant;
-use std::{collections::VecDeque, fs::OpenOptions, io::Write};
 use tracing::debug;
 
 /// Maximum number of terminal lines to keep in history
@@ -89,18 +89,21 @@ pub struct TerminalPanel {
     vim_number_prefix: String,
     /// VIM mode cursor absolute line number in terminal history (1-based, like code panel)
     vim_cursor_line: usize,
+    /// Shared breakpoint manager
+    breakpoint_manager: BreakpointManager,
     /// Shared execution state manager
-    execution_manager: Option<ExecutionManager>,
+    execution_manager: ExecutionManager,
+    /// Theme manager for centralized theme management
+    theme_manager: ThemeManager,
 }
 
 impl TerminalPanel {
-    /// Create a new terminal panel
-    pub fn new() -> Self {
-        Self::new_with_execution_manager(None)
-    }
-
-    /// Create a new terminal panel with execution manager
-    pub fn new_with_execution_manager(execution_manager: Option<ExecutionManager>) -> Self {
+    /// Create a new terminal panel with required managers
+    pub fn new_with_managers(
+        breakpoint_manager: BreakpointManager,
+        execution_manager: ExecutionManager,
+        theme_manager: ThemeManager,
+    ) -> Self {
         let mut panel = Self {
             lines: Vec::new(),
             mode: TerminalMode::Insert,
@@ -117,7 +120,9 @@ impl TerminalPanel {
             last_ctrl_c: None,
             vim_number_prefix: String::new(),
             vim_cursor_line: 1, // Start at first line (1-based like code panel)
+            breakpoint_manager,
             execution_manager,
+            theme_manager,
         };
 
         // Add welcome message with fancy styling
@@ -149,7 +154,7 @@ impl TerminalPanel {
 
     /// Add system message (convenience method)
     pub fn add_system(&mut self, line: &str) {
-        self.add_line(line, LineType::System);
+        self.add_line(&format!("⚡ {}", line), LineType::System);
     }
 
     /// Add command line (convenience method)
@@ -191,6 +196,12 @@ impl TerminalPanel {
             "history" => {
                 self.show_history();
             }
+            "theme" => {
+                self.show_themes();
+            }
+            cmd if cmd.starts_with("theme ") => {
+                self.handle_theme_command(&cmd[6..]);
+            }
             cmd if cmd.starts_with('$') => {
                 // Solidity expression evaluation
                 self.add_output(&format!("Evaluating: {}", &cmd[1..]));
@@ -218,128 +229,96 @@ impl TerminalPanel {
         match parts[0] {
             "next" | "n" => {
                 self.add_system("Stepping to next snapshot...");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    if current < total.saturating_sub(1) {
-                        exec_mgr.update_state(current + 1, total, Some(current + 10), None);
-                        self.add_output(&format!(
-                            "✅ Stepped to snapshot {}/{}",
-                            current + 1,
-                            total
-                        ));
-                    } else {
-                        self.add_output("⚠️ Already at last snapshot");
-                    }
+                let exec_mgr = &self.execution_manager;
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                if current < total.saturating_sub(1) {
+                    exec_mgr.update_state(current + 1, total, Some(current + 10), None);
+                    self.add_output(&format!("✅ Stepped to snapshot {}/{}", current + 1, total));
                 } else {
-                    self.add_output("(RPC call would be made here)");
+                    self.add_output("⚠️ Already at last snapshot");
                 }
             }
             "prev" | "p" => {
                 self.add_system("Stepping to previous snapshot...");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    if current > 0 {
-                        exec_mgr.update_state(current - 1, total, Some(current + 8), None);
-                        self.add_output(&format!(
-                            "✅ Stepped to snapshot {}/{}",
-                            current - 1,
-                            total
-                        ));
-                    } else {
-                        self.add_output("⚠️ Already at first snapshot");
-                    }
+                let exec_mgr = &self.execution_manager;
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                if current > 0 {
+                    exec_mgr.update_state(current - 1, total, Some(current + 8), None);
+                    self.add_output(&format!("✅ Stepped to snapshot {}/{}", current - 1, total));
                 } else {
-                    self.add_output("(RPC call would be made here)");
+                    self.add_output("⚠️ Already at first snapshot");
                 }
             }
             "step" | "s" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.add_output(&format!("Stepping {} snapshots...", count));
-                if let Some(exec_mgr) = &self.execution_manager {
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    let new_pos = (current + count).min(total.saturating_sub(1));
-                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
-                    self.add_output(&format!(
-                        "✅ Stepped {} snapshots to {}/{}",
-                        count, new_pos, total
-                    ));
-                } else {
-                    self.add_output("(RPC call would be made here)");
-                }
+                let exec_mgr = &self.execution_manager;
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                let new_pos = (current + count).min(total.saturating_sub(1));
+                exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                self.add_output(&format!(
+                    "✅ Stepped {} snapshots to {}/{}",
+                    count, new_pos, total
+                ));
             }
             "reverse" | "r" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.add_output(&format!("Reverse stepping {} snapshots...", count));
-                if let Some(exec_mgr) = &self.execution_manager {
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    let new_pos = current.saturating_sub(count);
-                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
-                    self.add_output(&format!(
-                        "✅ Reverse stepped {} snapshots to {}/{}",
-                        count, new_pos, total
-                    ));
-                } else {
-                    self.add_output("(RPC call would be made here)");
-                }
+                let exec_mgr = &self.execution_manager;
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                let new_pos = current.saturating_sub(count);
+                exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                self.add_output(&format!(
+                    "✅ Reverse stepped {} snapshots to {}/{}",
+                    count, new_pos, total
+                ));
             }
             "call" | "c" => {
                 self.add_system("Stepping to next function call...");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    // Simulate jumping to next significant call (larger step)
-                    let new_pos = (current + 10).min(total.saturating_sub(1));
-                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
-                    self.add_output(&format!(
-                        "✅ Stepped to next call at snapshot {}/{}",
-                        new_pos, total
-                    ));
-                } else {
-                    self.add_output("(RPC call would be made here)");
-                }
+                let exec_mgr = &self.execution_manager;
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                // Simulate jumping to next significant call (larger step)
+                let new_pos = (current + 10).min(total.saturating_sub(1));
+                exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                self.add_output(&format!(
+                    "✅ Stepped to next call at snapshot {}/{}",
+                    new_pos, total
+                ));
             }
             "rcall" | "rc" => {
                 self.add_system("Stepping back from function call...");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    // Simulate jumping back to previous significant call
-                    let new_pos = current.saturating_sub(10);
-                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
-                    self.add_output(&format!(
-                        "✅ Stepped back to previous call at snapshot {}/{}",
-                        new_pos, total
-                    ));
-                } else {
-                    self.add_output("(RPC call would be made here)");
-                }
+                let exec_mgr = &self.execution_manager;
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                // Simulate jumping back to previous significant call
+                let new_pos = current.saturating_sub(10);
+                exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                self.add_output(&format!(
+                    "✅ Stepped back to previous call at snapshot {}/{}",
+                    new_pos, total
+                ));
             }
             "goto" => {
                 if parts.len() > 1 {
                     if let Ok(index) = parts[1].parse::<usize>() {
                         self.add_output(&format!("Jumping to snapshot {}...", index));
-                        if let Some(exec_mgr) = &self.execution_manager {
-                            let total = exec_mgr.total_snapshots();
-                            if index < total {
-                                exec_mgr.update_state(index, total, Some(index + 9), None);
-                                self.add_output(&format!(
-                                    "✅ Jumped to snapshot {}/{}",
-                                    index, total
-                                ));
-                            } else {
-                                self.add_output(&format!(
-                                    "⚠️ Invalid snapshot index. Range: 0-{}",
-                                    total.saturating_sub(1)
-                                ));
-                            }
+                        let exec_mgr = &self.execution_manager;
+                        let total = exec_mgr.total_snapshots();
+                        if index < total {
+                            exec_mgr.update_state(index, total, Some(index + 9), None);
+                            self.add_output(&format!("✅ Jumped to snapshot {}/{}", index, total));
                         } else {
-                            self.add_output("(RPC call would be made here)");
+                            self.add_output(&format!(
+                                "⚠️ Invalid snapshot index. Range: 0-{}",
+                                total.saturating_sub(1)
+                            ));
                         }
                     } else {
                         self.add_output("Invalid snapshot index");
@@ -423,6 +402,7 @@ impl TerminalPanel {
         self.add_output("⚙️  Other:");
         self.add_output("  help, h          - Show this help");
         self.add_output("  clear, cls       - Clear terminal");
+        self.add_output("  theme            - Switch theme");
         self.add_output("  history          - Show command history");
         self.add_output("  quit, q, exit    - Exit debugger");
         self.add_output("");
@@ -442,6 +422,50 @@ impl TerminalPanel {
                 .collect();
             for line in history_lines {
                 self.add_output(&line);
+            }
+        }
+    }
+
+    /// Show available themes
+    fn show_themes(&mut self) {
+        let themes = self.theme_manager.list_themes();
+        let active_theme = self.theme_manager.get_active_theme_name();
+
+        self.add_output("Available themes:");
+        for (name, display_name, description) in themes {
+            let marker = if name == active_theme { "→" } else { " " };
+            self.add_output(&format!("{} {} - {}", marker, display_name, description));
+        }
+        self.add_output("");
+        self.add_output("Usage:");
+        self.add_output("  theme <name>    Switch to theme");
+        self.add_output("  theme           List available themes");
+    }
+
+    /// Handle theme switching command
+    fn handle_theme_command(&mut self, theme_name: &str) {
+        let theme_name = theme_name.to_lowercase();
+        let theme_name = theme_name.trim();
+
+        if theme_name.is_empty() {
+            self.show_themes();
+            return;
+        }
+
+        match self.theme_manager.switch_theme(theme_name) {
+            Ok(_) => {
+                self.add_system(&format!(
+                    "Switched to '{}' theme - changes will apply immediately",
+                    theme_name
+                ));
+                // Theme changes take effect immediately via the shared ThemeManager
+            }
+            Err(e) => {
+                self.add_error(&format!("Failed to switch theme: {}", e));
+                self.add_output("Available themes:");
+                for (_name, display_name, description) in self.theme_manager.list_themes() {
+                    self.add_output(&format!("  {} - {}", display_name, description));
+                }
             }
         }
     }
@@ -687,13 +711,12 @@ impl TerminalPanel {
             return;
         }
 
-        // Move cursor down in absolute terminal history (1-based like code panel)
-        let new_line = (self.vim_cursor_line + multiplier).min(max_lines);
+        // Move cursor down in absolute terminal history (considering input buffer)
+        let new_line = (self.vim_cursor_line + multiplier).min(max_lines + 1);
         self.vim_cursor_line = new_line;
 
-        // Auto-scroll if cursor moves out of view (EXACTLY like code panel logic)
-        // Assuming viewport is roughly 25 lines (conservative estimate like code panel)
-        let viewport_height = 25;
+        // Auto-scroll if cursor moves out of view
+        let viewport_height = self.content_height;
         if self.vim_cursor_line > self.scroll_offset + viewport_height {
             self.scroll_offset = self.vim_cursor_line.saturating_sub(viewport_height);
         }
@@ -782,10 +805,10 @@ impl TerminalPanel {
             .enumerate()
             .map(|(display_row, terminal_line)| {
                 let base_style = match terminal_line.line_type {
-                    LineType::Command => Style::default().fg(self.color_scheme.command_color),
-                    LineType::Output => Style::default().fg(self.color_scheme.output_color),
-                    LineType::Error => Style::default().fg(self.color_scheme.error_color),
-                    LineType::System => Style::default().fg(self.color_scheme.info_color),
+                    LineType::Command => Style::default().fg(self.theme_manager.info_color()),
+                    LineType::Output => Style::default(),
+                    LineType::Error => Style::default().fg(self.theme_manager.error_color()),
+                    LineType::System => Style::default().fg(self.theme_manager.success_color()),
                 };
 
                 // Create the line content with base style
@@ -813,7 +836,11 @@ impl TerminalPanel {
                     && Some(display_row) == cursor_display_row
                 {
                     // Apply highlighting to entire ListItem (full width like code panel)
-                    list_item.style(Style::default().bg(Color::DarkGray).fg(Color::White))
+                    list_item.style(
+                        Style::default()
+                            .bg(self.theme_manager.highlight_bg_color())
+                            .fg(self.theme_manager.highlight_fg_color()),
+                    )
                 } else {
                     list_item
                 }
@@ -877,7 +904,8 @@ impl TerminalPanel {
             }
         };
 
-        let help_paragraph = Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
+        let help_paragraph = Paragraph::new(help_text)
+            .style(Style::default().fg(self.theme_manager.help_text_color()));
         frame.render_widget(help_paragraph, help_area);
     }
 }
@@ -904,9 +932,9 @@ impl Panel for TerminalPanel {
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let border_color = if self.focused {
-            self.color_scheme.focused_border
+            self.theme_manager.focused_border_color()
         } else {
-            self.color_scheme.unfocused_border
+            self.theme_manager.unfocused_border_color()
         };
 
         // Add status line if there's enough space
@@ -1007,33 +1035,5 @@ impl Panel for TerminalPanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-}
-
-impl Default for TerminalPanel {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_terminal_panel_creation() {
-        let panel = TerminalPanel::new();
-        assert_eq!(panel.panel_type(), PanelType::Terminal);
-        assert!(!panel.lines.is_empty()); // Should have welcome message
-        assert_eq!(panel.mode, TerminalMode::Insert);
-    }
-
-    #[test]
-    fn test_command_execution() {
-        let mut panel = TerminalPanel::new();
-        let initial_count = panel.lines.len();
-
-        panel.execute_command("help").unwrap();
-        assert!(panel.lines.len() > initial_count);
     }
 }

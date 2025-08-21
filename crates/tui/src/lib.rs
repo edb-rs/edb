@@ -5,6 +5,7 @@
 //! This crate provides a terminal-based interface for interacting with the EDB engine.
 
 mod app;
+mod config;
 mod layout;
 mod managers;
 mod panels;
@@ -12,10 +13,12 @@ mod rpc;
 mod ui;
 
 pub use app::App;
+pub use config::{ColorScheme as ConfigColorScheme, Config, Theme};
 pub use layout::{LayoutConfig, LayoutManager, LayoutType};
+pub use managers::ThemeManager;
 pub use panels::EventResponse;
 pub use rpc::RpcClient;
-pub use ui::{ColorScheme, Icons, Theme};
+pub use ui::{ColorScheme, Icons, Theme as UiTheme};
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream},

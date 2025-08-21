@@ -3,7 +3,7 @@
 //! This panel shows source code with syntax highlighting and current line indication.
 
 use super::{BreakpointManager, EventResponse, Panel, PanelType};
-use crate::managers::ExecutionManager;
+use crate::managers::{ExecutionManager, ThemeManager};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -72,33 +72,26 @@ pub struct CodePanel {
     scroll_offset: usize,
     /// Whether this panel is focused
     focused: bool,
-    /// Shared breakpoint manager
-    breakpoint_manager: Option<BreakpointManager>,
-    /// Shared execution state manager
-    execution_manager: Option<ExecutionManager>,
     /// File selector state
     show_file_selector: bool,
     /// Selected file index in file selector
     file_selector_index: usize,
     /// Height percentage for file selector (0-100)
     file_selector_height_percent: u16,
+    /// Shared breakpoint manager
+    breakpoint_manager: BreakpointManager,
+    /// Shared execution state manager
+    execution_manager: ExecutionManager,
+    /// Theme manager for styling
+    theme_manager: ThemeManager,
 }
 
 impl CodePanel {
-    /// Create a new code panel
-    pub fn new() -> Self {
-        Self::new_with_managers(None, None)
-    }
-
-    /// Create a new code panel with shared breakpoint manager (legacy method)
-    pub fn new_with_breakpoints(breakpoint_manager: Option<BreakpointManager>) -> Self {
-        Self::new_with_managers(breakpoint_manager, None)
-    }
-
-    /// Create a new code panel with shared managers
+    /// Create a new code panel with required managers
     pub fn new_with_managers(
-        breakpoint_manager: Option<BreakpointManager>,
-        execution_manager: Option<ExecutionManager>,
+        breakpoint_manager: BreakpointManager,
+        execution_manager: ExecutionManager,
+        theme_manager: ThemeManager,
     ) -> Self {
         // Mock server response - for addresses WITH source code
         // In reality, if has_source_code is true, we show source
@@ -193,6 +186,7 @@ impl CodePanel {
             focused: false,
             breakpoint_manager,
             execution_manager,
+            theme_manager,
             show_file_selector: false,
             file_selector_index: 0,
             file_selector_height_percent: 20, // Default to 20% of panel height
@@ -333,9 +327,11 @@ impl CodePanel {
                 );
 
                 let style = if display_idx == self.file_selector_index {
-                    Style::default().bg(Color::Blue).fg(Color::White)
+                    Style::default()
+                        .bg(self.theme_manager.selected_bg_color())
+                        .fg(self.theme_manager.selected_fg_color())
                 } else if file_info.has_execution {
-                    Style::default().fg(Color::Yellow) // Highlight files with current execution
+                    Style::default().fg(self.theme_manager.warning_color()) // Highlight files with current execution
                 } else {
                     Style::default()
                 };
@@ -353,9 +349,9 @@ impl CodePanel {
                         sorted_files.len()
                     ))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green)),
+                    .border_style(Style::default().fg(self.theme_manager.success_color())),
             )
-            .highlight_style(Style::default().bg(Color::Blue));
+            .highlight_style(Style::default().bg(self.theme_manager.selected_bg_color()));
 
         frame.render_widget(file_list, area);
     }
@@ -409,10 +405,7 @@ impl CodePanel {
                 };
 
                 // Check if this line has a breakpoint
-                let has_breakpoint = self
-                    .breakpoint_manager
-                    .as_ref()
-                    .map_or(false, |mgr| mgr.has_breakpoint(line_num));
+                let has_breakpoint = self.breakpoint_manager.has_breakpoint(line_num);
                 let breakpoint_indicator = if has_breakpoint { "●" } else { " " };
 
                 let line_content = if self.mode == CodeMode::Source {
@@ -425,9 +418,13 @@ impl CodePanel {
                 };
 
                 let style = if is_execution {
-                    Style::default().bg(Color::Yellow).fg(Color::Black)
+                    Style::default()
+                        .bg(self.theme_manager.warning_color())
+                        .fg(self.theme_manager.selected_fg_color())
                 } else if is_user_cursor {
-                    Style::default().bg(Color::DarkGray).fg(Color::White)
+                    Style::default()
+                        .bg(self.theme_manager.highlight_bg_color())
+                        .fg(self.theme_manager.highlight_fg_color())
                 } else {
                     Style::default()
                 };
@@ -479,8 +476,8 @@ impl CodePanel {
                 self.selected_path_index + 1,
                 self.display_info.file_info.len()
             );
-            let status_paragraph =
-                Paragraph::new(status_text).style(Style::default().fg(Color::Cyan));
+            let status_paragraph = Paragraph::new(status_text)
+                .style(Style::default().fg(self.theme_manager.info_color()));
             frame.render_widget(status_paragraph, status_area);
 
             // Help line - updated to include file selector
@@ -496,8 +493,8 @@ impl CodePanel {
                 "↑/↓: Move cursor • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint"
                     .to_string()
             };
-            let help_paragraph =
-                Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
+            let help_paragraph = Paragraph::new(help_text)
+                .style(Style::default().fg(self.theme_manager.help_text_color()));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -539,7 +536,11 @@ impl Panel for CodePanel {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let border_color = if self.focused { Color::Cyan } else { Color::Gray };
+        let border_color = if self.focused {
+            self.theme_manager.focused_border_color()
+        } else {
+            self.theme_manager.unfocused_border_color()
+        };
 
         // Split area if file selector is shown
         let (file_selector_area, code_area) = if self.show_file_selector {
@@ -601,15 +602,15 @@ impl Panel for CodePanel {
                     // Allow breakpoints to work in file selector mode
                     KeyCode::Char('b') | KeyCode::Char('B') => {
                         if let Some(line) = self.user_cursor_line {
-                            if let Some(mgr) = &self.breakpoint_manager {
-                                let added = mgr.toggle_breakpoint(line);
-                                if added {
-                                    debug!("Added breakpoint at line {}", line);
-                                } else {
-                                    debug!("Removed breakpoint at line {}", line);
-                                }
+                            let mgr = &self.breakpoint_manager;
+                            let added = mgr.toggle_breakpoint(line);
+                            if added {
+                                debug!("Added breakpoint at line {}", line);
+                            } else {
+                                debug!("Removed breakpoint at line {}", line);
                             }
-                        } else {
+                        }
+                        {
                             debug!("No user cursor position for breakpoint");
                         }
                         Ok(EventResponse::Handled)
@@ -686,13 +687,12 @@ impl Panel for CodePanel {
             KeyCode::Char('b') | KeyCode::Char('B') => {
                 // Toggle breakpoint at user cursor position
                 if let Some(line) = self.user_cursor_line {
-                    if let Some(mgr) = &self.breakpoint_manager {
-                        let added = mgr.toggle_breakpoint(line);
-                        if added {
-                            debug!("Added breakpoint at line {}", line);
-                        } else {
-                            debug!("Removed breakpoint at line {}", line);
-                        }
+                    let mgr = &self.breakpoint_manager;
+                    let added = mgr.toggle_breakpoint(line);
+                    if added {
+                        debug!("Added breakpoint at line {}", line);
+                    } else {
+                        debug!("Removed breakpoint at line {}", line);
                     }
                 } else {
                     debug!("No user cursor position for breakpoint");
@@ -703,14 +703,13 @@ impl Panel for CodePanel {
                 // Step: Move to next snapshot/instruction
                 // TODO: This will send a step command to the RPC server
                 debug!("Step (next instruction) requested from code panel");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    // For now, simulate moving to next snapshot
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    if current < total.saturating_sub(1) {
-                        exec_mgr.update_state(current + 1, total, Some(current + 10), None);
-                        debug!("Stepped to snapshot {}", current + 1);
-                    }
+                let exec_mgr = &self.execution_manager;
+                // For now, simulate moving to next snapshot
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                if current < total.saturating_sub(1) {
+                    exec_mgr.update_state(current + 1, total, Some(current + 10), None);
+                    debug!("Stepped to snapshot {}", current + 1);
                 }
                 Ok(EventResponse::Handled)
             }
@@ -718,14 +717,13 @@ impl Panel for CodePanel {
                 // Reverse step: Move to previous snapshot/instruction
                 // TODO: This will send a reverse step command to the RPC server
                 debug!("Reverse step (previous instruction) requested from code panel");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    // For now, simulate moving to previous snapshot
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    if current > 0 {
-                        exec_mgr.update_state(current - 1, total, Some(current + 8), None);
-                        debug!("Reverse stepped to snapshot {}", current - 1);
-                    }
+                let exec_mgr = &self.execution_manager;
+                // For now, simulate moving to previous snapshot
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                if current > 0 {
+                    exec_mgr.update_state(current - 1, total, Some(current + 8), None);
+                    debug!("Reverse stepped to snapshot {}", current - 1);
                 }
                 Ok(EventResponse::Handled)
             }
@@ -733,28 +731,28 @@ impl Panel for CodePanel {
                 // Next: Step over function calls (skip internal calls)
                 // TODO: This will send a next command to the RPC server
                 debug!("Next (step over) requested from code panel");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    // For now, simulate stepping over to next significant point
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    let next_pos = (current + 5).min(total.saturating_sub(1));
-                    exec_mgr.update_state(next_pos, total, Some(next_pos + 9), None);
-                    debug!("Next (step over) to snapshot {}", next_pos);
-                }
+                let exec_mgr = &self.execution_manager;
+                // For now, simulate stepping over to next significant point
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                let next_pos = (current + 5).min(total.saturating_sub(1));
+                exec_mgr.update_state(next_pos, total, Some(next_pos + 9), None);
+                debug!("Next (step over) to snapshot {}", next_pos);
+
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('p') => {
                 // Previous: Step back over function calls (reverse step over)
                 // TODO: This will send a previous command to the RPC server
                 debug!("Previous (reverse step over) requested from code panel");
-                if let Some(exec_mgr) = &self.execution_manager {
-                    // For now, simulate stepping back to previous significant point
-                    let current = exec_mgr.current_snapshot();
-                    let total = exec_mgr.total_snapshots();
-                    let prev_pos = current.saturating_sub(5);
-                    exec_mgr.update_state(prev_pos, total, Some(prev_pos + 9), None);
-                    debug!("Previous (reverse step over) to snapshot {}", prev_pos);
-                }
+                let exec_mgr = &self.execution_manager;
+                // For now, simulate stepping back to previous significant point
+                let current = exec_mgr.current_snapshot();
+                let total = exec_mgr.total_snapshots();
+                let prev_pos = current.saturating_sub(5);
+                exec_mgr.update_state(prev_pos, total, Some(prev_pos + 9), None);
+                debug!("Previous (reverse step over) to snapshot {}", prev_pos);
+
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('c') => {
@@ -785,11 +783,5 @@ impl Panel for CodePanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-}
-
-impl Default for CodePanel {
-    fn default() -> Self {
-        Self::new()
     }
 }

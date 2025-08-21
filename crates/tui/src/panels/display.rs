@@ -3,12 +3,12 @@
 //! This panel can switch between different display modes based on context.
 
 use super::{BreakpointManager, EventResponse, Panel, PanelType};
-use crate::managers::ExecutionManager;
+use crate::managers::{ExecutionManager, ThemeManager};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
@@ -72,29 +72,22 @@ pub struct DisplayPanel {
     variables: Vec<String>,
     stack: Vec<String>,
     memory: Vec<String>,
-    /// Shared breakpoint manager
-    breakpoint_manager: Option<BreakpointManager>,
-    /// Shared execution state manager
-    execution_manager: Option<ExecutionManager>,
     /// Whether this panel is focused
     focused: bool,
+    /// Shared breakpoint manager
+    breakpoint_manager: BreakpointManager,
+    /// Shared execution state manager
+    execution_manager: ExecutionManager,
+    /// Theme manager for styling
+    theme_manager: ThemeManager,
 }
 
 impl DisplayPanel {
-    /// Create a new display panel
-    pub fn new() -> Self {
-        Self::new_with_managers(None, None)
-    }
-
-    /// Create a new display panel with shared breakpoint manager (legacy method)
-    pub fn new_with_breakpoints(breakpoint_manager: Option<BreakpointManager>) -> Self {
-        Self::new_with_managers(breakpoint_manager, None)
-    }
-
-    /// Create a new display panel with shared managers
+    /// Create a new display panel with required managers
     pub fn new_with_managers(
-        breakpoint_manager: Option<BreakpointManager>,
-        execution_manager: Option<ExecutionManager>,
+        breakpoint_manager: BreakpointManager,
+        execution_manager: ExecutionManager,
+        theme_manager: ThemeManager,
     ) -> Self {
         Self {
             mode: DisplayMode::Variables,
@@ -123,9 +116,10 @@ impl DisplayPanel {
                     .to_string(),
                 "0x60: 0xa9059cbb000000000000000000000000456...def000000000000000003e8".to_string(),
             ],
+            focused: false,
             breakpoint_manager,
             execution_manager,
-            focused: false,
+            theme_manager,
         }
     }
 
@@ -148,18 +142,15 @@ impl DisplayPanel {
                 vec!["Transition state display not implemented".to_string()]
             }
             DisplayMode::Breakpoints => {
-                if let Some(mgr) = &self.breakpoint_manager {
-                    let breakpoints = mgr.get_all_breakpoints();
-                    if breakpoints.is_empty() {
-                        vec!["No breakpoints set".to_string()]
-                    } else {
-                        breakpoints
-                            .iter()
-                            .map(|line| format!("● Line {} (SimpleToken.sol)", line))
-                            .collect()
-                    }
+                let mgr = &self.breakpoint_manager;
+                let breakpoints = mgr.get_all_breakpoints();
+                if breakpoints.is_empty() {
+                    vec!["No breakpoints set".to_string()]
                 } else {
-                    vec!["Breakpoint manager not available".to_string()]
+                    breakpoints
+                        .iter()
+                        .map(|line| format!("● Line {} (SimpleToken.sol)", line))
+                        .collect()
                 }
             }
         }
@@ -192,7 +183,11 @@ impl Panel for DisplayPanel {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let border_color = if self.focused { Color::Cyan } else { Color::Gray };
+        let border_color = if self.focused {
+            self.theme_manager.focused_border_color()
+        } else {
+            self.theme_manager.unfocused_border_color()
+        };
         let data = self.get_current_data();
 
         if data.is_empty() {
@@ -214,9 +209,11 @@ impl Panel for DisplayPanel {
             .enumerate()
             .map(|(i, item)| {
                 let style = if i == self.selected_index && self.focused {
-                    Style::default().bg(Color::Blue).fg(Color::White)
+                    Style::default()
+                        .bg(self.theme_manager.selected_bg_color())
+                        .fg(self.theme_manager.selected_fg_color())
                 } else if i == self.selected_index {
-                    Style::default().bg(Color::DarkGray)
+                    Style::default().bg(self.theme_manager.highlight_bg_color())
                 } else {
                     Style::default()
                 };
@@ -231,7 +228,7 @@ impl Panel for DisplayPanel {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color)),
             )
-            .highlight_style(Style::default().bg(Color::Blue));
+            .highlight_style(Style::default().bg(self.theme_manager.selected_bg_color()));
 
         frame.render_widget(list, area);
 
@@ -244,8 +241,8 @@ impl Panel for DisplayPanel {
                 height: 1,
             };
             let help_text = "Tab: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
-            let help_paragraph =
-                Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
+            let help_paragraph = Paragraph::new(help_text)
+                .style(Style::default().fg(self.theme_manager.help_text_color()));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -313,11 +310,5 @@ impl Panel for DisplayPanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-}
-
-impl Default for DisplayPanel {
-    fn default() -> Self {
-        Self::new()
     }
 }

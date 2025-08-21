@@ -127,6 +127,7 @@ tokio = "1.0"
 # serialization
 serde = "1.0"
 serde_json = "1.0"
+toml = "0.8"
 
 # web server
 axum = "0.7"
@@ -146,6 +147,7 @@ clap = "4"
 # misc
 chrono = "0.4"
 derive_more = "2"
+dirs = "5.0"
 dirs-next = "2"
 dotenv = "0.15"
 eyre = "0.6"
