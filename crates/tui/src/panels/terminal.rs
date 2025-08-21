@@ -73,6 +73,8 @@ pub struct TerminalPanel {
     history_position: Option<usize>,
     /// Scroll position in terminal history (0 = bottom/latest)
     scroll_offset: usize,
+    /// Content height for the current area
+    content_height: usize,
     /// Whether this panel is focused
     focused: bool,
     /// Color scheme for styling
@@ -85,8 +87,8 @@ pub struct TerminalPanel {
     last_ctrl_c: Option<Instant>,
     /// Number prefix for vim navigation (e.g., "5" in "5j")
     vim_number_prefix: String,
-    /// VIM mode cursor position: (line_index, column_index) in the displayed content
-    vim_cursor_position: (usize, usize),
+    /// VIM mode cursor absolute line number in terminal history (1-based, like code panel)
+    vim_cursor_line: usize,
     /// Shared execution state manager
     execution_manager: Option<ExecutionManager>,
 }
@@ -107,13 +109,14 @@ impl TerminalPanel {
             command_history: VecDeque::new(),
             history_position: None,
             scroll_offset: 0,
+            content_height: 0,
             focused: false,
             color_scheme: ColorScheme::default(),
             connected: true,
             snapshot_info: Some((127, 348)),
             last_ctrl_c: None,
             vim_number_prefix: String::new(),
-            vim_cursor_position: (0, 0), // Start at top-left of displayed content
+            vim_cursor_line: 1, // Start at first line (1-based like code panel)
             execution_manager,
         };
 
@@ -132,8 +135,6 @@ impl TerminalPanel {
             self.lines.remove(0);
         }
         self.lines.push(TerminalLine { content: content.to_string(), line_type });
-        // Auto-scroll to bottom when new content is added
-        self.scroll_offset = 0;
     }
 
     /// Add output line (convenience method)
@@ -385,11 +386,9 @@ impl TerminalPanel {
         self.add_output("");
         self.add_output("🔄 Terminal Navigation (Vim-Style):");
         self.add_output("  Esc              - Switch to VIM mode for navigation");
-        self.add_output("  (VIM mode) j/k/↑/↓ - Move cursor vertically (with auto-scroll)");
-        self.add_output("  (VIM mode) h/l/←/→ - Move cursor horizontally");
+        self.add_output("  (VIM mode) j/k/↑/↓ - Navigate lines (with auto-scroll)");
         self.add_output("  (VIM mode) 5j/3↓   - Move multiple lines with number prefix");
         self.add_output("  (VIM mode) gg/G    - Go to top/bottom");
-        self.add_output("  (VIM mode) {/}     - Jump between commands");
         self.add_output("  (VIM mode) i       - Return to INSERT mode");
         self.add_output("");
         self.add_output("🧭 Panel Navigation:");
@@ -603,6 +602,9 @@ impl TerminalPanel {
         match event.code {
             // Return to INSERT mode
             KeyCode::Char('i') | KeyCode::Enter => {
+                // Update cursor position to bottom
+                self.vim_goto_bottom();
+                self.vim_number_prefix.clear();
                 self.mode = TerminalMode::Insert;
                 Ok(EventResponse::Handled)
             }
@@ -617,29 +619,9 @@ impl TerminalPanel {
                 Ok(EventResponse::Handled)
             }
 
-            // Horizontal cursor movement in VIM mode
-            KeyCode::Char('h') | KeyCode::Left => {
-                self.vim_move_cursor_left();
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('l') | KeyCode::Right => {
-                self.vim_move_cursor_right();
-                Ok(EventResponse::Handled)
-            }
-
             // Handle number prefixes for multi-line scrolling
             KeyCode::Char(c) if c.is_ascii_digit() => {
                 self.vim_number_prefix.push(c);
-                Ok(EventResponse::Handled)
-            }
-
-            // Command boundaries { and }
-            KeyCode::Char('{') => {
-                self.vim_jump_to_prev_command();
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('}') => {
-                self.vim_jump_to_next_command();
                 Ok(EventResponse::Handled)
             }
 
@@ -668,32 +650,7 @@ impl TerminalPanel {
         }
     }
 
-    /// Scroll down in VIM mode
-    fn vim_scroll_down(&mut self, count: usize) {
-        let multiplier = if self.vim_number_prefix.is_empty() {
-            count
-        } else {
-            self.vim_number_prefix.parse::<usize>().unwrap_or(1) * count
-        };
-
-        let max_scroll = self.lines.len().saturating_sub(1);
-        self.scroll_offset = (self.scroll_offset + multiplier).min(max_scroll);
-        self.vim_number_prefix.clear();
-    }
-
-    /// Scroll up in VIM mode
-    fn vim_scroll_up(&mut self, count: usize) {
-        let multiplier = if self.vim_number_prefix.is_empty() {
-            count
-        } else {
-            self.vim_number_prefix.parse::<usize>().unwrap_or(1) * count
-        };
-
-        self.scroll_offset = self.scroll_offset.saturating_sub(multiplier);
-        self.vim_number_prefix.clear();
-    }
-
-    /// Move VIM cursor up (k key) with auto-scrolling
+    /// Move VIM cursor up (k key) with auto-scrolling (exactly like code panel)
     fn vim_move_cursor_up(&mut self, count: usize) {
         let multiplier = if self.vim_number_prefix.is_empty() {
             count
@@ -701,23 +658,22 @@ impl TerminalPanel {
             self.vim_number_prefix.parse::<usize>().unwrap_or(1) * count
         };
 
-        // Move cursor up in the visible area
-        if self.vim_cursor_position.0 >= multiplier {
-            self.vim_cursor_position.0 -= multiplier;
+        // Move cursor up in absolute terminal history (1-based like code panel)
+        if self.vim_cursor_line > multiplier {
+            self.vim_cursor_line -= multiplier;
         } else {
-            // Need to scroll up to show more content above
-            let scroll_needed = multiplier - self.vim_cursor_position.0;
-            self.scroll_offset =
-                (self.scroll_offset + scroll_needed).min(self.lines.len().saturating_sub(1));
-            self.vim_cursor_position.0 = 0;
+            self.vim_cursor_line = 1; // Can't go above first line
         }
 
-        // Clamp horizontal position to new line length
-        self.vim_clamp_cursor_to_line();
+        // Auto-scroll if cursor moves out of view (EXACTLY like code panel logic)
+        if self.vim_cursor_line < self.scroll_offset + 1 {
+            self.scroll_offset = (self.vim_cursor_line - 1).max(0);
+        }
+
         self.vim_number_prefix.clear();
     }
 
-    /// Move VIM cursor down (j key) with auto-scrolling  
+    /// Move VIM cursor down (j key) with auto-scrolling (exactly like code panel)
     fn vim_move_cursor_down(&mut self, count: usize) {
         let multiplier = if self.vim_number_prefix.is_empty() {
             count
@@ -725,158 +681,47 @@ impl TerminalPanel {
             self.vim_number_prefix.parse::<usize>().unwrap_or(1) * count
         };
 
-        let visible_lines = self.get_visible_lines_for_vim();
-        let max_line_idx = visible_lines.len().saturating_sub(1);
-
-        if self.vim_cursor_position.0 + multiplier <= max_line_idx {
-            self.vim_cursor_position.0 += multiplier;
-        } else {
-            // Need to scroll down or hit bottom
-            let overflow = (self.vim_cursor_position.0 + multiplier) - max_line_idx;
-            if self.scroll_offset >= overflow {
-                self.scroll_offset -= overflow;
-                self.vim_cursor_position.0 = max_line_idx;
-            } else {
-                // Hit bottom of content
-                self.scroll_offset = 0;
-                self.vim_cursor_position.0 =
-                    self.get_visible_lines_for_vim().len().saturating_sub(1);
-            }
+        let max_lines = self.lines.len();
+        if max_lines == 0 {
+            self.vim_number_prefix.clear();
+            return;
         }
 
-        // Clamp horizontal position to new line length
-        self.vim_clamp_cursor_to_line();
-        self.vim_number_prefix.clear();
-    }
+        // Move cursor down in absolute terminal history (1-based like code panel)
+        let new_line = (self.vim_cursor_line + multiplier).min(max_lines);
+        self.vim_cursor_line = new_line;
 
-    /// Move VIM cursor left (h key)
-    fn vim_move_cursor_left(&mut self) {
-        if self.vim_cursor_position.1 > 0 {
-            self.vim_cursor_position.1 -= 1;
+        // Auto-scroll if cursor moves out of view (EXACTLY like code panel logic)
+        // Assuming viewport is roughly 25 lines (conservative estimate like code panel)
+        let viewport_height = 25;
+        if self.vim_cursor_line > self.scroll_offset + viewport_height {
+            self.scroll_offset = self.vim_cursor_line.saturating_sub(viewport_height);
         }
-    }
 
-    /// Move VIM cursor right (l key)
-    fn vim_move_cursor_right(&mut self) {
-        // Get the current line to check its length
-        let visible_lines = self.get_visible_lines_for_vim();
-        if let Some(current_line) = visible_lines.get(self.vim_cursor_position.0) {
-            let line_length = current_line.content.chars().count();
-            if self.vim_cursor_position.1 < line_length.saturating_sub(1) {
-                self.vim_cursor_position.1 += 1;
-            }
-        }
-    }
-
-    /// Clamp VIM cursor horizontal position to the current line length
-    fn vim_clamp_cursor_to_line(&mut self) {
-        let visible_lines = self.get_visible_lines_for_vim();
-        if let Some(current_line) = visible_lines.get(self.vim_cursor_position.0) {
-            let line_length = current_line.content.chars().count();
-            if line_length > 0 {
-                self.vim_cursor_position.1 =
-                    self.vim_cursor_position.1.min(line_length.saturating_sub(1));
-            } else {
-                self.vim_cursor_position.1 = 0;
-            }
-        }
-    }
-
-    /// Get the currently visible lines for VIM cursor navigation
-    fn get_visible_lines_for_vim(&self) -> Vec<&TerminalLine> {
-        // In VIM mode, we only show terminal history (no input line)
-        let start_idx = if self.scroll_offset >= self.lines.len() {
-            0
-        } else {
-            self.lines.len().saturating_sub(self.scroll_offset + 1)
-        };
-
-        self.lines.iter().skip(start_idx).collect()
-    }
-
-    /// Jump to previous command boundary
-    fn vim_jump_to_prev_command(&mut self) {
-        let current_line = self.lines.len().saturating_sub(self.scroll_offset + 1);
-
-        // Search backwards for a command line
-        for i in (0..current_line).rev() {
-            if matches!(self.lines[i].line_type, LineType::Command) {
-                self.scroll_offset = self.lines.len().saturating_sub(i + 1);
-                break;
-            }
-        }
-        self.vim_number_prefix.clear();
-    }
-
-    /// Jump to next command boundary
-    fn vim_jump_to_next_command(&mut self) {
-        let current_line = self.lines.len().saturating_sub(self.scroll_offset + 1);
-
-        // Search forwards for a command line
-        for i in (current_line + 1)..self.lines.len() {
-            if matches!(self.lines[i].line_type, LineType::Command) {
-                self.scroll_offset = self.lines.len().saturating_sub(i + 1);
-                break;
-            }
-        }
         self.vim_number_prefix.clear();
     }
 
     /// Go to top of terminal
     fn vim_goto_top(&mut self) {
-        self.scroll_offset = self.lines.len().saturating_sub(1);
+        self.vim_cursor_line = 1; // First line (1-based)
+        self.scroll_offset = 0; // Show from beginning (like code panel)
     }
 
     /// Go to bottom of terminal
     fn vim_goto_bottom(&mut self) {
-        self.scroll_offset = 0;
-    }
+        if !self.lines.is_empty() {
+            self.vim_cursor_line = self.lines.len() + 1; // Include prompt line
 
-    /// Render a line with VIM cursor (block cursor)
-    fn render_line_with_vim_cursor<'a>(&self, content: &'a str, base_style: Style) -> Line<'a> {
-        let chars: Vec<char> = content.chars().collect();
-        let cursor_col = self.vim_cursor_position.1;
+            let max_lines = self.lines.len() + 1;
 
-        if chars.is_empty() {
-            // Empty line - show cursor as a space with background
-            return Line::from(vec![Span::styled(
-                " ",
-                Style::default().bg(Color::White).fg(Color::Black),
-            )]);
+            if max_lines <= self.content_height {
+                self.scroll_offset = 0; // No scroll needed if content fits
+            } else {
+                // Scroll to show last line at bottom
+                // This is like code panel logic where we show the last lines
+                self.scroll_offset = max_lines.saturating_sub(self.content_height);
+            }
         }
-
-        if cursor_col >= chars.len() {
-            // Cursor at end of line - show the content plus a cursor space
-            return Line::from(vec![
-                Span::styled(content, base_style),
-                Span::styled(" ", Style::default().bg(Color::White).fg(Color::Black)),
-            ]);
-        }
-
-        // Cursor is within the line - split content around cursor
-        let before: String = chars.iter().take(cursor_col).collect();
-        let at_cursor = chars[cursor_col];
-        let after: String = chars.iter().skip(cursor_col + 1).collect();
-
-        let mut spans = Vec::new();
-
-        // Add content before cursor
-        if !before.is_empty() {
-            spans.push(Span::styled(before, base_style));
-        }
-
-        // Add cursor character with inverted colors (block cursor)
-        spans.push(Span::styled(
-            at_cursor.to_string(),
-            Style::default().bg(Color::White).fg(Color::Black),
-        ));
-
-        // Add content after cursor
-        if !after.is_empty() {
-            spans.push(Span::styled(after, base_style));
-        }
-
-        Line::from(spans)
     }
 
     /// Render the unified bash-like terminal view
@@ -884,45 +729,56 @@ impl TerminalPanel {
         // Start with all terminal history
         let mut all_content = self.lines.clone();
 
-        // Add current input line only in INSERT mode when focused
-        if self.mode == TerminalMode::Insert && self.focused {
-            let prompt = format!(
-                "{} edb{} {}",
-                if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
-                Icons::ARROW_RIGHT,
-                if self.focused {
-                    // Show line cursor in INSERT mode
-                    let chars: Vec<char> = self.input_buffer.chars().collect();
-                    if self.cursor_position == chars.len() {
-                        format!("{}│", self.input_buffer)
-                    } else if self.cursor_position < chars.len() {
-                        let before: String = chars.iter().take(self.cursor_position).collect();
-                        let after: String = chars.iter().skip(self.cursor_position).collect();
-                        format!("{}│{}", before, after)
-                    } else {
-                        self.input_buffer.clone()
-                    }
+        // Add current input line only in both INSERT and VIM modes
+        let prompt = format!(
+            "{} edb{} {}",
+            if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
+            Icons::ARROW_RIGHT,
+            if self.focused && self.mode == TerminalMode::Insert {
+                // Show line cursor in INSERT mode
+                let chars: Vec<char> = self.input_buffer.chars().collect();
+                if self.cursor_position == chars.len() {
+                    format!("{}│", self.input_buffer)
+                } else if self.cursor_position < chars.len() {
+                    let before: String = chars.iter().take(self.cursor_position).collect();
+                    let after: String = chars.iter().skip(self.cursor_position).collect();
+                    format!("{}│{}", before, after)
                 } else {
                     self.input_buffer.clone()
                 }
-            );
-            all_content.push(TerminalLine { content: prompt, line_type: LineType::Command });
-        }
+            } else {
+                self.input_buffer.clone()
+            }
+        );
+        all_content.push(TerminalLine { content: prompt, line_type: LineType::Command });
 
         // Calculate visible area (leave space for help text if needed)
         let help_height = if self.focused && area.height > 8 { 1 } else { 0 };
-        let content_height = area.height.saturating_sub(2 + help_height) as usize; // Account for borders + help
+        self.content_height = area.height.saturating_sub(2 + help_height) as usize; // Account for borders + help
 
-        // Calculate visible lines based on scroll_offset
+        // In INSERT mode, always stay at bottom to show most recent content
+        // In VIM mode, respect user's scroll position
         let total_content = all_content.len();
-        let end_idx = total_content.saturating_sub(self.scroll_offset);
-        let start_idx = end_idx.saturating_sub(content_height);
+        let (start_idx, end_idx) = if self.mode == TerminalMode::Insert {
+            // INSERT mode: always show the most recent content (bottom)
+            if total_content <= self.content_height {
+                (0, total_content)
+            } else {
+                let start = total_content - self.content_height;
+                (start, total_content)
+            }
+        } else {
+            // VIM mode: respect scroll_offset (like code panel)
+            let start = self.scroll_offset;
+            let end = (start + self.content_height).min(total_content);
+            (start, end)
+        };
 
         // Create unified terminal content items with VIM cursor support
         let terminal_items: Vec<ListItem<'_>> = all_content
             .iter()
             .skip(start_idx)
-            .take(content_height)
+            .take(self.content_height)
             .enumerate()
             .map(|(display_row, terminal_line)| {
                 let base_style = match terminal_line.line_type {
@@ -932,22 +788,40 @@ impl TerminalPanel {
                     LineType::System => Style::default().fg(self.color_scheme.info_color),
                 };
 
-                // Check if this line has the VIM cursor and we're in VIM mode
-                let styled_line = if self.mode == TerminalMode::Vim
-                    && self.focused
-                    && display_row == self.vim_cursor_position.0
-                {
-                    self.render_line_with_vim_cursor(&terminal_line.content, base_style)
-                } else {
-                    Line::from(Span::styled(&terminal_line.content, base_style))
-                };
+                // Create the line content with base style
+                let styled_line = Line::from(Span::styled(&terminal_line.content, base_style));
 
-                ListItem::new(styled_line)
+                // Apply full-width highlighting to the ListItem if this is the current VIM cursor line
+                let list_item = ListItem::new(styled_line);
+
+                // Convert absolute vim_cursor_line to display row (EXACTLY like code panel)
+                let cursor_display_row =
+                    if self.vim_cursor_line > 0 && self.mode == TerminalMode::Vim {
+                        let cursor_absolute_idx = self.vim_cursor_line - 1; // Convert to 0-based
+                                                                            // Check if cursor is within visible range
+                        if cursor_absolute_idx >= start_idx && cursor_absolute_idx < end_idx {
+                            Some(cursor_absolute_idx - start_idx) // Display row within visible content
+                        } else {
+                            None // Cursor not in visible area
+                        }
+                    } else {
+                        None
+                    };
+
+                if self.mode == TerminalMode::Vim
+                    && self.focused
+                    && Some(display_row) == cursor_display_row
+                {
+                    // Apply highlighting to entire ListItem (full width like code panel)
+                    list_item.style(Style::default().bg(Color::DarkGray).fg(Color::White))
+                } else {
+                    list_item
+                }
             })
             .collect();
 
-        // Show scroll indicator and mode in title
-        let scroll_indicator = if self.scroll_offset > 0 {
+        // Show scroll indicator and mode in title (only show scroll indicator in VIM mode)
+        let scroll_indicator = if self.mode == TerminalMode::Vim && self.scroll_offset > 0 {
             format!(" [↑{}]", self.scroll_offset)
         } else {
             String::new()
@@ -998,7 +872,9 @@ impl TerminalPanel {
 
         let help_text = match self.mode {
             TerminalMode::Insert => "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode",
-            TerminalMode::Vim => "VIM mode: j/k/↑/↓: Move cursor • h/l/←/→: Horizontal • gg/G: Top/Bottom • i/Enter: INSERT",
+            TerminalMode::Vim => {
+                "VIM mode: j/k/↑/↓: Navigate • gg/G: Top/Bottom • {/}: Commands • i/Enter: INSERT"
+            }
         };
 
         let help_paragraph = Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
@@ -1068,6 +944,8 @@ impl Panel for TerminalPanel {
             // Esc: Switch from INSERT to VIM mode
             KeyCode::Esc => {
                 if self.mode == TerminalMode::Insert {
+                    self.vim_goto_bottom();
+                    self.vim_number_prefix.clear();
                     self.mode = TerminalMode::Vim;
                     return Ok(EventResponse::Handled);
                 }
