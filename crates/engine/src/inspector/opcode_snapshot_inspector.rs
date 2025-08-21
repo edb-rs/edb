@@ -12,7 +12,7 @@
 //! reducing memory usage for large execution traces.
 
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::{EdbContext, ExecutionFrameId, OpcodeTr};
+use edb_common::{types::ExecutionFrameId, EdbContext, OpcodeTr};
 use revm::{
     bytecode::opcode::OpCode,
     context::{ContextTr, LocalContextTr},
@@ -24,6 +24,7 @@ use revm::{
     state::TransientStorage,
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet},
@@ -32,7 +33,7 @@ use std::{
 };
 
 /// Single opcode execution snapshot
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpcodeSnapshot<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -44,7 +45,7 @@ where
     /// Contract address being executed
     pub address: Address,
     /// Current opcode
-    pub opcode: OpCode,
+    pub opcode: u8,
     /// Memory state (shared via Arc when unchanged)
     pub memory: Arc<Vec<u8>>,
     /// Stack state (always cloned as most opcodes modify it)
@@ -269,7 +270,7 @@ where
         let snapshot = OpcodeSnapshot {
             pc: interp.bytecode.pc(),
             address: contract_address,
-            opcode,
+            opcode: opcode.get(),
             memory: memory.clone(),
             stack: interp.stack.data().clone(),
             calldata: calldata.clone(),
@@ -536,7 +537,8 @@ where
 
     /// Helper to print a single snapshot line
     fn print_snapshot_line(&self, index: usize, snapshot: &OpcodeSnapshot<DB>, indent: &str) {
-        let opcode_str = format!("{}", snapshot.opcode.as_str());
+        let opcode = unsafe { OpCode::new_unchecked(snapshot.opcode) };
+        let opcode_str = format!("{}", opcode.as_str());
         let addr_short = format!("{:?}", snapshot.address);
         let addr_display = if addr_short.len() > 10 {
             format!("{}...{}", &addr_short[0..6], &addr_short[addr_short.len() - 4..])

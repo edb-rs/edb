@@ -10,7 +10,7 @@
 //! making it more efficient for tracking specific execution states.
 
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::{EdbContext, ExecutionFrameId};
+use edb_common::{types::ExecutionFrameId, EdbContext};
 use eyre::Result;
 use foundry_compilers::{artifacts::Contract, Artifact};
 use revm::{
@@ -19,6 +19,7 @@ use revm::{
     interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome},
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
+use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 use tracing::{debug, error};
 
@@ -32,7 +33,7 @@ pub const HOOK_TRIGGER_ADDRESS: Address = Address::new([
 ]);
 
 /// Single hook execution snapshot
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookSnapshot<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,

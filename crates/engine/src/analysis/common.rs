@@ -42,6 +42,7 @@
 //! ```
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::warn;
 
@@ -84,7 +85,7 @@ use crate::{
 ///     println!("Found step: {}", step.variant_name());
 /// }
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     /// Maps source index to their corresponding source analysis results
     pub sources: HashMap<u32, SourceAnalysis>,

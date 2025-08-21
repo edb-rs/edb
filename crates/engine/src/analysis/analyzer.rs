@@ -7,6 +7,7 @@ use foundry_compilers::artifacts::{
     VariableDeclaration, Visibility,
 };
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::log::*;
@@ -40,7 +41,7 @@ use crate::{
 /// - `ast`: Parsed Abstract Syntax Tree
 /// - `unit`: Processed source unit ready for analysis
 /// - `steps`: List of analyzed execution steps in this file
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceAnalysis {
     /// Unique identifier for this source file
     pub id: u32,

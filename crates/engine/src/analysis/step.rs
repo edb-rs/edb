@@ -17,6 +17,7 @@ use foundry_compilers::artifacts::{
     // SourceUnit,
 };
 use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     analysis::{StepHook, UVID},
@@ -29,7 +30,9 @@ lazy_static! {
 }
 
 /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct USID(u64);
 
 impl USID {
@@ -100,7 +103,7 @@ pub type StepRef = Arc<Step>;
 /// - `src`: Source location information (file, line, column)
 /// - `pre_hooks`: Hooks to execute before this step
 /// - `post_hooks`: Hooks to execute after this step
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
     /// Unique step identifier for this execution step
     pub usid: USID,
@@ -162,7 +165,7 @@ impl Step {
 }
 
 /// The variant types for source steps.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StepVariant {
     /// A single statement that is executed in a single debug step.
     Statement(Statement),

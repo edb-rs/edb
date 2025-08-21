@@ -19,7 +19,8 @@ use std::{
 
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 
-use edb_common::ExecutionFrameId;
+use edb_common::types::ExecutionFrameId;
+use serde::{Deserialize, Serialize};
 use tracing::error;
 
 use crate::{HookSnapshot, HookSnapshots, OpcodeSnapshot, OpcodeSnapshots, USID};
@@ -39,7 +40,7 @@ pub enum SnapshotId {
 /// their specific characteristics. Hook snapshots are generally preferred as they
 /// represent strategic breakpoints, while opcode snapshots provide fine-grained
 /// instruction-level details.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Snapshot<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -95,7 +96,7 @@ where
 /// The collection prioritizes hook snapshots when available, as they represent
 /// intentional debugging breakpoints. Opcode snapshots are included for frames
 /// that lack hook coverage, ensuring comprehensive state tracking.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,

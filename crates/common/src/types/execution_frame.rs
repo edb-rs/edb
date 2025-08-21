@@ -4,12 +4,14 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// Execution frame identifier for tracking nested call contexts
 ///
 /// A frame ID is a tuple (trace_entry_id, re_entry_count) where:
 /// - `trace_entry_id`: Unique identifier for the trace entry
 /// - `re_entry_count`: Number of times this frame has been re-entered
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ExecutionFrameId(pub usize, pub usize);
 
 impl fmt::Display for ExecutionFrameId {

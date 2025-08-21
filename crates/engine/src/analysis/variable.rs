@@ -21,6 +21,7 @@ use foundry_compilers::artifacts::{
     SourceUnit, UncheckedBlock, VariableDeclaration,
 };
 use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 
 // use crate::{
 //     // Visitor, Walk
@@ -58,7 +59,9 @@ pub const EDB_RUNTIME_VALUE_OFFSET: u64 = 0x234c6dfc3bf8fed1;
 /// let uvid2 = new_uvid();
 /// assert_ne!(uvid1, uvid2);
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct UVID(u64);
 
 impl UVID {
@@ -155,7 +158,7 @@ pub type VariableRef = Arc<Variable>;
 ///     scope: VariableScope {},
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 #[allow(clippy::large_enum_variant)]
 pub enum Variable {
@@ -229,7 +232,7 @@ pub type VariableScopeRef = Arc<VariableScope>;
 /// - Contract scope information
 /// - Visibility modifiers (public, private, internal, external)
 /// - Storage location (storage, memory, calldata)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct VariableScope {
     /// The AST node that defines this scope
@@ -325,7 +328,7 @@ pub enum VariableType {
 ///
 /// This enum wraps various Solidity AST node types that create new variable scopes,
 /// allowing the variable analyzer to track scope boundaries and variable visibility.
-#[derive(Debug, Clone, From)]
+#[derive(Debug, Clone, From, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum ScopeNode {
     /// A source unit scope (file-level).

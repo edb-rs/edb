@@ -7,23 +7,19 @@ use crate::core::EngineContext;
 use crate::rpc::types::{RpcError, SnapshotInfo, SnapshotType};
 use revm::database::CacheDB;
 use revm::{Database, DatabaseCommit, DatabaseRef};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 use tracing::debug;
 
-/// Get information about the current snapshot
+/// Get information about a snapshot at the given index
 pub async fn get_current_snapshot<DB>(
     context: &Arc<EngineContext<DB>>,
-    current_index: &Arc<AtomicUsize>,
+    index: usize,
 ) -> Result<serde_json::Value, RpcError>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    let index = current_index.load(Ordering::SeqCst);
     let total = context.snapshots.total_snapshot_count();
 
     if index >= total {
@@ -92,20 +88,19 @@ where
     Ok(serde_json::json!(count))
 }
 
-/// Move to the next snapshot
+/// Calculate the next snapshot index and return snapshot info
 pub async fn step_next<DB>(
     context: &Arc<EngineContext<DB>>,
-    current_index: &Arc<AtomicUsize>,
+    current_index: usize,
 ) -> Result<serde_json::Value, RpcError>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    let current = current_index.load(Ordering::SeqCst);
     let total = context.snapshots.total_snapshot_count();
 
-    if current + 1 >= total {
+    if current_index + 1 >= total {
         return Err(RpcError {
             code: -33001, // SNAPSHOT_OUT_OF_BOUNDS
             message: "Already at the last snapshot".to_string(),
@@ -113,28 +108,24 @@ where
         });
     }
 
-    let new_index = current + 1;
-    current_index.store(new_index, Ordering::SeqCst);
+    let new_index = current_index + 1;
+    debug!("Stepping to next snapshot: {}", new_index);
 
-    debug!("Stepped to next snapshot: {}", new_index);
-
-    // Return updated snapshot info
-    get_current_snapshot(context, current_index).await
+    // Return snapshot info for the new index
+    get_current_snapshot(context, new_index).await
 }
 
-/// Move to the previous snapshot
+/// Calculate the previous snapshot index and return snapshot info
 pub async fn step_previous<DB>(
     context: &Arc<EngineContext<DB>>,
-    current_index: &Arc<AtomicUsize>,
+    current_index: usize,
 ) -> Result<serde_json::Value, RpcError>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    let current = current_index.load(Ordering::SeqCst);
-
-    if current == 0 {
+    if current_index == 0 {
         return Err(RpcError {
             code: -33001, // SNAPSHOT_OUT_OF_BOUNDS
             message: "Already at the first snapshot".to_string(),
@@ -142,19 +133,16 @@ where
         });
     }
 
-    let new_index = current - 1;
-    current_index.store(new_index, Ordering::SeqCst);
+    let new_index = current_index - 1;
+    debug!("Stepping to previous snapshot: {}", new_index);
 
-    debug!("Stepped to previous snapshot: {}", new_index);
-
-    // Return updated snapshot info
-    get_current_snapshot(context, current_index).await
+    // Return snapshot info for the new index
+    get_current_snapshot(context, new_index).await
 }
 
-/// Set current snapshot to a specific index
+/// Validate and return snapshot info for a specific index
 pub async fn set_current_snapshot<DB>(
     context: &Arc<EngineContext<DB>>,
-    current_index: &Arc<AtomicUsize>,
     index: usize,
 ) -> Result<serde_json::Value, RpcError>
 where
@@ -172,12 +160,10 @@ where
         });
     }
 
-    current_index.store(index, Ordering::SeqCst);
+    debug!("Validating snapshot index: {}", index);
 
-    debug!("Set current snapshot to: {}", index);
-
-    // Return updated snapshot info
-    get_current_snapshot(context, current_index).await
+    // Return snapshot info for the requested index
+    get_current_snapshot(context, index).await
 }
 
 #[cfg(test)]

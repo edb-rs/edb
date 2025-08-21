@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{USID, UVID};
 
 /// Contains information that should be recoreded before and after each step.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StepHook {
     /// The hook to mark that a step is about to be executed. The debugger will pause here during step-by-step execution.
     BeforeStep(USID),

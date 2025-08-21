@@ -16,11 +16,8 @@ use axum::{
 use eyre::Result;
 use revm::database::CacheDB;
 use revm::{Database, DatabaseCommit, DatabaseRef};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
-use std::{net::SocketAddr, sync::RwLock};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::{info, warn};
 
@@ -65,19 +62,15 @@ where
     server: Arc<DebugRpcServer<DB>>,
 }
 
-/// Debug RPC server that owns the non-Send EngineContext
+/// Debug RPC server that provides read-only access to EngineContext
 pub struct DebugRpcServer<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// Complete debugging context (now Send+Sync with updated REVM types)
+    /// Immutable debugging context (read-only access)
     context: Arc<EngineContext<DB>>,
-    /// Current snapshot index (for navigation)
-    current_snapshot_index: Arc<AtomicUsize>,
-    /// Breakpoint management
-    breakpoints: Arc<RwLock<Vec<super::types::Breakpoint>>>,
     /// Method handler for RPC dispatch
     method_handler: Arc<MethodHandler<DB>>,
 }
@@ -91,15 +84,9 @@ where
     /// Create a new debug RPC server
     pub fn new(context: EngineContext<DB>) -> Self {
         let context = Arc::new(context);
-        let current_snapshot_index = Arc::new(AtomicUsize::new(0));
-        let breakpoints = Arc::new(RwLock::new(Vec::new()));
-        let method_handler = Arc::new(MethodHandler::new(
-            context.clone(),
-            current_snapshot_index.clone(),
-            breakpoints.clone(),
-        ));
+        let method_handler = Arc::new(MethodHandler::new(context.clone()));
 
-        Self { context, current_snapshot_index, breakpoints, method_handler }
+        Self { context, method_handler }
     }
 
     /// Start the RPC server
@@ -155,23 +142,26 @@ where
         }
     }
 
-    /// Get current snapshot count
+    /// Get total snapshot count (stateless)
     pub fn snapshot_count(&self) -> usize {
         self.context.snapshots.len()
     }
 
-    /// Get current snapshot index
-    pub fn current_snapshot_index(&self) -> usize {
-        self.current_snapshot_index.load(Ordering::SeqCst)
+    /// Validate snapshot index (stateless helper)
+    pub fn validate_snapshot_index(&self, index: usize) -> Result<()> {
+        if index >= self.snapshot_count() {
+            return Err(eyre::eyre!(
+                "Snapshot index {} out of bounds (max: {})",
+                index,
+                self.snapshot_count() - 1
+            ));
+        }
+        Ok(())
     }
 
-    /// Set current snapshot index
-    pub fn set_current_snapshot_index(&self, index: usize) -> Result<()> {
-        if index >= self.snapshot_count() {
-            return Err(eyre::eyre!("Snapshot index {} out of bounds", index));
-        }
-        self.current_snapshot_index.store(index, Ordering::SeqCst);
-        Ok(())
+    /// Get read-only access to the engine context
+    pub fn context(&self) -> &Arc<EngineContext<DB>> {
+        &self.context
     }
 }
 

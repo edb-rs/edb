@@ -19,6 +19,7 @@ use revm::{
     database::CacheDB,
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -27,7 +28,7 @@ use std::{
 use tracing::{debug, error, info, warn};
 
 use edb_common::{
-    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
+    relax_context_constraints, types::Trace, CachePath, EdbCachePath, EdbContext, ForkResult,
     DEFAULT_ETHERSCAN_CACHE_TTL,
 };
 
@@ -40,7 +41,7 @@ use crate::{
     start_debug_server,
     utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
     CodeTweaker, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector, OpcodeSnapshots,
-    Snapshots, Trace,
+    Snapshots,
 };
 
 /// Complete debugging context containing all analysis results and state snapshots
@@ -49,7 +50,7 @@ use crate::{
 /// including the original transaction context, collected snapshots, analyzed source code,
 /// and recompiled artifacts. It serves as the primary data structure passed to the
 /// JSON-RPC server for time travel debugging.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineContext<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,

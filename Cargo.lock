@@ -2001,6 +2001,8 @@ name = "edb-common"
 version = "0.0.1"
 dependencies = [
  "alloy-chains",
+ "alloy-dyn-abi",
+ "alloy-json-abi",
  "alloy-network",
  "alloy-primitives",
  "alloy-provider",
