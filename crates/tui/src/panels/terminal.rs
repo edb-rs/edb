@@ -3,6 +3,7 @@
 //! This panel provides a command-line interface for debugging commands.
 
 use super::{EventResponse, Panel, PanelType};
+use crate::managers::ExecutionManager;
 use crate::ui::colors::ColorScheme;
 use crate::ui::icons::Icons;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -84,11 +85,18 @@ pub struct TerminalPanel {
     last_ctrl_c: Option<Instant>,
     /// Number prefix for vim navigation (e.g., "5" in "5j")
     vim_number_prefix: String,
+    /// Shared execution state manager
+    execution_manager: Option<ExecutionManager>,
 }
 
 impl TerminalPanel {
     /// Create a new terminal panel
     pub fn new() -> Self {
+        Self::new_with_execution_manager(None)
+    }
+
+    /// Create a new terminal panel with execution manager
+    pub fn new_with_execution_manager(execution_manager: Option<ExecutionManager>) -> Self {
         let mut panel = Self {
             lines: Vec::new(),
             mode: TerminalMode::Insert,
@@ -103,6 +111,7 @@ impl TerminalPanel {
             snapshot_info: Some((127, 348)),
             last_ctrl_c: None,
             vim_number_prefix: String::new(),
+            execution_manager,
         };
 
         // Add welcome message with fancy styling
@@ -205,23 +214,129 @@ impl TerminalPanel {
         match parts[0] {
             "next" | "n" => {
                 self.add_system("Stepping to next snapshot...");
-                self.add_output("(RPC call would be made here)");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    if current < total.saturating_sub(1) {
+                        exec_mgr.update_state(current + 1, total, Some(current + 10), None);
+                        self.add_output(&format!(
+                            "✅ Stepped to snapshot {}/{}",
+                            current + 1,
+                            total
+                        ));
+                    } else {
+                        self.add_output("⚠️ Already at last snapshot");
+                    }
+                } else {
+                    self.add_output("(RPC call would be made here)");
+                }
             }
             "prev" | "p" => {
                 self.add_system("Stepping to previous snapshot...");
-                self.add_output("(RPC call would be made here)");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    if current > 0 {
+                        exec_mgr.update_state(current - 1, total, Some(current + 8), None);
+                        self.add_output(&format!(
+                            "✅ Stepped to snapshot {}/{}",
+                            current - 1,
+                            total
+                        ));
+                    } else {
+                        self.add_output("⚠️ Already at first snapshot");
+                    }
+                } else {
+                    self.add_output("(RPC call would be made here)");
+                }
             }
-            "step" => {
+            "step" | "s" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.add_output(&format!("Stepping {} snapshots...", count));
-                self.add_output("(RPC call would be made here)");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    let new_pos = (current + count).min(total.saturating_sub(1));
+                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                    self.add_output(&format!(
+                        "✅ Stepped {} snapshots to {}/{}",
+                        count, new_pos, total
+                    ));
+                } else {
+                    self.add_output("(RPC call would be made here)");
+                }
+            }
+            "reverse" | "r" => {
+                let count =
+                    if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
+                self.add_output(&format!("Reverse stepping {} snapshots...", count));
+                if let Some(exec_mgr) = &self.execution_manager {
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    let new_pos = current.saturating_sub(count);
+                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                    self.add_output(&format!(
+                        "✅ Reverse stepped {} snapshots to {}/{}",
+                        count, new_pos, total
+                    ));
+                } else {
+                    self.add_output("(RPC call would be made here)");
+                }
+            }
+            "call" | "c" => {
+                self.add_system("Stepping to next function call...");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    // Simulate jumping to next significant call (larger step)
+                    let new_pos = (current + 10).min(total.saturating_sub(1));
+                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                    self.add_output(&format!(
+                        "✅ Stepped to next call at snapshot {}/{}",
+                        new_pos, total
+                    ));
+                } else {
+                    self.add_output("(RPC call would be made here)");
+                }
+            }
+            "rcall" | "rc" => {
+                self.add_system("Stepping back from function call...");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    // Simulate jumping back to previous significant call
+                    let new_pos = current.saturating_sub(10);
+                    exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                    self.add_output(&format!(
+                        "✅ Stepped back to previous call at snapshot {}/{}",
+                        new_pos, total
+                    ));
+                } else {
+                    self.add_output("(RPC call would be made here)");
+                }
             }
             "goto" => {
                 if parts.len() > 1 {
                     if let Ok(index) = parts[1].parse::<usize>() {
                         self.add_output(&format!("Jumping to snapshot {}...", index));
-                        self.add_output("(RPC call would be made here)");
+                        if let Some(exec_mgr) = &self.execution_manager {
+                            let total = exec_mgr.total_snapshots();
+                            if index < total {
+                                exec_mgr.update_state(index, total, Some(index + 9), None);
+                                self.add_output(&format!(
+                                    "✅ Jumped to snapshot {}/{}",
+                                    index, total
+                                ));
+                            } else {
+                                self.add_output(&format!(
+                                    "⚠️ Invalid snapshot index. Range: 0-{}",
+                                    total.saturating_sub(1)
+                                ));
+                            }
+                        } else {
+                            self.add_output("(RPC call would be made here)");
+                        }
                     } else {
                         self.add_output("Invalid snapshot index");
                     }
@@ -282,7 +397,10 @@ impl TerminalPanel {
         self.add_output("🚀 Debug Commands:");
         self.add_output("  next, n          - Step to next snapshot");
         self.add_output("  prev, p          - Step to previous snapshot");
-        self.add_output("  step <count>     - Step multiple snapshots");
+        self.add_output("  step, s <count>  - Step multiple snapshots");
+        self.add_output("  reverse, r <count> - Reverse step multiple snapshots");
+        self.add_output("  call, c          - Step to next function call");
+        self.add_output("  rcall, rc        - Step back from function call");
         self.add_output("  goto <index>     - Jump to specific snapshot");
         self.add_output("");
         self.add_output("🔍 Inspection:");

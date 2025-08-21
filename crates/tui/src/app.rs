@@ -3,9 +3,9 @@
 //! This module contains the core application state management and event handling.
 
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
+use crate::managers::{BreakpointManager, ExecutionManager};
 use crate::panels::{
-    BreakpointManager, CodePanel, DisplayPanel, EventResponse, Panel, PanelType, TerminalPanel,
-    TracePanel,
+    CodePanel, DisplayPanel, EventResponse, Panel, PanelType, TerminalPanel, TracePanel,
 };
 use crate::rpc::RpcClient;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent};
@@ -113,6 +113,8 @@ pub struct App {
     compact_main_panel: PanelType,
     /// Shared breakpoint manager
     breakpoint_manager: BreakpointManager,
+    /// Shared execution state manager
+    execution_manager: ExecutionManager,
     /// RPC connection status and health monitoring
     connection_status: ConnectionStatus,
     /// Last health check time for periodic monitoring
@@ -125,19 +127,32 @@ impl App {
         let layout_manager = LayoutManager::new();
         let current_panel = PanelType::Terminal;
         let breakpoint_manager = BreakpointManager::new();
+        let execution_manager = ExecutionManager::new();
 
         // Initialize panels with shared breakpoint manager
         let mut panels: HashMap<PanelType, Box<dyn Panel>> = HashMap::new();
-        panels.insert(PanelType::Trace, Box::new(TracePanel::new()));
+        panels.insert(
+            PanelType::Trace,
+            Box::new(TracePanel::new_with_execution_manager(Some(execution_manager.clone()))),
+        );
         panels.insert(
             PanelType::Code,
-            Box::new(CodePanel::new_with_breakpoints(Some(breakpoint_manager.clone()))),
+            Box::new(CodePanel::new_with_managers(
+                Some(breakpoint_manager.clone()),
+                Some(execution_manager.clone()),
+            )),
         );
         panels.insert(
             PanelType::Display,
-            Box::new(DisplayPanel::new_with_breakpoints(Some(breakpoint_manager.clone()))),
+            Box::new(DisplayPanel::new_with_managers(
+                Some(breakpoint_manager.clone()),
+                Some(execution_manager.clone()),
+            )),
         );
-        panels.insert(PanelType::Terminal, Box::new(TerminalPanel::new()));
+        panels.insert(
+            PanelType::Terminal,
+            Box::new(TerminalPanel::new_with_execution_manager(Some(execution_manager.clone()))),
+        );
 
         Ok(Self {
             rpc_client,
@@ -147,6 +162,7 @@ impl App {
             should_exit: false,
             compact_main_panel: PanelType::Code, // Default to Code in compact mode
             breakpoint_manager,
+            execution_manager,
             connection_status: ConnectionStatus::new(),
             last_health_check: None,
         })

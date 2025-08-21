@@ -6,6 +6,7 @@
 
 mod app;
 mod layout;
+mod managers;
 mod panels;
 mod rpc;
 mod ui;

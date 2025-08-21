@@ -3,6 +3,7 @@
 //! This panel shows source code with syntax highlighting and current line indication.
 
 use super::{BreakpointManager, EventResponse, Panel, PanelType};
+use crate::managers::ExecutionManager;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -20,15 +21,6 @@ pub enum CodeMode {
     Source,
     /// Show opcodes
     Opcodes,
-}
-
-/// Type of cursor in code panel
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CursorType {
-    /// Following execution position (server-controlled)
-    Execution,
-    /// User's navigation cursor (for setting breakpoints)
-    User,
 }
 
 /// File information with metadata
@@ -76,14 +68,14 @@ pub struct CodePanel {
     current_execution_line: Option<usize>,
     /// User cursor line (user-controlled for breakpoints, 1-based)
     user_cursor_line: Option<usize>,
-    /// Which cursor is active (for navigation)
-    active_cursor: CursorType,
     /// Scroll offset
     scroll_offset: usize,
     /// Whether this panel is focused
     focused: bool,
     /// Shared breakpoint manager
     breakpoint_manager: Option<BreakpointManager>,
+    /// Shared execution state manager
+    execution_manager: Option<ExecutionManager>,
     /// File selector state
     show_file_selector: bool,
     /// Selected file index in file selector
@@ -95,11 +87,19 @@ pub struct CodePanel {
 impl CodePanel {
     /// Create a new code panel
     pub fn new() -> Self {
-        Self::new_with_breakpoints(None)
+        Self::new_with_managers(None, None)
     }
 
-    /// Create a new code panel with shared breakpoint manager
+    /// Create a new code panel with shared breakpoint manager (legacy method)
     pub fn new_with_breakpoints(breakpoint_manager: Option<BreakpointManager>) -> Self {
+        Self::new_with_managers(breakpoint_manager, None)
+    }
+
+    /// Create a new code panel with shared managers
+    pub fn new_with_managers(
+        breakpoint_manager: Option<BreakpointManager>,
+        execution_manager: Option<ExecutionManager>,
+    ) -> Self {
         // Mock server response - for addresses WITH source code
         // In reality, if has_source_code is true, we show source
         // If has_source_code is false, we show opcodes
@@ -189,10 +189,10 @@ impl CodePanel {
             selected_path_index: 0,
             current_execution_line: Some(9),
             user_cursor_line: Some(9), // Initially follows execution
-            active_cursor: CursorType::Execution,
             scroll_offset: 0,
             focused: false,
             breakpoint_manager,
+            execution_manager,
             show_file_selector: false,
             file_selector_index: 0,
             file_selector_height_percent: 20, // Default to 20% of panel height
@@ -472,16 +472,10 @@ impl CodePanel {
             let exec_line =
                 self.current_execution_line.map_or("None".to_string(), |l| l.to_string());
             let user_line = self.user_cursor_line.map_or("None".to_string(), |l| l.to_string());
-            let active_cursor_indicator = match self.active_cursor {
-                CursorType::Execution => "► Exec",
-                CursorType::User => "◯ User",
-            };
-
             let status_text = format!(
-                "► Exec: {} │ ◯ User: {} │ Active: {} │ Files: {}/{}",
+                "► Exec: {} │ ◯ User: {} │ Files: {}/{}",
                 exec_line,
                 user_line,
-                active_cursor_indicator,
                 self.selected_path_index + 1,
                 self.display_info.file_info.len()
             );
@@ -499,7 +493,7 @@ impl CodePanel {
             let help_text = if self.show_file_selector {
                 "↑/↓: Navigate files • Enter: Select • Esc/F: Close • B: Breakpoint • Ctrl+T: Return terminal".to_string()
             } else {
-                "Space: Switch cursor • ↑/↓: Scroll • j/k: Move cursor • F: Files • B: Breakpoint"
+                "↑/↓: Scroll • j/k: Move cursor • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint • Ctrl+T: Return terminal"
                     .to_string()
             };
             let help_paragraph =
@@ -632,15 +626,6 @@ impl Panel for CodePanel {
                 self.prev_source_path();
                 Ok(EventResponse::Handled)
             }
-            KeyCode::Char(' ') => {
-                // Toggle between execution and user cursor
-                self.active_cursor = match self.active_cursor {
-                    CursorType::Execution => CursorType::User,
-                    CursorType::User => CursorType::Execution,
-                };
-                debug!("Switched active cursor to: {:?}", self.active_cursor);
-                Ok(EventResponse::Handled)
-            }
             KeyCode::Up => {
                 // Arrow keys now ONLY scroll, they don't move cursors
                 // User cursor can be moved with 'j'/'k' keys if needed
@@ -675,20 +660,22 @@ impl Panel for CodePanel {
             }
             KeyCode::Char('j') | KeyCode::Char('J') => {
                 // Move user cursor down (vim-style)
-                if self.active_cursor == CursorType::User {
-                    if let Some(line) = self.user_cursor_line {
-                        let max_lines = self.get_display_lines().len();
-                        self.user_cursor_line = Some((line + 1).min(max_lines));
-                    }
+                if let Some(line) = self.user_cursor_line {
+                    let max_lines = self.get_display_lines().len();
+                    self.user_cursor_line = Some((line + 1).min(max_lines));
+                } else {
+                    // If no user cursor, start at line 1
+                    self.user_cursor_line = Some(1);
                 }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('k') | KeyCode::Char('K') => {
                 // Move user cursor up (vim-style)
-                if self.active_cursor == CursorType::User {
-                    if let Some(line) = self.user_cursor_line {
-                        self.user_cursor_line = Some(line.saturating_sub(1).max(1));
-                    }
+                if let Some(line) = self.user_cursor_line {
+                    self.user_cursor_line = Some(line.saturating_sub(1).max(1));
+                } else {
+                    // If no user cursor, start at line 1
+                    self.user_cursor_line = Some(1);
                 }
                 Ok(EventResponse::Handled)
             }
@@ -706,6 +693,76 @@ impl Panel for CodePanel {
                 } else {
                     debug!("No user cursor position for breakpoint");
                 }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('s') => {
+                // Step: Move to next snapshot/instruction
+                // TODO: This will send a step command to the RPC server
+                debug!("Step (next instruction) requested from code panel");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    // For now, simulate moving to next snapshot
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    if current < total.saturating_sub(1) {
+                        exec_mgr.update_state(current + 1, total, Some(current + 10), None);
+                        debug!("Stepped to snapshot {}", current + 1);
+                    }
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('r') => {
+                // Reverse step: Move to previous snapshot/instruction
+                // TODO: This will send a reverse step command to the RPC server
+                debug!("Reverse step (previous instruction) requested from code panel");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    // For now, simulate moving to previous snapshot
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    if current > 0 {
+                        exec_mgr.update_state(current - 1, total, Some(current + 8), None);
+                        debug!("Reverse stepped to snapshot {}", current - 1);
+                    }
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('n') => {
+                // Next: Step over function calls (skip internal calls)
+                // TODO: This will send a next command to the RPC server
+                debug!("Next (step over) requested from code panel");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    // For now, simulate stepping over to next significant point
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    let next_pos = (current + 5).min(total.saturating_sub(1));
+                    exec_mgr.update_state(next_pos, total, Some(next_pos + 9), None);
+                    debug!("Next (step over) to snapshot {}", next_pos);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('p') => {
+                // Previous: Step back over function calls (reverse step over)
+                // TODO: This will send a previous command to the RPC server
+                debug!("Previous (reverse step over) requested from code panel");
+                if let Some(exec_mgr) = &self.execution_manager {
+                    // For now, simulate stepping back to previous significant point
+                    let current = exec_mgr.current_snapshot();
+                    let total = exec_mgr.total_snapshots();
+                    let prev_pos = current.saturating_sub(5);
+                    exec_mgr.update_state(prev_pos, total, Some(prev_pos + 9), None);
+                    debug!("Previous (reverse step over) to snapshot {}", prev_pos);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('c') => {
+                // TODO: Step into next call (forward call navigation)
+                // This will send a command to the RPC server to step into the next function call
+                debug!("Next call navigation requested");
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('C') => {
+                // TODO: Step back from call (reverse call navigation)
+                // This will send a command to the RPC server to step back from the current call
+                debug!("Previous call navigation requested");
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

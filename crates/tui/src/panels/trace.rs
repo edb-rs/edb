@@ -3,6 +3,7 @@
 //! This panel shows the call trace and allows navigation through trace entries.
 
 use super::{EventResponse, Panel, PanelType};
+use crate::managers::ExecutionManager;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -23,11 +24,18 @@ pub struct TracePanel {
     selected_index: usize,
     /// Whether this panel is focused
     focused: bool,
+    /// Shared execution state manager
+    execution_manager: Option<ExecutionManager>,
 }
 
 impl TracePanel {
     /// Create a new trace panel
     pub fn new() -> Self {
+        Self::new_with_execution_manager(None)
+    }
+
+    /// Create a new trace panel with execution manager
+    pub fn new_with_execution_manager(execution_manager: Option<ExecutionManager>) -> Self {
         Self {
             trace_entries: vec![
                 "📞 CALL 0x123...abc → 0x456...def".to_string(),
@@ -41,6 +49,7 @@ impl TracePanel {
             ],
             selected_index: 0,
             focused: false,
+            execution_manager,
         }
     }
 

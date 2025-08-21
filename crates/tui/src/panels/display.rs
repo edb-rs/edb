@@ -3,6 +3,7 @@
 //! This panel can switch between different display modes based on context.
 
 use super::{BreakpointManager, EventResponse, Panel, PanelType};
+use crate::managers::ExecutionManager;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -73,6 +74,8 @@ pub struct DisplayPanel {
     memory: Vec<String>,
     /// Shared breakpoint manager
     breakpoint_manager: Option<BreakpointManager>,
+    /// Shared execution state manager
+    execution_manager: Option<ExecutionManager>,
     /// Whether this panel is focused
     focused: bool,
 }
@@ -80,11 +83,19 @@ pub struct DisplayPanel {
 impl DisplayPanel {
     /// Create a new display panel
     pub fn new() -> Self {
-        Self::new_with_breakpoints(None)
+        Self::new_with_managers(None, None)
     }
 
-    /// Create a new display panel with shared breakpoint manager
+    /// Create a new display panel with shared breakpoint manager (legacy method)
     pub fn new_with_breakpoints(breakpoint_manager: Option<BreakpointManager>) -> Self {
+        Self::new_with_managers(breakpoint_manager, None)
+    }
+
+    /// Create a new display panel with shared managers
+    pub fn new_with_managers(
+        breakpoint_manager: Option<BreakpointManager>,
+        execution_manager: Option<ExecutionManager>,
+    ) -> Self {
         Self {
             mode: DisplayMode::Variables,
             selected_index: 0,
@@ -113,6 +124,7 @@ impl DisplayPanel {
                 "0x60: 0xa9059cbb000000000000000000000000456...def000000000000000003e8".to_string(),
             ],
             breakpoint_manager,
+            execution_manager,
             focused: false,
         }
     }
