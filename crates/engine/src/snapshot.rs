@@ -365,7 +365,7 @@ where
         // Print legend
         println!("\n\x1b[33m📖 Legend:\x1b[0m");
         println!("  \x1b[92m🎯 Hook\x1b[0m    - Strategic instrumentation breakpoint");
-        println!("  \x1b[94m⚙️  Opcode\x1b[0m  - Fine-grained instruction-level snapshot");
+        println!("  \x1b[94m⚙️ Opcode\x1b[0m  - Fine-grained instruction-level snapshot");
     }
 
     /// Print detailed information for a single frame

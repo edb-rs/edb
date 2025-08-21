@@ -14,7 +14,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use revm::{
     context::{
         result::{ExecutionResult, HaltReason},
-        Host, TxEnv,
+        BlockEnv, CfgEnv, Host, TxEnv,
     },
     database::CacheDB,
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
@@ -52,12 +52,14 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct EngineContext<DB>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// EVM execution context with forked database state
-    pub ctx: EdbContext<DB>,
+    /// Configuration environment for the EVM
+    pub cfg: CfgEnv,
+    /// Block environment for the target block
+    pub block: BlockEnv,
     /// Transaction environment for the target transaction
     pub tx: TxEnv,
     /// Merged snapshots from both opcode-level and hook-based collection
@@ -151,9 +153,9 @@ impl Engine {
     /// 7. Starts a JSON-RPC server with the analysis results and snapshots
     pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
     where
-        DB: Database + DatabaseCommit + DatabaseRef + Clone + 'static,
-        <CacheDB<DB> as Database>::Error: Clone,
-        <DB as Database>::Error: Clone,
+        DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+        <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+        <DB as Database>::Error: Clone + Send + Sync,
     {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
 
@@ -194,7 +196,8 @@ impl Engine {
         let snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         // Let's pack the debug context
         let context = EngineContext {
-            ctx,
+            cfg: ctx.cfg.clone(),
+            block: ctx.block.clone(),
             tx,
             snapshots,
             artifacts,

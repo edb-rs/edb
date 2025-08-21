@@ -47,9 +47,9 @@ pub struct ForkInfo {
 /// Result of forking operation containing comprehensive replay information
 pub struct ForkResult<DB>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     /// Fork information
     pub fork_info: ForkInfo,

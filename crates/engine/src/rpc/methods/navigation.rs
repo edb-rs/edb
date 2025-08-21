@@ -19,9 +19,9 @@ pub async fn get_current_snapshot<DB>(
     current_index: &Arc<AtomicUsize>,
 ) -> Result<serde_json::Value, RpcError>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     let index = current_index.load(Ordering::SeqCst);
     let total = context.snapshots.total_snapshot_count();
@@ -84,9 +84,9 @@ pub async fn get_snapshot_count<DB>(
     context: &Arc<EngineContext<DB>>,
 ) -> Result<serde_json::Value, RpcError>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     let count = context.snapshots.total_snapshot_count();
     Ok(serde_json::json!(count))
@@ -98,9 +98,9 @@ pub async fn step_next<DB>(
     current_index: &Arc<AtomicUsize>,
 ) -> Result<serde_json::Value, RpcError>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     let current = current_index.load(Ordering::SeqCst);
     let total = context.snapshots.total_snapshot_count();
@@ -128,9 +128,9 @@ pub async fn step_previous<DB>(
     current_index: &Arc<AtomicUsize>,
 ) -> Result<serde_json::Value, RpcError>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     let current = current_index.load(Ordering::SeqCst);
 
@@ -158,9 +158,9 @@ pub async fn set_current_snapshot<DB>(
     index: usize,
 ) -> Result<serde_json::Value, RpcError>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     let total = context.snapshots.total_snapshot_count();
 

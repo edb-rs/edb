@@ -13,9 +13,9 @@ use tracing::debug;
 /// Method handler for dispatching RPC calls (runs on single thread)
 pub struct MethodHandler<DB>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     /// Complete debugging context
     context: Arc<EngineContext<DB>>,
@@ -27,9 +27,9 @@ where
 
 impl<DB> MethodHandler<DB>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     pub fn new(
         context: Arc<EngineContext<DB>>,

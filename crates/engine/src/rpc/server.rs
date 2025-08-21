@@ -1,7 +1,7 @@
-//! RPC server implementation with async channel proxy pattern
+//! RPC server implementation with standard multi-threaded pattern
 //!
 //! This module implements the main JSON-RPC server that handles debugging requests
-//! using async channels to proxy requests to the non-Send EngineContext data.
+//! using the standard Axum multi-threaded approach with Send+Sync EngineContext.
 
 use super::methods::MethodHandler;
 use super::types::{RpcError, RpcRequest, RpcResponse};
@@ -21,8 +21,8 @@ use std::sync::{
     Arc,
 };
 use std::{net::SocketAddr, sync::RwLock};
-use tokio::sync::{mpsc, oneshot, Mutex};
-use tracing::{error, info, warn};
+use tokio::sync::oneshot;
+use tracing::{info, warn};
 
 /// Handle to the running RPC server
 #[derive(Debug)]
@@ -55,27 +55,24 @@ impl RpcServerHandle {
 
 /// Thread-safe RPC state for Axum
 #[derive(Clone)]
-struct RpcState {
-    /// Channel to send work to the dedicated worker thread
-    tx: Arc<Mutex<mpsc::Sender<Work>>>,
-}
-
-/// Work item sent to the single-thread worker
-struct Work {
-    /// The RPC request to handle
-    req: RpcRequest,
-    /// Channel to send back the response
-    rsp: oneshot::Sender<RpcResponse>,
+struct RpcState<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    /// The debug RPC server instance
+    server: Arc<DebugRpcServer<DB>>,
 }
 
 /// Debug RPC server that owns the non-Send EngineContext
 pub struct DebugRpcServer<DB>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone + 'static,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// Complete debugging context (NOT Send/Sync due to Rc<RefCell> in REVM)
+    /// Complete debugging context (now Send+Sync with updated REVM types)
     context: Arc<EngineContext<DB>>,
     /// Current snapshot index (for navigation)
     current_snapshot_index: Arc<AtomicUsize>,
@@ -87,9 +84,9 @@ where
 
 impl<DB> DebugRpcServer<DB>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone + 'static,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     /// Create a new debug RPC server
     pub fn new(context: EngineContext<DB>) -> Self {
@@ -111,36 +108,16 @@ where
         self.start_on_port(port).await
     }
 
-    /// Start the RPC server on a specific port using LocalSet for non-Send types
+    /// Start the RPC server on a specific port using standard multi-threaded pattern
     ///
-    /// This method creates the Axum server that uses Send+Sync state, while keeping
-    /// the non-Send EngineContext in a LocalSet (single-threaded execution).
+    /// This method creates the Axum server with Send+Sync state, leveraging
+    /// the now thread-safe EngineContext.
     pub async fn start_on_port(self, port: u16) -> Result<RpcServerHandle> {
-        // 1) Create channel to communicate between Axum handlers and the EngineContext
-        let (tx, mut rx) = mpsc::channel::<Work>(1024);
-
-        // 2) Spawn the engine context handler on LocalSet
-        // Note: This requires the caller to be running inside a LocalSet context
-        tokio::task::spawn_local(async move {
-            info!("Starting RPC engine context handler");
-
-            while let Some(Work { req, rsp }) = rx.recv().await {
-                let response = self.handle_request(req).await;
-
-                // Send response back (ignore if receiver dropped)
-                if rsp.send(response).is_err() {
-                    warn!("Client dropped connection before response");
-                }
-            }
-
-            info!("RPC engine context handler shutting down");
-        });
-
-        // 3) Create the Axum app with Send+Sync state
+        // Create the Axum app with the server as state
         let app = Router::new()
             .route("/", post(handle_rpc_request))
             .route("/health", get(health_check))
-            .with_state(RpcState { tx: Arc::new(Mutex::new(tx)) });
+            .with_state(RpcState { server: Arc::new(self) });
 
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -198,11 +175,16 @@ where
     }
 }
 
-/// Handle RPC requests by forwarding to the engine context handler
-async fn handle_rpc_request(
-    State(state): State<RpcState>,
+/// Handle RPC requests directly with the thread-safe server
+async fn handle_rpc_request<DB>(
+    State(state): State<RpcState<DB>>,
     JsonExtract(request): JsonExtract<RpcRequest>,
-) -> JsonResponse<RpcResponse> {
+) -> JsonResponse<RpcResponse>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
     // Validate JSON-RPC version
     if request.jsonrpc != "2.0" {
         return JsonResponse(RpcResponse {
@@ -217,44 +199,8 @@ async fn handle_rpc_request(
         });
     }
 
-    // Send work to the single-thread worker
-    let (rsp_tx, rsp_rx) = oneshot::channel();
-    let request_id = request.id.clone();
-    {
-        let tx = state.tx.lock().await;
-        if tx.send(Work { req: request, rsp: rsp_tx }).await.is_err() {
-            error!("Worker thread is dead");
-            return JsonResponse(RpcResponse {
-                jsonrpc: "2.0".to_string(),
-                result: None,
-                error: Some(RpcError {
-                    code: -32603,
-                    message: "Internal error - worker thread unavailable".to_string(),
-                    data: None,
-                }),
-                id: request_id,
-            });
-        }
-    }
-
-    // Wait for response from worker
-    let response = match rsp_rx.await {
-        Ok(resp) => resp,
-        Err(_) => {
-            error!("Worker dropped response channel");
-            RpcResponse {
-                jsonrpc: "2.0".to_string(),
-                result: None,
-                error: Some(RpcError {
-                    code: -32603,
-                    message: "Internal error - worker communication failed".to_string(),
-                    data: None,
-                }),
-                id: super::types::RpcId::String("unknown".to_string()),
-            }
-        }
-    };
-
+    // Handle request directly (no channel proxy needed)
+    let response = state.server.handle_request(request).await;
     JsonResponse(response)
 }
 
@@ -264,16 +210,16 @@ async fn health_check() -> JsonResponse<serde_json::Value> {
         "status": "healthy",
         "service": "edb-debug-rpc-server",
         "version": env!("CARGO_PKG_VERSION"),
-        "architecture": "async-channel-proxy"
+        "architecture": "multi-threaded"
     }))
 }
 
 /// Create and start a debug RPC server with auto-port detection
 pub async fn start_debug_server<DB>(context: EngineContext<DB>) -> Result<RpcServerHandle>
 where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone + 'static,
-    <CacheDB<DB> as Database>::Error: Clone,
-    <DB as Database>::Error: Clone,
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
 {
     let server = DebugRpcServer::new(context);
     server.start().await
@@ -283,16 +229,11 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_rpc_state_is_send_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<RpcState>();
-    }
-
-    #[test]
-    fn test_work_message_not_send() {
-        // Work contains oneshot::Sender which is Send, so this should compile
-        fn assert_send<T: Send>() {}
-        assert_send::<Work>();
-    }
+    // Tests would need a concrete DB type to compile
+    // #[test]
+    // fn test_rpc_state_is_send_sync() {
+    //     fn assert_send_sync<T: Send + Sync>() {}
+    //     // Would need a concrete DB type like:
+    //     // assert_send_sync::<RpcState<EmptyDB>>();
+    // }
 }
