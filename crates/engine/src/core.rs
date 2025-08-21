@@ -33,47 +33,8 @@ use edb_common::{
 };
 
 use crate::{
-    analysis::AnalysisResult,
-    analyze,
-    inspector::{CallTracer, TraceReplayResult},
-    instrument,
-    rpc::RpcServerHandle,
-    start_debug_server,
-    utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
-    CodeTweaker, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector, OpcodeSnapshots,
-    Snapshots,
+    analysis::AnalysisResult, analyze, inspector::{CallTracer, TraceReplayResult}, instrument, rpc::RpcServerHandle, start_debug_server, utils::{next_etherscan_api_key, Artifact, OnchainCompiler}, CodeTweaker, EngineContext, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector, OpcodeSnapshots, Snapshots
 };
-
-/// Complete debugging context containing all analysis results and state snapshots
-///
-/// This struct encapsulates all the data produced during the debugging workflow,
-/// including the original transaction context, collected snapshots, analyzed source code,
-/// and recompiled artifacts. It serves as the primary data structure passed to the
-/// JSON-RPC server for time travel debugging.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EngineContext<DB>
-where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
-    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
-    <DB as Database>::Error: Clone + Send + Sync,
-{
-    /// Configuration environment for the EVM
-    pub cfg: CfgEnv,
-    /// Block environment for the target block
-    pub block: BlockEnv,
-    /// Transaction environment for the target transaction
-    pub tx: TxEnv,
-    /// Merged snapshots from both opcode-level and hook-based collection
-    pub snapshots: Snapshots<DB>,
-    /// Original contract artifacts with source code and metadata
-    pub artifacts: HashMap<Address, Artifact>,
-    /// Recompiled artifacts with instrumented source code
-    pub recompiled_artifacts: HashMap<Address, Artifact>,
-    /// Analysis results identifying instrumentation points
-    pub analysis_results: HashMap<Address, AnalysisResult>,
-    /// Execution trace showing call hierarchy and frame structure
-    pub trace: Trace,
-}
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
 #[derive(Debug, Clone)]
@@ -161,7 +122,7 @@ impl Engine {
         info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
 
         // Step 0: Initialize context and database
-        let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, .. } =
+        let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, fork_info } =
             fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
@@ -196,16 +157,19 @@ impl Engine {
         // Step 8: Start RPC server with analysis results and snapshots
         let snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         // Let's pack the debug context
-        let context = EngineContext {
+        let mut context = EngineContext {
             cfg: ctx.cfg.clone(),
             block: ctx.block.clone(),
             tx,
+            tx_hash,
+            fork_info,
             snapshots,
             artifacts,
             recompiled_artifacts,
             analysis_results,
             trace: replay_result.execution_trace,
         };
+        context.finalize();
 
         let rpc_handle = start_debug_server(context).await?;
         info!("Debug RPC server started on port {}", rpc_handle.port());

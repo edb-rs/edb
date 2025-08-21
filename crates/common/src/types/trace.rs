@@ -58,13 +58,6 @@ impl DerefMut for Trace {
 
 // Convenient explicit iterator methods (optional but nice)
 impl Trace {
-    pub fn iter(&self) -> std::slice::Iter<'_, TraceEntry> {
-        self.inner.iter()
-    }
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, TraceEntry> {
-        self.inner.iter_mut()
-    }
-
     /// Convert trace to serde_json::Value for RPC serialization
     pub fn to_json_value(&self) -> Result<serde_json::Value, serde_json::Error> {
         serde_json::to_value(self)

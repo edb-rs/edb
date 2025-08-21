@@ -19,6 +19,7 @@ use revm::{
     database::{AlloyDB, CacheDB, StateBuilder},
     Context, Database, DatabaseCommit, DatabaseRef, ExecuteCommitEvm, MainBuilder, MainContext,
 };
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{debug, error, field::debug, info, warn};
 
@@ -30,7 +31,7 @@ use revm::{
 };
 
 /// Fork configuration details
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ForkInfo {
     /// Block number that was forked
     pub block_number: u64,

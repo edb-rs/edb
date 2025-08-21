@@ -6,7 +6,7 @@
 use super::methods::MethodHandler;
 use super::types::{RpcError, RpcRequest, RpcResponse};
 use super::utils::get_default_rpc_port;
-use crate::core::EngineContext;
+use crate::EngineContext;
 use axum::{
     extract::{Json as JsonExtract, State},
     response::Json as JsonResponse,

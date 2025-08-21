@@ -6,6 +6,9 @@ use analysis::*;
 pub mod core;
 pub use core::*;
 
+pub mod context;
+pub use context::*;
+
 pub mod inspector;
 pub use inspector::*;
 

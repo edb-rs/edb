@@ -131,6 +131,48 @@ where
     }
 }
 
+// IntoIterator for owned Trace (moves out its contents)
+impl<DB> IntoIterator for Snapshots<DB> 
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    type Item = (ExecutionFrameId, Snapshot<DB>);
+    type IntoIter = std::vec::IntoIter<(ExecutionFrameId, Snapshot<DB>)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+// IntoIterator for &Trace (shared iteration)
+impl<'a, DB> IntoIterator for &'a Snapshots<DB> 
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    type Item = &'a (ExecutionFrameId, Snapshot<DB>);
+    type IntoIter = std::slice::Iter<'a, (ExecutionFrameId, Snapshot<DB>)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
+// IntoIterator for &mut Trace (mutable iteration)
+impl<'a, DB> IntoIterator for &'a mut Snapshots<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    type Item = &'a mut (ExecutionFrameId, Snapshot<DB>);
+    type IntoIter = std::slice::IterMut<'a, (ExecutionFrameId, Snapshot<DB>)>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter_mut()
+    }
+}
+
 impl<DB> Snapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
