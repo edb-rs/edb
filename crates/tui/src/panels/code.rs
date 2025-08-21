@@ -6,7 +6,7 @@ use super::{BreakpointManager, EventResponse, Panel, PanelType};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
@@ -31,6 +31,17 @@ pub enum CursorType {
     User,
 }
 
+/// File information with metadata
+#[derive(Debug, Clone)]
+pub struct FileInfo {
+    /// File path
+    pub path: String,
+    /// Number of lines in the file
+    pub line_count: usize,
+    /// Whether this file contains current execution
+    pub has_execution: bool,
+}
+
 /// Server-controlled display preferences
 #[derive(Debug, Clone)]
 pub struct CodeDisplayInfo {
@@ -42,6 +53,8 @@ pub struct CodeDisplayInfo {
     pub opcodes_available: bool,
     /// List of available source files for this address
     pub available_files: Vec<String>,
+    /// Enhanced file information with metadata
+    pub file_info: Vec<FileInfo>,
 }
 
 /// Code panel implementation (stub)
@@ -71,6 +84,12 @@ pub struct CodePanel {
     focused: bool,
     /// Shared breakpoint manager
     breakpoint_manager: Option<BreakpointManager>,
+    /// File selector state
+    show_file_selector: bool,
+    /// Selected file index in file selector
+    file_selector_index: usize,
+    /// Height percentage for file selector (0-100)
+    file_selector_height_percent: u16,
 }
 
 impl CodePanel {
@@ -84,14 +103,36 @@ impl CodePanel {
         // Mock server response - for addresses WITH source code
         // In reality, if has_source_code is true, we show source
         // If has_source_code is false, we show opcodes
+        // Create mock file information with metadata
+        let file_info = vec![
+            FileInfo {
+                path: "contracts/SimpleToken.sol".to_string(),
+                line_count: 45,
+                has_execution: true, // This file contains current execution
+            },
+            FileInfo {
+                path: "contracts/interfaces/IERC20.sol".to_string(),
+                line_count: 28,
+                has_execution: false,
+            },
+            FileInfo {
+                path: "contracts/libraries/SafeMath.sol".to_string(),
+                line_count: 156,
+                has_execution: false,
+            },
+            FileInfo {
+                path: "contracts/utils/Context.sol".to_string(),
+                line_count: 12,
+                has_execution: false,
+            },
+        ];
+
         let display_info = CodeDisplayInfo {
             has_source_code: true, // This address has source code
             preferred_display: CodeMode::Source,
             opcodes_available: false, // When we have source, we don't show opcodes
-            available_files: vec![
-                "contracts/SimpleToken.sol".to_string(),
-                "contracts/interfaces/IERC20.sol".to_string(),
-            ],
+            available_files: file_info.iter().map(|f| f.path.clone()).collect(),
+            file_info,
         };
 
         // If we have source code, populate source_lines
@@ -143,6 +184,7 @@ impl CodePanel {
                 "SimpleToken.sol".to_string(),
                 "IERC20.sol".to_string(),
                 "SafeMath.sol".to_string(),
+                "Context.sol".to_string(),
             ],
             selected_path_index: 0,
             current_execution_line: Some(9),
@@ -151,6 +193,9 @@ impl CodePanel {
             scroll_offset: 0,
             focused: false,
             breakpoint_manager,
+            show_file_selector: false,
+            file_selector_index: 0,
+            file_selector_height_percent: 20, // Default to 20% of panel height
         }
     }
 
@@ -205,45 +250,118 @@ impl CodePanel {
             CodeMode::Opcodes => &self.opcode_lines,
         }
     }
-}
 
-impl Panel for CodePanel {
-    fn panel_type(&self) -> PanelType {
-        PanelType::Code
+    /// Toggle file selector visibility
+    fn toggle_file_selector(&mut self) {
+        self.show_file_selector = !self.show_file_selector;
+        if self.show_file_selector {
+            // Reset selection to current file when opening
+            self.file_selector_index = self.selected_path_index;
+        }
+        debug!("File selector toggled: {}", self.show_file_selector);
     }
 
-    fn title(&self) -> String {
-        let mode_str = match self.mode {
-            CodeMode::Source => "Source",
-            CodeMode::Opcodes => "Opcodes",
-        };
+    /// Move file selector up
+    fn file_selector_up(&mut self) {
+        if self.file_selector_index > 0 {
+            self.file_selector_index -= 1;
+        }
+    }
 
-        // Show source availability status
-        let availability =
-            if self.display_info.has_source_code { "✓" } else { "✗ Opcodes Only" };
+    /// Move file selector down
+    fn file_selector_down(&mut self) {
+        let max_index = self.display_info.file_info.len().saturating_sub(1);
+        if self.file_selector_index < max_index {
+            self.file_selector_index += 1;
+        }
+    }
 
-        let path_str = if self.source_paths.is_empty() {
-            "No source".to_string()
-        } else {
-            self.source_paths[self.selected_path_index].clone()
-        };
+    /// Select file from file selector
+    fn select_file_from_selector(&mut self) {
+        if self.file_selector_index < self.display_info.file_info.len() {
+            self.selected_path_index = self.file_selector_index;
+            self.show_file_selector = false;
 
-        // Show file count if multiple files available
-        let file_count = if self.display_info.available_files.len() > 1 {
-            format!(
-                " [{}/{}]",
-                self.selected_path_index + 1,
-                self.display_info.available_files.len()
+            // Update source_paths index to match
+            let selected_file = &self.display_info.file_info[self.file_selector_index];
+            let filename = selected_file.path.split('/').last().unwrap_or(&selected_file.path);
+
+            // Find matching index in source_paths
+            if let Some(index) = self.source_paths.iter().position(|p| p == filename) {
+                self.selected_path_index = index;
+            }
+
+            debug!("Selected file: {}", selected_file.path);
+        }
+    }
+
+    /// Get sorted file list for display (execution files first, then alphabetical)
+    fn get_sorted_files(&self) -> Vec<(usize, &FileInfo)> {
+        let mut files: Vec<(usize, &FileInfo)> =
+            self.display_info.file_info.iter().enumerate().collect();
+
+        files.sort_by(|(_, a), (_, b)| {
+            // First, sort by execution (files with execution come first)
+            match (a.has_execution, b.has_execution) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => {
+                    // Then sort alphabetically by filename
+                    let a_name = a.path.split('/').last().unwrap_or(&a.path);
+                    let b_name = b.path.split('/').last().unwrap_or(&b.path);
+                    a_name.cmp(b_name)
+                }
+            }
+        });
+
+        files
+    }
+
+    /// Render the file selector panel
+    fn render_file_selector(&self, frame: &mut Frame, area: Rect, _border_color: Color) {
+        let sorted_files = self.get_sorted_files();
+
+        let items: Vec<ListItem> = sorted_files
+            .iter()
+            .enumerate()
+            .map(|(display_idx, (_, file_info))| {
+                let filename = file_info.path.split('/').last().unwrap_or(&file_info.path);
+                let execution_indicator = if file_info.has_execution { "►" } else { " " };
+                let content = format!(
+                    "{} 📄 {} ({} lines)",
+                    execution_indicator, filename, file_info.line_count
+                );
+
+                let style = if display_idx == self.file_selector_index {
+                    Style::default().bg(Color::Blue).fg(Color::White)
+                } else if file_info.has_execution {
+                    Style::default().fg(Color::Yellow) // Highlight files with current execution
+                } else {
+                    Style::default()
+                };
+
+                ListItem::new(content).style(style)
+            })
+            .collect();
+
+        let file_list = List::new(items)
+            .block(
+                Block::default()
+                    .title(format!(
+                        "📁 Files ({}/{})",
+                        self.file_selector_index + 1,
+                        sorted_files.len()
+                    ))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green)),
             )
-        } else {
-            String::new()
-        };
+            .highlight_style(Style::default().bg(Color::Blue));
 
-        format!("{} {} - {}{}", mode_str, availability, path_str, file_count)
+        frame.render_widget(file_list, area);
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let border_color = if self.focused { Color::Cyan } else { Color::Gray };
+    /// Render the main code content
+    fn render_code_content(&self, frame: &mut Frame, area: Rect, border_color: Color) {
         let lines = self.get_display_lines();
 
         if lines.is_empty() {
@@ -258,11 +376,17 @@ impl Panel for CodePanel {
         }
 
         // Create list items with line numbers and highlighting
+        let available_height = if self.focused && area.height > 12 {
+            area.height.saturating_sub(4) // Account for borders and status lines
+        } else {
+            area.height.saturating_sub(2) // Just borders
+        };
+
         let display_lines: Vec<_> = lines
             .iter()
             .enumerate()
             .skip(self.scroll_offset)
-            .take((area.height as usize).saturating_sub(4)) // Account for borders and title
+            .take(available_height as usize)
             .collect();
 
         let items: Vec<ListItem> = display_lines
@@ -359,25 +483,89 @@ impl Panel for CodePanel {
                 user_line,
                 active_cursor_indicator,
                 self.selected_path_index + 1,
-                self.display_info.available_files.len()
+                self.display_info.file_info.len()
             );
             let status_paragraph =
                 Paragraph::new(status_text).style(Style::default().fg(Color::Cyan));
             frame.render_widget(status_paragraph, status_area);
 
-            // Help line
+            // Help line - updated to include file selector
             let help_area = Rect {
                 x: area.x + 1,
                 y: area.y + area.height - 3,
                 width: area.width - 2,
                 height: 1,
             };
-            let help_text =
-                "Space: Switch cursor • ↑/↓: Scroll • j/k: Move cursor • B: Breakpoint".to_string();
+            let help_text = if self.show_file_selector {
+                "↑/↓: Navigate files • Enter: Select • Esc/F: Close • B: Breakpoint • Ctrl+T: Return terminal".to_string()
+            } else {
+                "Space: Switch cursor • ↑/↓: Scroll • j/k: Move cursor • F: Files • B: Breakpoint"
+                    .to_string()
+            };
             let help_paragraph =
                 Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(help_paragraph, help_area);
         }
+    }
+}
+
+impl Panel for CodePanel {
+    fn panel_type(&self) -> PanelType {
+        PanelType::Code
+    }
+
+    fn title(&self) -> String {
+        let mode_str = match self.mode {
+            CodeMode::Source => "Source",
+            CodeMode::Opcodes => "Opcodes",
+        };
+
+        // Show source availability status
+        let availability =
+            if self.display_info.has_source_code { "✓" } else { "✗ Opcodes Only" };
+
+        let path_str = if self.source_paths.is_empty() {
+            "No source".to_string()
+        } else {
+            self.source_paths[self.selected_path_index].clone()
+        };
+
+        // Show file count if multiple files available
+        let file_count = if self.display_info.available_files.len() > 1 {
+            format!(
+                " [{}/{}]",
+                self.selected_path_index + 1,
+                self.display_info.available_files.len()
+            )
+        } else {
+            String::new()
+        };
+
+        format!("{} {} - {}{}", mode_str, availability, path_str, file_count)
+    }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
+        let border_color = if self.focused { Color::Cyan } else { Color::Gray };
+
+        // Split area if file selector is shown
+        let (file_selector_area, code_area) = if self.show_file_selector {
+            let file_height = (area.height * self.file_selector_height_percent / 100).max(3);
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(file_height), Constraint::Min(0)])
+                .split(area);
+            (Some(chunks[0]), chunks[1])
+        } else {
+            (None, area)
+        };
+
+        // Render file selector if shown
+        if let Some(selector_area) = file_selector_area {
+            self.render_file_selector(frame, selector_area, border_color);
+        }
+
+        // Render main code content
+        self.render_code_content(frame, code_area, border_color);
     }
 
     fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
@@ -386,7 +574,56 @@ impl Panel for CodePanel {
         }
 
         match event.code {
-            // 'O' key removed - source/opcodes are mutually exclusive
+            // 'F' key toggles file selector
+            KeyCode::Char('f') | KeyCode::Char('F') => {
+                self.toggle_file_selector();
+                Ok(EventResponse::Handled)
+            }
+            // Handle file selector navigation when it's open
+            _ if self.show_file_selector => {
+                match event.code {
+                    KeyCode::Up => {
+                        self.file_selector_up();
+                        Ok(EventResponse::Handled)
+                    }
+                    KeyCode::Down => {
+                        self.file_selector_down();
+                        Ok(EventResponse::Handled)
+                    }
+                    KeyCode::Enter => {
+                        self.select_file_from_selector();
+                        Ok(EventResponse::Handled)
+                    }
+                    KeyCode::Esc => {
+                        self.show_file_selector = false;
+                        debug!("File selector closed with Esc");
+                        Ok(EventResponse::Handled)
+                    }
+                    KeyCode::Char('f') | KeyCode::Char('F') => {
+                        self.show_file_selector = false;
+                        debug!("File selector closed with F");
+                        Ok(EventResponse::Handled)
+                    }
+                    // Allow breakpoints to work in file selector mode
+                    KeyCode::Char('b') | KeyCode::Char('B') => {
+                        if let Some(line) = self.user_cursor_line {
+                            if let Some(mgr) = &self.breakpoint_manager {
+                                let added = mgr.toggle_breakpoint(line);
+                                if added {
+                                    debug!("Added breakpoint at line {}", line);
+                                } else {
+                                    debug!("Removed breakpoint at line {}", line);
+                                }
+                            }
+                        } else {
+                            debug!("No user cursor position for breakpoint");
+                        }
+                        Ok(EventResponse::Handled)
+                    }
+                    _ => Ok(EventResponse::NotHandled),
+                }
+            }
+            // Normal code navigation when file selector is closed
             KeyCode::Tab => {
                 self.next_source_path();
                 Ok(EventResponse::Handled)

@@ -14,8 +14,88 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     Frame,
 };
-use std::{collections::HashMap, sync::Arc};
-use tracing::{debug, info};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tracing::{debug, warn};
+
+/// RPC connection status
+#[derive(Debug, Clone)]
+pub struct ConnectionStatus {
+    /// Whether we're connected to the RPC server
+    pub connected: bool,
+    /// Last successful connection time
+    pub last_success: Option<Instant>,
+    /// Last connection attempt time
+    pub last_attempt: Option<Instant>,
+    /// Response time for last successful request (milliseconds)
+    pub response_time_ms: Option<u64>,
+    /// Current error message if disconnected
+    pub error_message: Option<String>,
+    /// Number of consecutive failures
+    pub failure_count: u32,
+}
+
+impl ConnectionStatus {
+    /// Create new connection status in disconnected state
+    pub fn new() -> Self {
+        Self {
+            connected: false,
+            last_success: None,
+            last_attempt: None,
+            response_time_ms: None,
+            error_message: None,
+            failure_count: 0,
+        }
+    }
+
+    /// Mark connection as successful
+    pub fn mark_success(&mut self, response_time_ms: u64) {
+        self.connected = true;
+        self.last_success = Some(Instant::now());
+        self.last_attempt = Some(Instant::now());
+        self.response_time_ms = Some(response_time_ms);
+        self.error_message = None;
+        self.failure_count = 0;
+    }
+
+    /// Mark connection as failed
+    pub fn mark_failure(&mut self, error: String) {
+        self.connected = false;
+        self.last_attempt = Some(Instant::now());
+        self.error_message = Some(error);
+        self.failure_count += 1;
+    }
+
+    /// Get status display string for UI
+    pub fn status_display(&self) -> String {
+        if self.connected {
+            if let Some(response_time) = self.response_time_ms {
+                format!("🟢 Connected ({}ms)", response_time)
+            } else {
+                "🟢 Connected".to_string()
+            }
+        } else {
+            match self.failure_count {
+                0 => "🔸 Connecting...".to_string(),
+                1..=3 => format!("🟡 Reconnecting... ({})", self.failure_count),
+                _ => "🔴 Disconnected".to_string(),
+            }
+        }
+    }
+
+    /// Get detailed status for debugging
+    pub fn detailed_status(&self) -> String {
+        let base = self.status_display();
+        if let Some(error) = &self.error_message {
+            format!("{} - {}", base, error)
+        } else {
+            base
+        }
+    }
+}
 
 /// Main application state
 pub struct App {
@@ -33,6 +113,10 @@ pub struct App {
     compact_main_panel: PanelType,
     /// Shared breakpoint manager
     breakpoint_manager: BreakpointManager,
+    /// RPC connection status and health monitoring
+    connection_status: ConnectionStatus,
+    /// Last health check time for periodic monitoring
+    last_health_check: Option<Instant>,
 }
 
 impl App {
@@ -63,6 +147,8 @@ impl App {
             should_exit: false,
             compact_main_panel: PanelType::Code, // Default to Code in compact mode
             breakpoint_manager,
+            connection_status: ConnectionStatus::new(),
+            last_health_check: None,
         })
     }
 
@@ -83,19 +169,65 @@ impl App {
 
     /// Update application state
     pub async fn update(&mut self) -> Result<()> {
-        // Periodic updates can be added here
+        // Perform periodic health checks
+        self.check_connection_health().await;
         Ok(())
+    }
+
+    /// Perform periodic health check on RPC connection
+    async fn check_connection_health(&mut self) {
+        let now = Instant::now();
+
+        // Check if it's time for a health check (every 5 seconds)
+        let should_check = match self.last_health_check {
+            None => true, // First check
+            Some(last) => now.duration_since(last) >= Duration::from_secs(5),
+        };
+
+        if !should_check {
+            return;
+        }
+
+        self.last_health_check = Some(now);
+
+        // Perform health check
+        let start_time = Instant::now();
+        match self.rpc_client.health_check().await {
+            Ok(_) => {
+                let response_time = start_time.elapsed().as_millis() as u64;
+                self.connection_status.mark_success(response_time);
+                debug!("Health check successful: {}ms", response_time);
+            }
+            Err(e) => {
+                let error_msg = format!("{}", e);
+                self.connection_status.mark_failure(error_msg.clone());
+                warn!("Health check failed: {}", error_msg);
+            }
+        }
     }
 
     /// Render the full 4-panel layout
     fn render_full_layout(&mut self, frame: &mut Frame<'_>, area: Rect) -> Result<()> {
+        // First split for status bar
+        let layout_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Status bar
+                Constraint::Fill(1),   // Main content
+            ])
+            .split(area);
+
+        // Render status bar
+        self.render_status_bar(frame, layout_chunks[0]);
+
+        // Split main content area for 4-panel layout
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Percentage(70), // Top row (Trace | Code)
                 Constraint::Percentage(30), // Bottom row (Display | Terminal)
             ])
-            .split(area);
+            .split(layout_chunks[1]);
 
         let top_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -135,6 +267,19 @@ impl App {
 
     /// Render the compact 3-panel stacked layout
     fn render_compact_layout(&mut self, frame: &mut Frame<'_>, area: Rect) -> Result<()> {
+        // First split for status bar
+        let layout_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Status bar
+                Constraint::Fill(1),   // Main content
+            ])
+            .split(area);
+
+        // Render status bar
+        self.render_status_bar(frame, layout_chunks[0]);
+
+        // Split main content for 3-panel layout
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -142,7 +287,7 @@ impl App {
                 Constraint::Percentage(30), // Display panel
                 Constraint::Percentage(20), // Terminal panel
             ])
-            .split(area);
+            .split(layout_chunks[1]);
 
         // Set focus for panels
         self.update_panel_focus();
@@ -163,15 +308,72 @@ impl App {
 
     /// Render the mobile single-panel layout
     fn render_mobile_layout(&mut self, frame: &mut Frame<'_>, area: Rect) -> Result<()> {
+        // First split for status bar
+        let layout_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // Status bar
+                Constraint::Fill(1),   // Main content
+            ])
+            .split(area);
+
+        // Render status bar
+        self.render_status_bar(frame, layout_chunks[0]);
+
         // Set focus for panels
         self.update_panel_focus();
 
         // Render only the current panel
         if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-            panel.render(frame, area);
+            panel.render(frame, layout_chunks[1]);
         }
 
         Ok(())
+    }
+
+    /// Render the status bar at the top of the screen
+    fn render_status_bar(&mut self, frame: &mut Frame<'_>, area: Rect) {
+        use ratatui::{
+            style::{Color, Style},
+            text::{Line, Span},
+            widgets::Paragraph,
+        };
+
+        // Create status line content
+        let status_text = self.connection_status.status_display();
+        let server_url = self.rpc_client.server_url();
+
+        // Current panel indicator
+        let panel_name = format!("{:?}", self.current_panel);
+
+        // Layout information
+        let layout_type = match self.layout_manager.layout_type() {
+            LayoutType::Full => "Full",
+            LayoutType::Compact => "Compact",
+            LayoutType::Mobile => "Mobile",
+        };
+
+        let status_line = Line::from(vec![
+            Span::styled(
+                status_text,
+                Style::default().fg(if self.connection_status.connected {
+                    Color::Green
+                } else {
+                    Color::Yellow
+                }),
+            ),
+            Span::raw(" | "),
+            Span::styled(format!("Server: {}", server_url), Style::default().fg(Color::Cyan)),
+            Span::raw(" | "),
+            Span::styled(format!("Panel: {}", panel_name), Style::default().fg(Color::White)),
+            Span::raw(" | "),
+            Span::styled(format!("Layout: {}", layout_type), Style::default().fg(Color::Gray)),
+        ]);
+
+        let status_paragraph =
+            Paragraph::new(status_line).style(Style::default().bg(Color::DarkGray));
+
+        frame.render_widget(status_paragraph, area);
     }
 
     /// Update panel focus states
@@ -202,7 +404,10 @@ impl App {
                 self.should_exit = true;
                 return Ok(EventResponse::Exit);
             }
-            KeyCode::Esc => {
+            KeyCode::Char('t')
+                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                // Ctrl+T: Switch to terminal from any panel
                 self.current_panel = PanelType::Terminal;
                 return Ok(EventResponse::Handled);
             }
@@ -385,6 +590,11 @@ impl App {
     /// Check if the app should exit
     pub fn should_exit(&self) -> bool {
         self.should_exit
+    }
+
+    /// Get current connection status for display
+    pub fn connection_status(&self) -> &ConnectionStatus {
+        &self.connection_status
     }
 }
 
