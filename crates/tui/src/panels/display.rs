@@ -4,6 +4,8 @@
 
 use super::{BreakpointManager, EventResponse, Panel, PanelType};
 use crate::managers::{ExecutionManager, ThemeManager};
+use crate::ui::borders::BorderPresets;
+use crate::ui::status::StatusBar;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -59,6 +61,19 @@ impl DisplayMode {
             DisplayMode::Breakpoints => DisplayMode::Variables,
         }
     }
+
+    /// Get prev mode in cycle
+    pub fn prev(&self) -> DisplayMode {
+        match self {
+            DisplayMode::Variables => DisplayMode::Breakpoints,
+            DisplayMode::Stack => DisplayMode::Variables,
+            DisplayMode::Memory => DisplayMode::Stack,
+            DisplayMode::CallData => DisplayMode::Memory,
+            DisplayMode::State => DisplayMode::CallData,
+            DisplayMode::TransitionState => DisplayMode::State,
+            DisplayMode::Breakpoints => DisplayMode::TransitionState,
+        }
+    }
 }
 
 /// Display panel implementation (stub)
@@ -68,6 +83,10 @@ pub struct DisplayPanel {
     mode: DisplayMode,
     /// Selected item index
     selected_index: usize,
+    /// Scroll offset for auto-scrolling
+    scroll_offset: usize,
+    /// Content height for viewport calculations
+    context_height: usize,
     /// Mock data for different modes
     variables: Vec<String>,
     stack: Vec<String>,
@@ -92,6 +111,8 @@ impl DisplayPanel {
         Self {
             mode: DisplayMode::Variables,
             selected_index: 0,
+            scroll_offset: 0,
+            context_height: 0,
             variables: vec![
                 "totalSupply: uint256 = 1000000".to_string(),
                 "balances[msg.sender]: uint256 = 500000".to_string(),
@@ -127,6 +148,15 @@ impl DisplayPanel {
     fn next_mode(&mut self) {
         self.mode = self.mode.next();
         self.selected_index = 0; // Reset selection when changing modes
+        self.scroll_offset = 0; // Reset scroll when changing modes
+        debug!("Switched to display mode: {:?}", self.mode);
+    }
+
+    /// Switch to previous display mode
+    fn prev_mode(&mut self) {
+        self.mode = self.mode.prev();
+        self.selected_index = 0; // Reset selection when changing modes
+        self.scroll_offset = 0; // Reset scroll when changing modes
         debug!("Switched to display mode: {:?}", self.mode);
     }
 
@@ -156,18 +186,28 @@ impl DisplayPanel {
         }
     }
 
-    /// Move selection up
+    /// Move selection up with auto-scrolling
     fn move_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
+            // Auto-scroll up if selection moves above visible area
+            if self.selected_index < self.scroll_offset {
+                self.scroll_offset = self.selected_index;
+            }
         }
     }
 
-    /// Move selection down
+    /// Move selection down with auto-scrolling
     fn move_down(&mut self) {
         let data = self.get_current_data();
-        if self.selected_index < data.len().saturating_sub(1) {
+        let max_lines = data.len();
+        if self.selected_index < max_lines.saturating_sub(1) {
             self.selected_index += 1;
+            let viewport_height = self.context_height;
+            // Auto-scroll down if selection moves below visible area
+            if self.selected_index >= self.scroll_offset + viewport_height {
+                self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
+            }
         }
     }
 }
@@ -188,25 +228,35 @@ impl Panel for DisplayPanel {
         } else {
             self.theme_manager.unfocused_border_color()
         };
+
+        // Calculate context height for viewport calculations
+        self.context_height = if self.focused && area.height > 10 {
+            area.height.saturating_sub(4) // Account for borders and status lines
+        } else {
+            area.height.saturating_sub(2) // Just borders
+        } as usize;
+
         let data = self.get_current_data();
 
         if data.is_empty() {
             let paragraph =
                 Paragraph::new(format!("No {} data available", self.mode.name().to_lowercase()))
-                    .block(
-                        Block::default()
-                            .title(self.title())
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(border_color)),
-                    );
+                    .block(BorderPresets::display(
+                        self.focused,
+                        self.title(),
+                        self.theme_manager.focused_border_color(),
+                        self.theme_manager.unfocused_border_color(),
+                    ));
             frame.render_widget(paragraph, area);
             return;
         }
 
-        // Create list items with selection highlighting
+        // Create list items with selection highlighting and viewport scrolling
         let items: Vec<ListItem> = data
             .iter()
             .enumerate()
+            .skip(self.scroll_offset) // Skip items before viewport
+            .take(self.context_height) // Take only visible items
             .map(|(i, item)| {
                 let style = if i == self.selected_index && self.focused {
                     Style::default()
@@ -222,25 +272,43 @@ impl Panel for DisplayPanel {
             .collect();
 
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .title(self.title())
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(border_color)),
-            )
+            .block(BorderPresets::display(
+                self.focused,
+                self.title(),
+                self.theme_manager.focused_border_color(),
+                self.theme_manager.unfocused_border_color(),
+            ))
             .highlight_style(Style::default().bg(self.theme_manager.selected_bg_color()));
 
         frame.render_widget(list, area);
 
-        // Add help text at the bottom if focused
+        // Add status and help text at the bottom if focused
         if self.focused && area.height > 10 {
-            let help_area = Rect {
+            // Status line
+            let status_area = Rect {
                 x: area.x + 1,
                 y: area.y + area.height - 3,
                 width: area.width - 2,
                 height: 1,
             };
-            let help_text = "Tab: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
+
+            let status_bar = StatusBar::new()
+                .current_panel("Display".to_string())
+                .message(format!("Mode: {}", self.mode.name()))
+                .message(format!("Items: {}", self.get_current_data().len()));
+
+            let status_text = status_bar.build();
+            let status_paragraph = Paragraph::new(status_text)
+                .style(Style::default().fg(self.theme_manager.accent_color()));
+            frame.render_widget(status_paragraph, status_area);
+
+            let help_area = Rect {
+                x: area.x + 1,
+                y: area.y + area.height - 2,
+                width: area.width - 2,
+                height: 1,
+            };
+            let help_text = "←/→: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
             let help_paragraph = Paragraph::new(help_text)
                 .style(Style::default().fg(self.theme_manager.help_text_color()));
             frame.render_widget(help_paragraph, help_area);
@@ -253,8 +321,12 @@ impl Panel for DisplayPanel {
         }
 
         match event.code {
-            KeyCode::Tab => {
+            KeyCode::Right => {
                 self.next_mode();
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Left => {
+                self.prev_mode();
                 Ok(EventResponse::Handled)
             }
             KeyCode::Up => {

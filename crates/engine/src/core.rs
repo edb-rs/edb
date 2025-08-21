@@ -248,8 +248,7 @@ impl Engine {
             }
         }
 
-        // Print the trace tree structure for debugging
-        #[cfg(debug_assertions)]
+        // Print the trace tree structure
         result.execution_trace.print_trace_tree();
 
         Ok(result)
@@ -371,7 +370,6 @@ impl Engine {
 
         let snapshots = inspector.into_snapshots();
 
-        #[cfg(debug_assertions)]
         snapshots.print_summary();
 
         Ok(snapshots)
@@ -401,7 +399,6 @@ impl Engine {
 
         let snapshots = inspector.into_snapshots();
 
-        #[cfg(debug_assertions)]
         snapshots.print_summary();
 
         Ok(snapshots)
@@ -533,7 +530,6 @@ impl Engine {
     {
         let snapshots = Snapshots::merge(opcode_snapshots, hook_snapshots);
 
-        #[cfg(debug_assertions)]
         snapshots.print_summary();
 
         Ok(snapshots)

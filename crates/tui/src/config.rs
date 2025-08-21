@@ -63,6 +63,8 @@ pub struct ColorScheme {
     pub warning: String,
     /// Information color
     pub info: String,
+    /// Accent color for status bars and highlights
+    pub accent: String,
 }
 
 /// Panel-specific configuration
@@ -142,6 +144,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "cyan".to_string(),
+                    accent: "bright_cyan".to_string(),
                 },
             },
         );
@@ -164,6 +167,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "white".to_string(),
+                    accent: "bright_white".to_string(),
                 },
             },
         );
@@ -186,6 +190,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "blue".to_string(),
+                    accent: "bright_blue".to_string(),
                 },
             },
         );
@@ -208,6 +213,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "cyan".to_string(),
+                    accent: "bright_magenta".to_string(),
                 },
             },
         );
@@ -369,9 +375,12 @@ impl ColorScheme {
     pub fn warning(&self) -> Color {
         Config::parse_color(&self.warning)
     }
-
     /// Get info color
     pub fn info(&self) -> Color {
         Config::parse_color(&self.info)
+    }
+    /// Get accent color for status bars
+    pub fn accent_color(&self) -> Color {
+        Config::parse_color(&self.accent)
     }
 }

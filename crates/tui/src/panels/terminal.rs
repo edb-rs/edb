@@ -4,8 +4,10 @@
 
 use super::{EventResponse, Panel, PanelType};
 use crate::managers::{breakpoint, theme, BreakpointManager, ExecutionManager, ThemeManager};
+use crate::ui::borders::BorderPresets;
 use crate::ui::colors::ColorScheme;
 use crate::ui::icons::Icons;
+use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -527,33 +529,50 @@ impl TerminalPanel {
         }
     }
 
-    /// Render status line with connection and snapshot info    
+    /// Render enhanced status line with comprehensive status information    
     fn render_status_line(&self, frame: &mut Frame<'_>, area: Rect) {
-        let status_text = if let Some((current, total)) = self.snapshot_info {
-            format!(
-                "{} Connected {} Snapshot {}/{} {} Gas: 2,847,293",
-                if self.connected { Icons::SUCCESS } else { Icons::ERROR },
-                Icons::BULLET,
-                current,
-                total,
-                Icons::BULLET
-            )
+        // Build comprehensive status using StatusBar
+        let connection_status = if self.connected {
+            ConnectionStatus::Connected
         } else {
-            format!(
-                "{} {} Status: Ready",
-                if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
-                Icons::BULLET
-            )
+            ConnectionStatus::Disconnected
         };
+
+        let execution_status = if let Some((current, total)) = self.snapshot_info {
+            if current == 0 {
+                ExecutionStatus::Start
+            } else if current >= total.saturating_sub(1) {
+                ExecutionStatus::End
+            } else {
+                ExecutionStatus::Running
+            }
+        } else {
+            ExecutionStatus::Start
+        };
+
+        let mut status_bar = StatusBar::new()
+            .connection(connection_status)
+            .execution(execution_status)
+            .current_panel("Terminal".to_string());
+
+        // Add snapshot info if available
+        if let Some((current, total)) = self.snapshot_info {
+            status_bar = status_bar.message(format!("Snapshot {}/{}", current + 1, total + 1));
+        }
+
+        // Add gas info
+        status_bar = status_bar.message("Gas: 2,847,293".to_string());
+
+        let status_text = status_bar.build();
 
         let status_paragraph = Paragraph::new(Line::from(vec![Span::styled(
             status_text,
-            Style::default().fg(self.color_scheme.info_color),
+            Style::default().fg(self.theme_manager.info_color()),
         )]))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(self.color_scheme.unfocused_border)),
+                .border_style(Style::default().fg(self.theme_manager.unfocused_border_color())),
         );
 
         frame.render_widget(status_paragraph, area);
@@ -748,7 +767,7 @@ impl TerminalPanel {
     }
 
     /// Render the unified bash-like terminal view
-    fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, border_color: Color) {
+    fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, _border_color: Color) {
         // Start with all terminal history
         let mut all_content = self.lines.clone();
 
@@ -775,9 +794,9 @@ impl TerminalPanel {
         );
         all_content.push(TerminalLine { content: prompt, line_type: LineType::Command });
 
-        // Calculate visible area (leave space for help text if needed)
-        let help_height = if self.focused && area.height > 8 { 1 } else { 0 };
-        self.content_height = area.height.saturating_sub(2 + help_height) as usize; // Account for borders + help
+        // Calculate visible area (leave space for status and help text if needed)
+        let status_help_height = if self.focused && area.height > 10 { 2 } else { 0 };
+        self.content_height = area.height.saturating_sub(2 + status_help_height) as usize; // Account for borders + status/help
 
         // In INSERT mode, always stay at bottom to show most recent content
         // In VIM mode, respect user's scroll position
@@ -820,8 +839,9 @@ impl TerminalPanel {
                 // Convert absolute vim_cursor_line to display row (EXACTLY like code panel)
                 let cursor_display_row =
                     if self.vim_cursor_line > 0 && self.mode == TerminalMode::Vim {
-                        let cursor_absolute_idx = self.vim_cursor_line - 1; // Convert to 0-based
-                                                                            // Check if cursor is within visible range
+                        // Convert to 0-based
+                        let cursor_absolute_idx = self.vim_cursor_line - 1;
+                        // Check if cursor is within visible range
                         if cursor_absolute_idx >= start_idx && cursor_absolute_idx < end_idx {
                             Some(cursor_absolute_idx - start_idx) // Display row within visible content
                         } else {
@@ -866,47 +886,55 @@ impl TerminalPanel {
             mode_indicator
         );
 
-        let terminal_block = Block::default()
-            .title(terminal_title)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color));
+        let terminal_block = BorderPresets::terminal(
+            self.focused,
+            terminal_title,
+            self.theme_manager.focused_border_color(),
+            self.theme_manager.unfocused_border_color(),
+        );
 
-        // Create the main terminal area (leave space for help text at bottom)
-        let main_area = if self.focused && area.height > 8 {
-            Rect {
-                x: area.x,
-                y: area.y,
-                width: area.width,
-                height: area.height - 1, // Leave one line for help
-            }
-        } else {
-            area
-        };
+        // Use the full area since status/help are handled separately
+        let main_area = area;
 
         let terminal_list = List::new(terminal_items).block(terminal_block);
         frame.render_widget(terminal_list, main_area);
 
-        // Render help text at the very bottom, outside the terminal border
-        if self.focused && area.height > 8 {
-            self.render_help_text(frame, area);
+        // Add status and help text inside the terminal border like other panels
+        if self.focused && area.height > 10 {
+            // Status line
+            let status_area = Rect {
+                x: area.x + 1,
+                y: area.y + area.height - 3,
+                width: area.width - 2,
+                height: 1,
+            };
+
+            let status_bar = StatusBar::new()
+                .current_panel("Terminal".to_string())
+                .message(format!("Mode: {:?}", self.mode));
+
+            let status_text = status_bar.build();
+            let status_paragraph = Paragraph::new(status_text)
+                .style(Style::default().fg(self.theme_manager.accent_color()));
+            frame.render_widget(status_paragraph, status_area);
+
+            // Help text
+            let help_area = Rect {
+                x: area.x + 1,
+                y: area.y + area.height - 2,
+                width: area.width - 2,
+                height: 1,
+            };
+
+            let help_text = match self.mode {
+                TerminalMode::Insert => "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode",
+                TerminalMode::Vim => "VIM mode: j/k/↑/↓: Navigate • gg/G: Top/Bottom • {/}: Commands • i/Enter: INSERT"
+            };
+
+            let help_paragraph = Paragraph::new(help_text)
+                .style(Style::default().fg(self.theme_manager.help_text_color()));
+            frame.render_widget(help_paragraph, help_area);
         }
-    }
-
-    /// Render mode-specific help text
-    fn render_help_text(&self, frame: &mut Frame<'_>, area: Rect) {
-        let help_area =
-            Rect { x: area.x, y: area.y + area.height - 1, width: area.width, height: 1 };
-
-        let help_text = match self.mode {
-            TerminalMode::Insert => "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode",
-            TerminalMode::Vim => {
-                "VIM mode: j/k/↑/↓: Navigate • gg/G: Top/Bottom • {/}: Commands • i/Enter: INSERT"
-            }
-        };
-
-        let help_paragraph = Paragraph::new(help_text)
-            .style(Style::default().fg(self.theme_manager.help_text_color()));
-        frame.render_widget(help_paragraph, help_area);
     }
 }
 

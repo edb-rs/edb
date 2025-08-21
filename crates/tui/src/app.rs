@@ -380,6 +380,9 @@ impl App {
             widgets::Paragraph,
         };
 
+        // Update RPC spinner animation
+        self.rpc_client.tick();
+
         // Create status line content
         let status_text = self.connection_status.status_display();
         let server_url = self.rpc_client.server_url();
@@ -394,15 +397,24 @@ impl App {
             LayoutType::Mobile => "Mobile",
         };
 
-        let status_line = Line::from(vec![
-            Span::styled(
-                status_text,
-                Style::default().fg(if self.connection_status.connected {
-                    Color::Green
-                } else {
-                    Color::Yellow
-                }),
-            ),
+        // RPC spinner information
+        let mut status_spans = vec![Span::styled(
+            status_text,
+            Style::default().fg(if self.connection_status.connected {
+                Color::Green
+            } else {
+                Color::Yellow
+            }),
+        )];
+
+        // Add RPC spinner if loading
+        if self.rpc_client.is_loading() {
+            let spinner_text = self.rpc_client.spinner_display();
+            status_spans.push(Span::raw(" | "));
+            status_spans.push(Span::styled(spinner_text, Style::default().fg(Color::Cyan)));
+        }
+
+        status_spans.extend_from_slice(&[
             Span::raw(" | "),
             Span::styled(format!("Server: {}", server_url), Style::default().fg(Color::Cyan)),
             Span::raw(" | "),
@@ -410,6 +422,8 @@ impl App {
             Span::raw(" | "),
             Span::styled(format!("Layout: {}", layout_type), Style::default().fg(Color::Gray)),
         ]);
+
+        let status_line = Line::from(status_spans);
 
         let status_paragraph =
             Paragraph::new(status_line).style(Style::default().bg(Color::DarkGray));
@@ -463,13 +477,10 @@ impl App {
                 match self.layout_manager.layout_type() {
                     LayoutType::Compact => {
                         // In compact mode, Tab switches main panel between Trace/Code
-                        self.compact_main_panel = match self.compact_main_panel {
-                            PanelType::Trace => PanelType::Code,
-                            PanelType::Code => PanelType::Display,
-                            PanelType::Display => PanelType::Trace,
-                            _ => PanelType::Code, // Fallback
+                        self.current_panel = match self.current_panel {
+                            PanelType::Terminal => self.compact_main_panel,
+                            _ => PanelType::Terminal,
                         };
-                        debug!("Switched compact main panel to: {:?}", self.compact_main_panel);
                         return Ok(EventResponse::Handled);
                     }
                     _ => {
@@ -483,27 +494,27 @@ impl App {
             // Function keys for mobile layout
             KeyCode::F(1) => {
                 if self.layout_manager.layout_type() != LayoutType::Compact {
-                    // In compact mode, we keep the current panel unchanged
-                    self.current_panel = PanelType::Trace;
+                    self.compact_main_panel = PanelType::Trace;
                 }
+                self.current_panel = PanelType::Trace;
                 return Ok(EventResponse::Handled);
             }
             KeyCode::F(2) => {
                 if self.layout_manager.layout_type() != LayoutType::Compact {
-                    self.current_panel = PanelType::Code;
+                    self.compact_main_panel = PanelType::Code;
                 }
+                self.current_panel = PanelType::Code;
                 return Ok(EventResponse::Handled);
             }
             KeyCode::F(3) => {
                 if self.layout_manager.layout_type() != LayoutType::Compact {
-                    self.current_panel = PanelType::Display;
+                    self.compact_main_panel = PanelType::Display;
                 }
+                self.current_panel = PanelType::Display;
                 return Ok(EventResponse::Handled);
             }
             KeyCode::F(4) => {
-                if self.layout_manager.layout_type() != LayoutType::Compact {
-                    self.current_panel = PanelType::Terminal;
-                }
+                self.current_panel = PanelType::Terminal;
                 return Ok(EventResponse::Handled);
             }
 

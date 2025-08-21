@@ -4,6 +4,8 @@
 
 use super::{BreakpointManager, EventResponse, Panel, PanelType};
 use crate::managers::{ExecutionManager, ThemeManager};
+use crate::ui::borders::BorderPresets;
+use crate::ui::status::{BreakpointStatus, FileStatus, StatusBar};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -76,8 +78,14 @@ pub struct CodePanel {
     show_file_selector: bool,
     /// Selected file index in file selector
     file_selector_index: usize,
+    /// File selector scroll offset for auto-scrolling
+    file_selector_scroll_offset: usize,
+    /// File selector viewport height
+    file_selector_context_height: usize,
     /// Height percentage for file selector (0-100)
     file_selector_height_percent: u16,
+    /// Content height for the current panel
+    context_height: usize,
     /// Shared breakpoint manager
     breakpoint_manager: BreakpointManager,
     /// Shared execution state manager
@@ -187,53 +195,12 @@ impl CodePanel {
             breakpoint_manager,
             execution_manager,
             theme_manager,
+            context_height: 0,
             show_file_selector: false,
             file_selector_index: 0,
+            file_selector_scroll_offset: 0,
+            file_selector_context_height: 0,
             file_selector_height_percent: 20, // Default to 20% of panel height
-        }
-    }
-
-    // REMOVED: toggle_mode function
-    // Source and opcodes are mutually exclusive per address
-    // If has_source_code = true, we show source
-    // If has_source_code = false, we show opcodes
-    // There is no toggling between them
-
-    /// Switch to next source path
-    fn next_source_path(&mut self) {
-        if !self.source_paths.is_empty() {
-            self.selected_path_index = (self.selected_path_index + 1) % self.source_paths.len();
-            debug!("Switched to source path: {}", self.source_paths[self.selected_path_index]);
-        }
-    }
-
-    /// Switch to previous source path
-    fn prev_source_path(&mut self) {
-        if !self.source_paths.is_empty() {
-            self.selected_path_index = if self.selected_path_index == 0 {
-                self.source_paths.len() - 1
-            } else {
-                self.selected_path_index - 1
-            };
-            debug!("Switched to source path: {}", self.source_paths[self.selected_path_index]);
-        }
-    }
-
-    /// Scroll up
-    fn scroll_up(&mut self) {
-        if self.scroll_offset > 0 {
-            self.scroll_offset -= 1;
-        }
-    }
-
-    /// Scroll down
-    fn scroll_down(&mut self) {
-        let max_lines = match self.mode {
-            CodeMode::Source => self.source_lines.len(),
-            CodeMode::Opcodes => self.opcode_lines.len(),
-        };
-        if self.scroll_offset < max_lines.saturating_sub(1) {
-            self.scroll_offset += 1;
         }
     }
 
@@ -255,18 +222,28 @@ impl CodePanel {
         debug!("File selector toggled: {}", self.show_file_selector);
     }
 
-    /// Move file selector up
+    /// Move file selector up with auto-scrolling
     fn file_selector_up(&mut self) {
         if self.file_selector_index > 0 {
             self.file_selector_index -= 1;
+            // Auto-scroll up if selection moves above visible area
+            if self.file_selector_index < self.file_selector_scroll_offset {
+                self.file_selector_scroll_offset = self.file_selector_index;
+            }
         }
     }
 
-    /// Move file selector down
+    /// Move file selector down with auto-scrolling
     fn file_selector_down(&mut self) {
         let max_index = self.display_info.file_info.len().saturating_sub(1);
         if self.file_selector_index < max_index {
             self.file_selector_index += 1;
+            let viewport_height = self.file_selector_context_height;
+            // Auto-scroll down if selection moves below visible area
+            if self.file_selector_index >= self.file_selector_scroll_offset + viewport_height {
+                self.file_selector_scroll_offset =
+                    (self.file_selector_index + 1).saturating_sub(viewport_height);
+            }
         }
     }
 
@@ -312,19 +289,29 @@ impl CodePanel {
     }
 
     /// Render the file selector panel
-    fn render_file_selector(&self, frame: &mut Frame, area: Rect, _border_color: Color) {
+    fn render_file_selector(&mut self, frame: &mut Frame, area: Rect, _border_color: Color) {
+        // Calculate file selector context height for viewport calculations
+        self.file_selector_context_height = area.height.saturating_sub(2) as usize; // Account for borders
+
         let sorted_files = self.get_sorted_files();
 
         let items: Vec<ListItem> = sorted_files
             .iter()
             .enumerate()
+            .skip(self.file_selector_scroll_offset) // Skip items before viewport
+            .take(self.file_selector_context_height) // Take only visible items
             .map(|(display_idx, (_, file_info))| {
                 let filename = file_info.path.split('/').last().unwrap_or(&file_info.path);
-                let execution_indicator = if file_info.has_execution { "►" } else { " " };
-                let content = format!(
-                    "{} 📄 {} ({} lines)",
-                    execution_indicator, filename, file_info.line_count
-                );
+
+                // Determine file status for enhanced icon display
+                let file_status = if file_info.has_execution {
+                    FileStatus::HasExecution
+                } else {
+                    FileStatus::SourceAvailable
+                };
+
+                let content =
+                    format!("{} ({} lines)", file_status.display(filename), file_info.line_count);
 
                 let style = if display_idx == self.file_selector_index {
                     Style::default()
@@ -357,33 +344,29 @@ impl CodePanel {
     }
 
     /// Render the main code content
-    fn render_code_content(&self, frame: &mut Frame, area: Rect, border_color: Color) {
+    fn render_code_content(&mut self, frame: &mut Frame, area: Rect, border_color: Color) {
+        // Create list items with line numbers and highlighting
+        self.context_height = if self.focused && area.height > 10 {
+            area.height.saturating_sub(4) // Account for borders and status lines
+        } else {
+            area.height.saturating_sub(2) // Just borders
+        } as usize;
+
         let lines = self.get_display_lines();
 
         if lines.is_empty() {
-            let paragraph = Paragraph::new("No code available").block(
-                Block::default()
-                    .title(self.title())
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(border_color)),
-            );
+            let paragraph = Paragraph::new("No code available").block(BorderPresets::code(
+                self.focused,
+                self.title(),
+                self.theme_manager.focused_border_color(),
+                self.theme_manager.unfocused_border_color(),
+            ));
             frame.render_widget(paragraph, area);
             return;
         }
 
-        // Create list items with line numbers and highlighting
-        let available_height = if self.focused && area.height > 12 {
-            area.height.saturating_sub(4) // Account for borders and status lines
-        } else {
-            area.height.saturating_sub(2) // Just borders
-        };
-
-        let display_lines: Vec<_> = lines
-            .iter()
-            .enumerate()
-            .skip(self.scroll_offset)
-            .take(available_height as usize)
-            .collect();
+        let display_lines: Vec<_> =
+            lines.iter().enumerate().skip(self.scroll_offset).take(self.context_height).collect();
 
         let items: Vec<ListItem> = display_lines
             .iter()
@@ -406,7 +389,13 @@ impl CodePanel {
 
                 // Check if this line has a breakpoint
                 let has_breakpoint = self.breakpoint_manager.has_breakpoint(line_num);
-                let breakpoint_indicator = if has_breakpoint { "●" } else { " " };
+                let breakpoint_status = if has_breakpoint {
+                    BreakpointStatus::Active
+                } else {
+                    BreakpointStatus::Disabled
+                };
+                let breakpoint_indicator =
+                    if has_breakpoint { breakpoint_status.icon() } else { " " };
 
                 let line_content = if self.mode == CodeMode::Source {
                     format!(
@@ -447,50 +436,56 @@ impl CodePanel {
             })
             .collect();
 
-        let list = List::new(items).block(
-            Block::default()
-                .title(self.title())
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color)),
-        );
+        let list = List::new(items).block(BorderPresets::code(
+            self.focused,
+            self.title(),
+            self.theme_manager.focused_border_color(),
+            self.theme_manager.unfocused_border_color(),
+        ));
 
         frame.render_widget(list, area);
 
         // Add cursor status and help text at the bottom if focused
-        if self.focused && area.height > 12 {
+        if self.focused && area.height > 10 {
             // Status line
             let status_area = Rect {
-                x: area.x + 1,
-                y: area.y + area.height - 4,
-                width: area.width - 2,
-                height: 1,
-            };
-
-            let exec_line =
-                self.current_execution_line.map_or("None".to_string(), |l| l.to_string());
-            let user_line = self.user_cursor_line.map_or("None".to_string(), |l| l.to_string());
-            let status_text = format!(
-                "► Exec: {} │ ◯ User: {} │ Files: {}/{}",
-                exec_line,
-                user_line,
-                self.selected_path_index + 1,
-                self.display_info.file_info.len()
-            );
-            let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_manager.info_color()));
-            frame.render_widget(status_paragraph, status_area);
-
-            // Help line - updated to include file selector
-            let help_area = Rect {
                 x: area.x + 1,
                 y: area.y + area.height - 3,
                 width: area.width - 2,
                 height: 1,
             };
+
+            // Build comprehensive status using StatusBar
+            let exec_line =
+                self.current_execution_line.map_or("None".to_string(), |l| l.to_string());
+            let user_line = self.user_cursor_line.map_or("None".to_string(), |l| l.to_string());
+
+            let status_bar = StatusBar::new()
+                .current_panel("Code".to_string())
+                .message(format!("► Exec: {}", exec_line))
+                .message(format!("◯ User: {}", user_line))
+                .message(format!(
+                    "Files: {}/{}",
+                    self.selected_path_index + 1,
+                    self.display_info.file_info.len()
+                ));
+
+            let status_text = status_bar.build();
+            let status_paragraph = Paragraph::new(status_text)
+                .style(Style::default().fg(self.theme_manager.accent_color()));
+            frame.render_widget(status_paragraph, status_area);
+
+            // Help line - updated to include file selector
+            let help_area = Rect {
+                x: area.x + 1,
+                y: area.y + area.height - 2,
+                width: area.width - 2,
+                height: 1,
+            };
             let help_text = if self.show_file_selector {
-                "↑/↓: Navigate files • Enter: Select • F: Close • B: Breakpoint".to_string()
+                "↑/↓: Navigate • Enter: Select • F: Close".to_string()
             } else {
-                "↑/↓: Move cursor • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint"
+                "↑/↓: Navigate • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint"
                     .to_string()
             };
             let help_paragraph = Paragraph::new(help_text)
@@ -618,15 +613,6 @@ impl Panel for CodePanel {
                     _ => Ok(EventResponse::NotHandled),
                 }
             }
-            // Normal code navigation when file selector is closed
-            KeyCode::Tab => {
-                self.next_source_path();
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::BackTab => {
-                self.prev_source_path();
-                Ok(EventResponse::Handled)
-            }
             KeyCode::Up => {
                 // Move user cursor up with automatic scrolling
                 if let Some(line) = self.user_cursor_line {
@@ -651,8 +637,7 @@ impl Panel for CodePanel {
                         self.user_cursor_line = Some(line + 1);
                         // Auto-scroll if cursor moves out of view
                         // We need to ensure cursor stays visible in the viewport
-                        // Assuming viewport is roughly 20-30 lines (will be properly calculated during render)
-                        let viewport_height = 25; // Conservative estimate
+                        let viewport_height = self.context_height;
                         if line + 1 > self.scroll_offset + viewport_height {
                             self.scroll_offset = (line + 1).saturating_sub(viewport_height);
                         }
@@ -661,27 +646,6 @@ impl Panel for CodePanel {
                     // If no user cursor, start at current view position
                     self.user_cursor_line = Some(self.scroll_offset + 1);
                 }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::PageUp => {
-                for _ in 0..10 {
-                    self.scroll_up();
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::PageDown => {
-                for _ in 0..10 {
-                    self.scroll_down();
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Home => {
-                self.scroll_offset = 0;
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::End => {
-                let max_lines = self.get_display_lines().len();
-                self.scroll_offset = max_lines.saturating_sub(1);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('b') | KeyCode::Char('B') => {

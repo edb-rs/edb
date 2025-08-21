@@ -114,6 +114,11 @@ impl ThemeManager {
         self.get_current_colors().info()
     }
 
+    /// Get accent color (for status bars and highlighting)
+    pub fn accent_color(&self) -> Color {
+        self.get_current_colors().accent_color()
+    }
+
     /// Reload configuration from disk
     pub fn reload(&self) -> Result<()> {
         let new_config = Config::load()?;

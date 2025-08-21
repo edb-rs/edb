@@ -4,6 +4,8 @@
 
 use super::{EventResponse, Panel, PanelType};
 use crate::managers::{ExecutionManager, ThemeManager};
+use crate::ui::borders::BorderPresets;
+use crate::ui::status::StatusBar;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -21,6 +23,10 @@ pub struct TracePanel {
     trace_entries: Vec<String>,
     /// Currently selected trace entry index
     selected_index: usize,
+    /// Scroll offset
+    scroll_offset: usize,
+    /// Current content height
+    context_height: usize,
     /// Whether this panel is focused
     focused: bool,
     /// Shared execution state manager
@@ -44,10 +50,15 @@ impl TracePanel {
                 "  ✅ SUCCESS output: 0x...".to_string(),
                 "📞 CALL 0x123...abc → 0xaaa...bbb".to_string(),
                 "  ❌ REVERT reason: insufficient balance".to_string(),
-                "✅ SUCCESS final result".to_string(),
+                "✅ SUCCESS final result 1".to_string(),
+                "✅ SUCCESS final result 2".to_string(),
+                "✅ SUCCESS final result 3".to_string(),
+                "✅ SUCCESS final result 4".to_string(),
             ],
             selected_index: 0,
             focused: false,
+            scroll_offset: 0,
+            context_height: 0,
             execution_manager,
             theme_manager,
         }
@@ -57,13 +68,21 @@ impl TracePanel {
     fn move_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
+            if self.selected_index < self.scroll_offset {
+                self.scroll_offset = self.selected_index;
+            }
         }
     }
 
     /// Move selection down
     fn move_down(&mut self) {
-        if self.selected_index < self.trace_entries.len().saturating_sub(1) {
+        let max_lines = self.trace_entries.len();
+        if self.selected_index < max_lines.saturating_sub(1) {
             self.selected_index += 1;
+            let viewport_height = self.context_height;
+            if self.selected_index >= self.scroll_offset + viewport_height {
+                self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
+            }
         }
     }
 
@@ -89,13 +108,19 @@ impl Panel for TracePanel {
             self.theme_manager.unfocused_border_color()
         };
 
+        self.context_height = if self.focused && area.height > 10 {
+            area.height.saturating_sub(4) // Account for borders and status lines
+        } else {
+            area.height.saturating_sub(2) // Just borders
+        } as usize;
+
         if self.trace_entries.is_empty() {
-            let paragraph = Paragraph::new("No trace data available").block(
-                Block::default()
-                    .title(self.title())
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(border_color)),
-            );
+            let paragraph = Paragraph::new("No trace data available").block(BorderPresets::trace(
+                self.focused,
+                self.title(),
+                self.theme_manager.focused_border_color(),
+                self.theme_manager.unfocused_border_color(),
+            ));
             frame.render_widget(paragraph, area);
             return;
         }
@@ -105,6 +130,8 @@ impl Panel for TracePanel {
             .trace_entries
             .iter()
             .enumerate()
+            .skip(self.scroll_offset)
+            .take(self.context_height)
             .map(|(i, entry)| {
                 let style = if i == self.selected_index && self.focused {
                     Style::default()
@@ -120,21 +147,40 @@ impl Panel for TracePanel {
             .collect();
 
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .title(self.title())
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(border_color)),
-            )
+            .block(BorderPresets::trace(
+                self.focused,
+                self.title(),
+                self.theme_manager.focused_border_color(),
+                self.theme_manager.unfocused_border_color(),
+            ))
             .highlight_style(Style::default().bg(self.theme_manager.selected_bg_color()));
 
         frame.render_widget(list, area);
 
-        // Add help text at the bottom if focused
+        // Add status and help text at the bottom if focused
         if self.focused && area.height > 10 {
-            let help_area = Rect {
+            // Status line
+            let status_area = Rect {
                 x: area.x + 1,
                 y: area.y + area.height - 3,
+                width: area.width - 2,
+                height: 1,
+            };
+
+            let status_bar = StatusBar::new().current_panel("Trace".to_string()).message(format!(
+                "Entry: {}/{}",
+                self.selected_index + 1,
+                self.trace_entries.len()
+            ));
+
+            let status_text = status_bar.build();
+            let status_paragraph = Paragraph::new(status_text)
+                .style(Style::default().fg(self.theme_manager.accent_color()));
+            frame.render_widget(status_paragraph, status_area);
+
+            let help_area = Rect {
+                x: area.x + 1,
+                y: area.y + area.height - 2,
                 width: area.width - 2,
                 height: 1,
             };
@@ -164,25 +210,6 @@ impl Panel for TracePanel {
                     debug!("Selected trace entry: {}", entry);
                     // TODO: Update current snapshot based on selected trace entry
                 }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::PageUp => {
-                // Jump up by multiple entries
-                self.selected_index = self.selected_index.saturating_sub(5);
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::PageDown => {
-                // Jump down by multiple entries
-                self.selected_index =
-                    (self.selected_index + 5).min(self.trace_entries.len().saturating_sub(1));
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Home => {
-                self.selected_index = 0;
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::End => {
-                self.selected_index = self.trace_entries.len().saturating_sub(1);
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

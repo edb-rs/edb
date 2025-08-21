@@ -2,19 +2,25 @@
 //!
 //! This module provides a client for making JSON-RPC calls to the debug server.
 
+use crate::ui::spinner::RpcSpinner;
 use eyre::Result;
 use jsonrpsee::{
     core::client::ClientT,
     http_client::{HttpClient, HttpClientBuilder},
 };
 use serde_json::Value;
-use std::time::Duration;
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use tracing::{debug, error};
 
 /// RPC client for debug server communication
 pub struct RpcClient {
     client: HttpClient,
     server_url: String,
+    /// Shared spinner state for loading indication
+    spinner: Arc<RwLock<RpcSpinner>>,
 }
 
 impl RpcClient {
@@ -25,7 +31,11 @@ impl RpcClient {
             .build(server_url)?;
 
         debug!("Created RPC client for: {}", server_url);
-        Ok(Self { client, server_url: server_url.to_string() })
+        Ok(Self {
+            client,
+            server_url: server_url.to_string(),
+            spinner: Arc::new(RwLock::new(RpcSpinner::new())),
+        })
     }
 
     /// Test connection to a server URL
@@ -49,88 +59,116 @@ impl RpcClient {
         }
     }
 
-    /// Get current snapshot information
-    pub async fn get_current_snapshot(&self) -> Result<Value> {
-        debug!("Getting current snapshot");
-        match self.client.request("debug.getCurrentSnapshot", rpc_params::build()).await {
+    /// Generic method to make RPC requests with automatic spinner management
+    async fn request_with_spinner(
+        &self,
+        method: &str,
+        params: Vec<Value>,
+        operation_name: &str,
+    ) -> Result<Value> {
+        self.start_loading(operation_name);
+        debug!("Making RPC request: {}", operation_name);
+
+        let result = match self.client.request(method, params).await {
             Ok(result) => {
-                debug!("Got current snapshot: {:?}", result);
+                debug!("{} successful: {:?}", operation_name, result);
                 Ok(result)
             }
             Err(e) => {
-                error!("Failed to get current snapshot: {}", e);
+                error!("{} failed: {}", operation_name, e);
                 Err(e.into())
             }
-        }
+        };
+
+        self.finish_loading();
+        result
+    }
+
+    /// Get current snapshot information
+    pub async fn get_current_snapshot(&self) -> Result<Value> {
+        self.request_with_spinner(
+            "debug.getCurrentSnapshot",
+            rpc_params::build(),
+            "Getting current snapshot",
+        )
+        .await
     }
 
     /// Get total snapshot count
     pub async fn get_snapshot_count(&self) -> Result<Value> {
-        debug!("Getting snapshot count");
-        match self.client.request("debug.getSnapshotCount", rpc_params::build()).await {
-            Ok(result) => {
-                debug!("Got snapshot count: {:?}", result);
-                Ok(result)
-            }
-            Err(e) => {
-                error!("Failed to get snapshot count: {}", e);
-                Err(e.into())
-            }
-        }
+        self.request_with_spinner(
+            "debug.getSnapshotCount",
+            rpc_params::build(),
+            "Getting snapshot count",
+        )
+        .await
     }
 
     /// Step to next snapshot
     pub async fn step_next(&self) -> Result<Value> {
-        debug!("Stepping to next snapshot");
-        match self.client.request("debug.stepNext", rpc_params::build()).await {
-            Ok(result) => {
-                debug!("Stepped to next snapshot: {:?}", result);
-                Ok(result)
-            }
-            Err(e) => {
-                error!("Failed to step to next snapshot: {}", e);
-                Err(e.into())
-            }
-        }
+        self.request_with_spinner(
+            "debug.stepNext",
+            rpc_params::build(),
+            "Stepping to next snapshot",
+        )
+        .await
     }
 
     /// Step to previous snapshot
     pub async fn step_previous(&self) -> Result<Value> {
-        debug!("Stepping to previous snapshot");
-        match self.client.request("debug.stepPrevious", rpc_params::build()).await {
-            Ok(result) => {
-                debug!("Stepped to previous snapshot: {:?}", result);
-                Ok(result)
-            }
-            Err(e) => {
-                error!("Failed to step to previous snapshot: {}", e);
-                Err(e.into())
-            }
-        }
+        self.request_with_spinner(
+            "debug.stepPrevious",
+            rpc_params::build(),
+            "Stepping to previous snapshot",
+        )
+        .await
     }
 
     /// Set current snapshot to specific index
     pub async fn set_current_snapshot(&self, index: usize) -> Result<Value> {
-        debug!("Setting current snapshot to: {}", index);
-        match self
-            .client
-            .request("debug.setCurrentSnapshot", rpc_params::build_with_param(Some(index)))
-            .await
-        {
-            Ok(result) => {
-                debug!("Set current snapshot to {}: {:?}", index, result);
-                Ok(result)
-            }
-            Err(e) => {
-                error!("Failed to set current snapshot to {}: {}", index, e);
-                Err(e.into())
-            }
-        }
+        self.request_with_spinner(
+            "debug.setCurrentSnapshot",
+            rpc_params::build_with_param(Some(index)),
+            &format!("Setting snapshot to {}", index),
+        )
+        .await
     }
 
     /// Get server URL
     pub fn server_url(&self) -> &str {
         &self.server_url
+    }
+
+    /// Get shared reference to spinner for UI updates
+    pub fn spinner(&self) -> Arc<RwLock<RpcSpinner>> {
+        Arc::clone(&self.spinner)
+    }
+
+    /// Check if spinner is currently loading
+    pub fn is_loading(&self) -> bool {
+        self.spinner.read().unwrap().is_loading()
+    }
+
+    /// Get spinner display text
+    pub fn spinner_display(&self) -> String {
+        self.spinner.read().unwrap().display_text()
+    }
+
+    /// Start loading spinner for an operation
+    fn start_loading(&self, operation: &str) {
+        self.spinner.write().unwrap().start_loading(operation);
+        debug!("Started loading spinner: {}", operation);
+    }
+
+    /// Finish loading spinner
+    fn finish_loading(&self) {
+        self.spinner.write().unwrap().finish_loading();
+        debug!("Finished loading spinner");
+    }
+
+    /// Update spinner animation (call from render loop)
+    pub fn tick(&self) {
+        self.spinner.write().unwrap().tick();
     }
 
     /// Check server health

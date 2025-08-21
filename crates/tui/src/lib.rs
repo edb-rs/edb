@@ -18,7 +18,11 @@ pub use layout::{LayoutConfig, LayoutManager, LayoutType};
 pub use managers::ThemeManager;
 pub use panels::EventResponse;
 pub use rpc::RpcClient;
-pub use ui::{ColorScheme, Icons, Theme as UiTheme};
+pub use ui::{
+    BorderPresets, BreakpointStatus, ColorScheme, ConnectionStatus, EnhancedBorder,
+    ExecutionStatus, FileStatus, Icons, PanelStatus, RpcSpinner, RpcStatus, Spinner, SpinnerStyles,
+    StatusBar, Theme as UiTheme,
+};
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream},
