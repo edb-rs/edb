@@ -65,6 +65,36 @@ pub struct ColorScheme {
     pub info: String,
     /// Accent color for status bars and highlights
     pub accent: String,
+
+    // Syntax highlighting colors
+    /// Keywords (contract, function, if, etc.)
+    pub keyword: String,
+    /// Type names (uint256, address, bool, etc.)
+    pub type_name: String,
+    /// String literals
+    pub string: String,
+    /// Number literals
+    pub number: String,
+    /// Comments
+    pub comment: String,
+    /// Identifiers (variable names, function names)
+    pub identifier: String,
+    /// Operators (+, -, *, ==, etc.)
+    pub operator: String,
+    /// Punctuation ((), {}, ;, etc.)
+    pub punctuation: String,
+    /// Ethereum addresses (0x...)
+    pub address: String,
+    /// Pragma statements
+    pub pragma: String,
+    /// EVM opcodes
+    pub opcode: String,
+
+    // Line number styling
+    /// Line numbers
+    pub line_number: String,
+    /// Line number background
+    pub line_number_bg: String,
 }
 
 /// Panel-specific configuration
@@ -145,6 +175,20 @@ impl Default for ThemeConfig {
                     warning: "yellow".to_string(),
                     info: "cyan".to_string(),
                     accent: "bright_cyan".to_string(),
+                    // Syntax highlighting
+                    keyword: "light_blue".to_string(),
+                    type_name: "light_green".to_string(),
+                    string: "green".to_string(),
+                    number: "light_yellow".to_string(),
+                    comment: "dark_gray".to_string(),
+                    identifier: "white".to_string(),
+                    operator: "light_magenta".to_string(),
+                    punctuation: "gray".to_string(),
+                    address: "light_cyan".to_string(),
+                    pragma: "magenta".to_string(),
+                    opcode: "light_blue".to_string(),
+                    line_number: "gray".to_string(),
+                    line_number_bg: "black".to_string(),
                 },
             },
         );
@@ -168,6 +212,20 @@ impl Default for ThemeConfig {
                     warning: "yellow".to_string(),
                     info: "white".to_string(),
                     accent: "bright_white".to_string(),
+                    // Syntax highlighting
+                    keyword: "white".to_string(),
+                    type_name: "light_green".to_string(),
+                    string: "green".to_string(),
+                    number: "yellow".to_string(),
+                    comment: "dark_gray".to_string(),
+                    identifier: "gray".to_string(),
+                    operator: "white".to_string(),
+                    punctuation: "gray".to_string(),
+                    address: "cyan".to_string(),
+                    pragma: "magenta".to_string(),
+                    opcode: "white".to_string(),
+                    line_number: "dark_gray".to_string(),
+                    line_number_bg: "black".to_string(),
                 },
             },
         );
@@ -191,6 +249,20 @@ impl Default for ThemeConfig {
                     warning: "yellow".to_string(),
                     info: "blue".to_string(),
                     accent: "bright_blue".to_string(),
+                    // Syntax highlighting
+                    keyword: "blue".to_string(),
+                    type_name: "green".to_string(),
+                    string: "red".to_string(),
+                    number: "magenta".to_string(),
+                    comment: "gray".to_string(),
+                    identifier: "black".to_string(),
+                    operator: "blue".to_string(),
+                    punctuation: "black".to_string(),
+                    address: "cyan".to_string(),
+                    pragma: "magenta".to_string(),
+                    opcode: "blue".to_string(),
+                    line_number: "gray".to_string(),
+                    line_number_bg: "white".to_string(),
                 },
             },
         );
@@ -214,6 +286,20 @@ impl Default for ThemeConfig {
                     warning: "yellow".to_string(),
                     info: "cyan".to_string(),
                     accent: "bright_magenta".to_string(),
+                    // Syntax highlighting (Monokai-inspired)
+                    keyword: "magenta".to_string(),
+                    type_name: "light_blue".to_string(),
+                    string: "yellow".to_string(),
+                    number: "light_magenta".to_string(),
+                    comment: "gray".to_string(),
+                    identifier: "white".to_string(),
+                    operator: "red".to_string(),
+                    punctuation: "white".to_string(),
+                    address: "light_green".to_string(),
+                    pragma: "magenta".to_string(),
+                    opcode: "light_cyan".to_string(),
+                    line_number: "gray".to_string(),
+                    line_number_bg: "black".to_string(),
                 },
             },
         );
@@ -382,5 +468,72 @@ impl ColorScheme {
     /// Get accent color for status bars
     pub fn accent_color(&self) -> Color {
         Config::parse_color(&self.accent)
+    }
+
+    // Syntax highlighting color methods
+
+    /// Get keyword color
+    pub fn keyword_color(&self) -> Color {
+        Config::parse_color(&self.keyword)
+    }
+
+    /// Get type name color
+    pub fn type_color(&self) -> Color {
+        Config::parse_color(&self.type_name)
+    }
+
+    /// Get string color
+    pub fn string_color(&self) -> Color {
+        Config::parse_color(&self.string)
+    }
+
+    /// Get number color
+    pub fn number_color(&self) -> Color {
+        Config::parse_color(&self.number)
+    }
+
+    /// Get comment color
+    pub fn comment_color(&self) -> Color {
+        Config::parse_color(&self.comment)
+    }
+
+    /// Get identifier color
+    pub fn identifier_color(&self) -> Color {
+        Config::parse_color(&self.identifier)
+    }
+
+    /// Get operator color
+    pub fn operator_color(&self) -> Color {
+        Config::parse_color(&self.operator)
+    }
+
+    /// Get punctuation color
+    pub fn punctuation_color(&self) -> Color {
+        Config::parse_color(&self.punctuation)
+    }
+
+    /// Get address color
+    pub fn address_color(&self) -> Color {
+        Config::parse_color(&self.address)
+    }
+
+    /// Get pragma color
+    pub fn pragma_color(&self) -> Color {
+        Config::parse_color(&self.pragma)
+    }
+
+    /// Get opcode color
+    pub fn opcode_color(&self) -> Color {
+        Config::parse_color(&self.opcode)
+    }
+
+    /// Get line number color
+    pub fn line_number_color(&self) -> Color {
+        Config::parse_color(&self.line_number)
+    }
+
+    /// Get line number background color
+    pub fn line_number_bg_color(&self) -> Color {
+        Config::parse_color(&self.line_number_bg)
     }
 }

@@ -119,6 +119,73 @@ impl ThemeManager {
         self.get_current_colors().accent_color()
     }
 
+    // Syntax highlighting colors
+
+    /// Get keyword color for syntax highlighting
+    pub fn syntax_keyword_color(&self) -> Color {
+        self.get_current_colors().keyword_color()
+    }
+
+    /// Get type color for syntax highlighting
+    pub fn syntax_type_color(&self) -> Color {
+        self.get_current_colors().type_color()
+    }
+
+    /// Get string color for syntax highlighting
+    pub fn syntax_string_color(&self) -> Color {
+        self.get_current_colors().string_color()
+    }
+
+    /// Get number color for syntax highlighting
+    pub fn syntax_number_color(&self) -> Color {
+        self.get_current_colors().number_color()
+    }
+
+    /// Get comment color for syntax highlighting
+    pub fn syntax_comment_color(&self) -> Color {
+        self.get_current_colors().comment_color()
+    }
+
+    /// Get identifier color for syntax highlighting
+    pub fn syntax_identifier_color(&self) -> Color {
+        self.get_current_colors().identifier_color()
+    }
+
+    /// Get operator color for syntax highlighting
+    pub fn syntax_operator_color(&self) -> Color {
+        self.get_current_colors().operator_color()
+    }
+
+    /// Get punctuation color for syntax highlighting
+    pub fn syntax_punctuation_color(&self) -> Color {
+        self.get_current_colors().punctuation_color()
+    }
+
+    /// Get address color for syntax highlighting
+    pub fn syntax_address_color(&self) -> Color {
+        self.get_current_colors().address_color()
+    }
+
+    /// Get pragma color for syntax highlighting
+    pub fn syntax_pragma_color(&self) -> Color {
+        self.get_current_colors().pragma_color()
+    }
+
+    /// Get opcode color for syntax highlighting
+    pub fn syntax_opcode_color(&self) -> Color {
+        self.get_current_colors().opcode_color()
+    }
+
+    /// Get line number color
+    pub fn line_number_color(&self) -> Color {
+        self.get_current_colors().line_number_color()
+    }
+
+    /// Get line number background color
+    pub fn line_number_bg_color(&self) -> Color {
+        self.get_current_colors().line_number_bg_color()
+    }
+
     /// Reload configuration from disk
     pub fn reload(&self) -> Result<()> {
         let new_config = Config::load()?;

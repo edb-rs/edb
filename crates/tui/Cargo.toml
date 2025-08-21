@@ -36,6 +36,7 @@ toml.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 dirs.workspace = true
+regex = "1.11"
 
 [dev-dependencies]
 edb-common = { path = "../common" }

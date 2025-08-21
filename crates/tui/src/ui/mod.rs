@@ -8,6 +8,7 @@ pub mod colors;
 pub mod icons;
 pub mod spinner;
 pub mod status;
+pub mod syntax;
 
 pub use borders::{BorderPresets, EnhancedBorder, EnhancedBorderStyle};
 pub use colors::{ColorScheme, Theme};
@@ -17,3 +18,4 @@ pub use status::{
     BreakpointStatus, ConnectionStatus, ExecutionStatus, FileStatus, PanelStatus, RpcStatus,
     StatusBar,
 };
+pub use syntax::{SyntaxHighlighter, SyntaxToken, SyntaxType, TokenStyle, TokenType};

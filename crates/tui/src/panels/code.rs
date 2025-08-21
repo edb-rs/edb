@@ -6,6 +6,7 @@ use super::{BreakpointManager, EventResponse, Panel, PanelType};
 use crate::managers::{ExecutionManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{BreakpointStatus, FileStatus, StatusBar};
+use crate::ui::syntax::{SyntaxHighlighter, SyntaxType, TokenStyle};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -92,6 +93,8 @@ pub struct CodePanel {
     execution_manager: ExecutionManager,
     /// Theme manager for styling
     theme_manager: ThemeManager,
+    /// Syntax highlighter for code
+    syntax_highlighter: SyntaxHighlighter,
 }
 
 impl CodePanel {
@@ -201,6 +204,7 @@ impl CodePanel {
             file_selector_scroll_offset: 0,
             file_selector_context_height: 0,
             file_selector_height_percent: 20, // Default to 20% of panel height
+            syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
 
@@ -210,6 +214,92 @@ impl CodePanel {
             CodeMode::Source => &self.source_lines,
             CodeMode::Opcodes => &self.opcode_lines,
         }
+    }
+
+    /// Apply syntax highlighting to a line and return styled text
+    fn highlight_line<'a>(
+        &self,
+        line: &'a str,
+        line_num: usize,
+        max_line_num: usize,
+    ) -> ratatui::text::Line<'a> {
+        use ratatui::text::{Line, Span};
+
+        // Determine syntax type based on display mode
+        let syntax_type = match self.mode {
+            CodeMode::Source => SyntaxType::Solidity,
+            CodeMode::Opcodes => SyntaxType::Opcodes,
+        };
+
+        // Get line number width (for consistent alignment)
+        let line_num_width = max_line_num.to_string().len().max(3);
+
+        // Create line number with background
+        let line_num_text = format!("{:>width$} ", line_num, width = line_num_width);
+        let line_num_span = Span::styled(
+            line_num_text,
+            Style::default()
+                .fg(self.theme_manager.line_number_color())
+                .bg(self.theme_manager.line_number_bg_color()),
+        );
+
+        // Tokenize the line for syntax highlighting
+        let tokens = self.syntax_highlighter.tokenize(line, syntax_type);
+
+        let mut spans = vec![line_num_span];
+        let mut last_end = 0;
+
+        // Apply syntax highlighting to tokens
+        for token in tokens {
+            // Add any unhighlighted text before this token
+            if token.start > last_end {
+                let unhighlighted = &line[last_end..token.start];
+                if !unhighlighted.is_empty() {
+                    spans.push(Span::raw(unhighlighted));
+                }
+            }
+
+            // Add the highlighted token
+            let token_text = &line[token.start..token.end];
+            let token_style =
+                self.get_token_style(self.syntax_highlighter.get_token_style(token.token_type));
+            spans.push(Span::styled(token_text, token_style));
+
+            last_end = token.end;
+        }
+
+        // Add any remaining unhighlighted text
+        if last_end < line.len() {
+            let remaining = &line[last_end..];
+            if !remaining.is_empty() {
+                spans.push(Span::raw(remaining));
+            }
+        }
+
+        Line::from(spans)
+    }
+
+    /// Convert TokenStyle to ratatui Style using theme colors
+    fn get_token_style(&self, token_style: TokenStyle) -> Style {
+        let color = match token_style {
+            TokenStyle::Keyword => self.theme_manager.syntax_keyword_color(),
+            TokenStyle::Type => self.theme_manager.syntax_type_color(),
+            TokenStyle::String => self.theme_manager.syntax_string_color(),
+            TokenStyle::Number => self.theme_manager.syntax_number_color(),
+            TokenStyle::Comment => self.theme_manager.syntax_comment_color(),
+            TokenStyle::Identifier => self.theme_manager.syntax_identifier_color(),
+            TokenStyle::Operator => self.theme_manager.syntax_operator_color(),
+            TokenStyle::Punctuation => self.theme_manager.syntax_punctuation_color(),
+            TokenStyle::Address => self.theme_manager.syntax_address_color(),
+            TokenStyle::Pragma => self.theme_manager.syntax_pragma_color(),
+            TokenStyle::Opcode
+            | TokenStyle::OpcodeNumber
+            | TokenStyle::OpcodeAddress
+            | TokenStyle::OpcodeData => self.theme_manager.syntax_opcode_color(),
+            TokenStyle::Default => Color::Reset,
+        };
+
+        Style::default().fg(color)
     }
 
     /// Toggle file selector visibility
@@ -343,9 +433,12 @@ impl CodePanel {
         frame.render_widget(file_list, area);
     }
 
-    /// Render the main code content
-    fn render_code_content(&mut self, frame: &mut Frame, area: Rect, border_color: Color) {
-        // Create list items with line numbers and highlighting
+    /// Render the main code content with syntax highlighting
+    fn render_code_content(&mut self, frame: &mut Frame, area: Rect, _border_color: Color) {
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{List, ListItem, Paragraph};
+
+        // Calculate viewport height
         self.context_height = if self.focused && area.height > 10 {
             area.height.saturating_sub(4) // Account for borders and status lines
         } else {
@@ -365,18 +458,26 @@ impl CodePanel {
             return;
         }
 
+        // Get the display lines with viewport scrolling
         let display_lines: Vec<_> =
             lines.iter().enumerate().skip(self.scroll_offset).take(self.context_height).collect();
 
-        let items: Vec<ListItem> = display_lines
+        let max_line_num = lines.len();
+
+        // Create list items with syntax highlighting, line numbers, and indicators
+        let list_items: Vec<ListItem> = display_lines
             .iter()
             .map(|(line_idx, line)| {
                 let line_num = line_idx + 1;
                 let is_execution =
                     self.current_execution_line.map_or(false, |exec| exec == line_num);
                 let is_user_cursor = self.user_cursor_line.map_or(false, |user| user == line_num);
+                let has_breakpoint = self.breakpoint_manager.has_breakpoint(line_num);
 
-                // Determine cursor indicator
+                // Start with syntax-highlighted line
+                let highlighted_line = self.highlight_line(line, line_num, max_line_num);
+
+                // Add cursor and breakpoint indicators
                 let cursor_indicator = if is_execution && is_user_cursor {
                     "◉" // Both cursors on same line
                 } else if is_execution {
@@ -387,63 +488,46 @@ impl CodePanel {
                     " " // No cursor
                 };
 
-                // Check if this line has a breakpoint
-                let has_breakpoint = self.breakpoint_manager.has_breakpoint(line_num);
-                let breakpoint_status = if has_breakpoint {
-                    BreakpointStatus::Active
+                let breakpoint_indicator = if has_breakpoint {
+                    Span::styled("●", Style::default().fg(self.theme_manager.error_color()))
                 } else {
-                    BreakpointStatus::Disabled
-                };
-                let breakpoint_indicator =
-                    if has_breakpoint { breakpoint_status.icon() } else { " " };
-
-                let line_content = if self.mode == CodeMode::Source {
-                    format!(
-                        "{:3} {} {} | {}",
-                        line_num, breakpoint_indicator, cursor_indicator, line
-                    )
-                } else {
-                    format!("{} {} {}", breakpoint_indicator, cursor_indicator, line)
+                    Span::raw(" ")
                 };
 
-                let style = if is_execution {
-                    Style::default()
-                        .bg(self.theme_manager.warning_color())
-                        .fg(self.theme_manager.selected_fg_color())
+                // Insert breakpoint and cursor indicators after line number
+                let mut new_spans = vec![highlighted_line.spans[0].clone()]; // Line number
+                new_spans.push(breakpoint_indicator);
+                new_spans.push(Span::raw(format!("{} │ ", cursor_indicator)));
+
+                // Add the syntax highlighted content (skip the line number span)
+                if highlighted_line.spans.len() > 1 {
+                    new_spans.extend_from_slice(&highlighted_line.spans[1..]);
+                }
+
+                let content_line = Line::from(new_spans);
+
+                // Apply background highlighting for execution/cursor lines
+                let item_style = if is_execution {
+                    Style::default().bg(self.theme_manager.warning_color())
                 } else if is_user_cursor {
-                    Style::default()
-                        .bg(self.theme_manager.highlight_bg_color())
-                        .fg(self.theme_manager.highlight_fg_color())
+                    Style::default().bg(self.theme_manager.highlight_bg_color())
                 } else {
                     Style::default()
                 };
 
-                // Apply red color to breakpoint indicator if present
-                let styled_content = if has_breakpoint {
-                    // Create a styled line with red breakpoint indicator
-                    if self.mode == CodeMode::Source {
-                        format!("{:3} ", line_num) + 
-                        &format!("\x1b[31m●\x1b[0m") + // Red bullet
-                        &format!(" {} | {}", cursor_indicator, line)
-                    } else {
-                        format!("\x1b[31m●\x1b[0m {} {}", cursor_indicator, line)
-                    }
-                } else {
-                    line_content
-                };
-
-                ListItem::new(styled_content).style(style)
+                ListItem::new(content_line).style(item_style)
             })
             .collect();
 
-        let list = List::new(items).block(BorderPresets::code(
+        // Create list with highlighted content
+        let code_list = List::new(list_items).block(BorderPresets::code(
             self.focused,
             self.title(),
             self.theme_manager.focused_border_color(),
             self.theme_manager.unfocused_border_color(),
         ));
 
-        frame.render_widget(list, area);
+        frame.render_widget(code_list, area);
 
         // Add cursor status and help text at the bottom if focused
         if self.focused && area.height > 10 {
