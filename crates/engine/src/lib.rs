@@ -1,7 +1,7 @@
 // Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
 // SPDX-License-Identifier: AGPL-3.0
 pub mod analysis;
-pub use analysis::*;
+use analysis::*;
 
 pub mod core;
 pub use core::*;

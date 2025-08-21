@@ -4,168 +4,283 @@ use eyre::Result;
 use foundry_compilers::artifacts::*;
 use paste::paste;
 
+/// Controls the behavior of AST traversal during visitor pattern execution.
+///
+/// This enum is returned by pre-node visitor methods to indicate how the traversal
+/// should proceed. It allows visitors to control the flow of AST traversal without
+/// having to implement complex traversal logic themselves.
+///
+/// # Examples
+///
+/// ```rust
+/// use crate::analysis::visitor::{Visitor, VisitorAction};
+///
+/// struct MyVisitor;
+///
+/// impl Visitor for MyVisitor {
+///     fn visit_function_definition(&mut self, _def: &FunctionDefinition) -> Result<VisitorAction> {
+///         // Skip traversing function bodies to improve performance
+///         Ok(VisitorAction::SkipSubtree)
+///     }
+///
+///     fn visit_variable_declaration(&mut self, _decl: &VariableDeclaration) -> Result<VisitorAction> {
+///         // Continue normal traversal
+///         Ok(VisitorAction::Continue)
+///     }
+/// }
+/// ```
+pub enum VisitorAction {
+    /// Continue normal AST traversal, visiting all child nodes.
+    ///
+    /// This is the default behavior that traverses the entire subtree
+    /// starting from the current node.
+    Continue,
+
+    /// Skip traversing the subtree of the current node.
+    ///
+    /// When this variant is returned, the visitor will not traverse any
+    /// child nodes of the current node, but will still call the corresponding
+    /// post-visit method. This is useful for:
+    ///
+    /// - Performance optimization when child nodes are not needed
+    /// - Avoiding traversal of large subtrees (e.g., function bodies)
+    /// - Implementing conditional traversal logic
+    ///
+    /// # Note
+    ///
+    /// The post-visit method for the current node will still be called,
+    /// even when skipping the subtree.
+    SkipSubtree,
+}
+
+/// Trait for implementing AST visitors that can traverse Solidity source code.
+///
+/// This trait provides methods for visiting each type of AST node in a Solidity
+/// source unit. Implementors can override specific methods to perform custom
+/// analysis or transformations on the AST.
+///
+/// All methods have default implementations that do nothing, allowing implementors
+/// to only override the methods they need.
+#[allow(missing_docs)]
 pub trait Visitor {
-    fn visit_source_unit(&mut self, _source_unit: &SourceUnit) -> Result<()> {
-        Ok(())
+    /// Visits a source unit (the root of a Solidity file).
+    ///
+    /// # Arguments
+    ///
+    /// * `_source_unit` - The source unit to visit
+    ///
+    /// # Returns
+    ///
+    /// A Result containing a VisitorAction indicating how to proceed with traversal.
+    fn visit_source_unit(&mut self, _source_unit: &SourceUnit) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_import_directive(&mut self, _directive: &ImportDirective) -> Result<()> {
-        Ok(())
+    fn visit_import_directive(&mut self, _directive: &ImportDirective) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_pragma_directive(&mut self, _directive: &PragmaDirective) -> Result<()> {
-        Ok(())
+    fn visit_pragma_directive(&mut self, _directive: &PragmaDirective) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_block(&mut self, _block: &Block) -> Result<()> {
-        Ok(())
+    fn visit_block(&mut self, _block: &Block) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_statement(&mut self, _statement: &Statement) -> Result<()> {
-        Ok(())
+    fn visit_statement(&mut self, _statement: &Statement) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_expression(&mut self, _expression: &Expression) -> Result<()> {
-        Ok(())
+    fn visit_expression(&mut self, _expression: &Expression) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_function_call(&mut self, _function_call: &FunctionCall) -> Result<()> {
-        Ok(())
+    fn visit_function_call(&mut self, _function_call: &FunctionCall) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_user_defined_type_name(&mut self, _type_name: &UserDefinedTypeName) -> Result<()> {
-        Ok(())
+    fn visit_user_defined_type_name(
+        &mut self,
+        _type_name: &UserDefinedTypeName,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_identifier_path(&mut self, _identifier_path: &IdentifierPath) -> Result<()> {
-        Ok(())
+    fn visit_identifier_path(
+        &mut self,
+        _identifier_path: &IdentifierPath,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_type_name(&mut self, _type_name: &TypeName) -> Result<()> {
-        Ok(())
+    fn visit_type_name(&mut self, _type_name: &TypeName) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_parameter_list(&mut self, _parameter_list: &ParameterList) -> Result<()> {
-        Ok(())
+    fn visit_parameter_list(&mut self, _parameter_list: &ParameterList) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_function_definition(&mut self, _definition: &FunctionDefinition) -> Result<()> {
-        Ok(())
+    fn visit_function_definition(
+        &mut self,
+        _definition: &FunctionDefinition,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_enum_definition(&mut self, _definition: &EnumDefinition) -> Result<()> {
-        Ok(())
+    fn visit_enum_definition(&mut self, _definition: &EnumDefinition) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_error_definition(&mut self, _definition: &ErrorDefinition) -> Result<()> {
-        Ok(())
+    fn visit_error_definition(&mut self, _definition: &ErrorDefinition) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_event_definition(&mut self, _definition: &EventDefinition) -> Result<()> {
-        Ok(())
+    fn visit_event_definition(&mut self, _definition: &EventDefinition) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_struct_definition(&mut self, _definition: &StructDefinition) -> Result<()> {
-        Ok(())
+    fn visit_struct_definition(&mut self, _definition: &StructDefinition) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_modifier_definition(&mut self, _definition: &ModifierDefinition) -> Result<()> {
-        Ok(())
+    fn visit_modifier_definition(
+        &mut self,
+        _definition: &ModifierDefinition,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_variable_declaration(&mut self, _declaration: &VariableDeclaration) -> Result<()> {
-        Ok(())
+    fn visit_variable_declaration(
+        &mut self,
+        _declaration: &VariableDeclaration,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_overrides(&mut self, _specifier: &OverrideSpecifier) -> Result<()> {
-        Ok(())
+    fn visit_overrides(&mut self, _specifier: &OverrideSpecifier) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
     fn visit_user_defined_value_type(
         &mut self,
         _value_type: &UserDefinedValueTypeDefinition,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_contract_definition(&mut self, _definition: &ContractDefinition) -> Result<()> {
-        Ok(())
+    fn visit_contract_definition(
+        &mut self,
+        _definition: &ContractDefinition,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_using_for(&mut self, _directive: &UsingForDirective) -> Result<()> {
-        Ok(())
+    fn visit_using_for(&mut self, _directive: &UsingForDirective) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_unary_operation(&mut self, _unary_op: &UnaryOperation) -> Result<()> {
-        Ok(())
+    fn visit_unary_operation(&mut self, _unary_op: &UnaryOperation) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_binary_operation(&mut self, _binary_op: &BinaryOperation) -> Result<()> {
-        Ok(())
+    fn visit_binary_operation(&mut self, _binary_op: &BinaryOperation) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_conditional(&mut self, _conditional: &Conditional) -> Result<()> {
-        Ok(())
+    fn visit_conditional(&mut self, _conditional: &Conditional) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_tuple_expression(&mut self, _tuple_expression: &TupleExpression) -> Result<()> {
-        Ok(())
+    fn visit_tuple_expression(
+        &mut self,
+        _tuple_expression: &TupleExpression,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_new_expression(&mut self, _new_expression: &NewExpression) -> Result<()> {
-        Ok(())
+    fn visit_new_expression(&mut self, _new_expression: &NewExpression) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_assignment(&mut self, _assignment: &Assignment) -> Result<()> {
-        Ok(())
+    fn visit_assignment(&mut self, _assignment: &Assignment) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_identifier(&mut self, _identifier: &Identifier) -> Result<()> {
-        Ok(())
+    fn visit_identifier(&mut self, _identifier: &Identifier) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_index_access(&mut self, _index_access: &IndexAccess) -> Result<()> {
-        Ok(())
+    fn visit_index_access(&mut self, _index_access: &IndexAccess) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_index_range_access(&mut self, _index_range_access: &IndexRangeAccess) -> Result<()> {
-        Ok(())
+    fn visit_index_range_access(
+        &mut self,
+        _index_range_access: &IndexRangeAccess,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_while_statement(&mut self, _while_statement: &WhileStatement) -> Result<()> {
-        Ok(())
+    fn visit_while_statement(
+        &mut self,
+        _while_statement: &WhileStatement,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_for_statement(&mut self, _for_statement: &ForStatement) -> Result<()> {
-        Ok(())
+    fn visit_for_statement(&mut self, _for_statement: &ForStatement) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_if_statement(&mut self, _if_statement: &IfStatement) -> Result<()> {
-        Ok(())
+    fn visit_if_statement(&mut self, _if_statement: &IfStatement) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_do_while_statement(&mut self, _do_while_statement: &DoWhileStatement) -> Result<()> {
-        Ok(())
+    fn visit_do_while_statement(
+        &mut self,
+        _do_while_statement: &DoWhileStatement,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_emit_statement(&mut self, _emit_statement: &EmitStatement) -> Result<()> {
-        Ok(())
+    fn visit_emit_statement(&mut self, _emit_statement: &EmitStatement) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_unchecked_block(&mut self, _unchecked_block: &UncheckedBlock) -> Result<()> {
-        Ok(())
+    fn visit_unchecked_block(
+        &mut self,
+        _unchecked_block: &UncheckedBlock,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_try_statement(&mut self, _try_statement: &TryStatement) -> Result<()> {
-        Ok(())
+    fn visit_try_statement(&mut self, _try_statement: &TryStatement) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_revert_statement(&mut self, _revert_statement: &RevertStatement) -> Result<()> {
-        Ok(())
+    fn visit_revert_statement(
+        &mut self,
+        _revert_statement: &RevertStatement,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_member_access(&mut self, _member_access: &MemberAccess) -> Result<()> {
-        Ok(())
+    fn visit_member_access(&mut self, _member_access: &MemberAccess) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_mapping(&mut self, _mapping: &Mapping) -> Result<()> {
-        Ok(())
+    fn visit_mapping(&mut self, _mapping: &Mapping) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
     fn visit_elementary_type_name(
         &mut self,
         _elementary_type_name: &ElementaryTypeName,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_literal(&mut self, _literal: &Literal) -> Result<()> {
-        Ok(())
+    fn visit_literal(&mut self, _literal: &Literal) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_function_type_name(&mut self, _function_type_name: &FunctionTypeName) -> Result<()> {
-        Ok(())
+    fn visit_function_type_name(
+        &mut self,
+        _function_type_name: &FunctionTypeName,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_array_type_name(&mut self, _array_type_name: &ArrayTypeName) -> Result<()> {
-        Ok(())
+    fn visit_array_type_name(&mut self, _array_type_name: &ArrayTypeName) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_function_call_options(&mut self, _function_call: &FunctionCallOptions) -> Result<()> {
-        Ok(())
+    fn visit_function_call_options(
+        &mut self,
+        _function_call: &FunctionCallOptions,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_return(&mut self, _return: &Return) -> Result<()> {
-        Ok(())
+    fn visit_return(&mut self, _return: &Return) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_inheritance_specifier(&mut self, _specifier: &InheritanceSpecifier) -> Result<()> {
-        Ok(())
+    fn visit_inheritance_specifier(
+        &mut self,
+        _specifier: &InheritanceSpecifier,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_modifier_invocation(&mut self, _invocation: &ModifierInvocation) -> Result<()> {
-        Ok(())
+    fn visit_modifier_invocation(
+        &mut self,
+        _invocation: &ModifierInvocation,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
-    fn visit_inline_assembly(&mut self, _assembly: &InlineAssembly) -> Result<()> {
-        Ok(())
+    fn visit_inline_assembly(&mut self, _assembly: &InlineAssembly) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
     fn visit_external_assembly_reference(
         &mut self,
         _ref: &ExternalInlineAssemblyReference,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
     }
 
     fn post_visit_source_unit(&mut self, _source_unit: &SourceUnit) -> Result<()> {
@@ -353,7 +468,21 @@ pub trait Visitor {
     }
 }
 
+/// Trait for AST nodes that can be walked by a visitor.
+///
+/// This trait is implemented by AST nodes that support visitor pattern traversal.
+/// It provides a way to walk through the AST structure and apply visitor operations
+/// to each node.
 pub trait Walk: Any {
+    /// Walks this AST node with the given visitor.
+    ///
+    /// # Arguments
+    ///
+    /// * `visitor` - The visitor to apply to this node and its children
+    ///
+    /// # Returns
+    ///
+    /// A Result indicating success or failure of the walk operation.
     fn walk(&self, visitor: &mut dyn Visitor) -> Result<()>;
 }
 
@@ -370,23 +499,37 @@ macro_rules! impl_walk {
     };
     ($ty:ty, $func:ident) => {
         impl_walk!($ty, |obj, visitor| {
-            visitor.$func(obj)?;
-            paste! { visitor.[<post_ $func>](obj)?; }
-            Ok(())
+            match visitor.$func(obj)? {
+                VisitorAction::Continue => {
+                    paste! { visitor.[<post_ $func>](obj)?; }
+                    Ok(())
+                }
+                VisitorAction::SkipSubtree => {
+                    paste! { visitor.[<post_ $func>](obj)?; }
+                    Ok(())
+                }
+            }
         });
     };
     ($ty:ty, $func:ident, | $val:ident, $visitor:ident | $e:expr) => {
         impl_walk!($ty, |$val, $visitor| {
-            $visitor.$func($val)?;
-            let r = $e;
+            match $visitor.$func($val)? {
+                VisitorAction::Continue => {
+                    let r = $e;
 
-            #[allow(clippy::question_mark)]
-            if r.is_err() {
-                return r;
+                    #[allow(clippy::question_mark)]
+                    if r.is_err() {
+                        return r;
+                    }
+
+                    paste! { $visitor.[<post_ $func>]($val)?; }
+                    Ok(())
+                }
+                VisitorAction::SkipSubtree => {
+                    paste! { $visitor.[<post_ $func>]($val)?; }
+                    Ok(())
+                }
             }
-
-            paste! { $visitor.[<post_ $func>]($val)?; }
-            Ok(())
         });
     };
 }
@@ -856,3 +999,90 @@ impl_walk!(UsingForFunctionItem, |item, visitor| {
 });
 
 impl_walk!(OverloadedOperator, |operator, visitor| operator.definition.walk(visitor));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::compile_contract_source_to_source_unit;
+    use semver::Version;
+
+    /// A test visitor that counts nodes and skips function bodies
+    struct SkipFunctionBodiesVisitor {
+        node_count: usize,
+        function_count: usize,
+    }
+
+    impl SkipFunctionBodiesVisitor {
+        fn new() -> Self {
+            Self { node_count: 0, function_count: 0 }
+        }
+    }
+
+    impl Visitor for SkipFunctionBodiesVisitor {
+        fn visit_function_definition(
+            &mut self,
+            _definition: &FunctionDefinition,
+        ) -> Result<VisitorAction> {
+            self.function_count += 1;
+            // Skip the function body (subtree) to avoid counting nodes inside functions
+            Ok(VisitorAction::SkipSubtree)
+        }
+
+        fn visit_contract_definition(
+            &mut self,
+            _definition: &ContractDefinition,
+        ) -> Result<VisitorAction> {
+            self.node_count += 1;
+            Ok(VisitorAction::Continue)
+        }
+
+        fn visit_variable_declaration(
+            &mut self,
+            _declaration: &VariableDeclaration,
+        ) -> Result<VisitorAction> {
+            self.node_count += 1;
+            Ok(VisitorAction::Continue)
+        }
+
+        fn visit_statement(&mut self, _statement: &Statement) -> Result<VisitorAction> {
+            self.node_count += 1;
+            Ok(VisitorAction::Continue)
+        }
+    }
+
+    #[test]
+    fn test_skip_subtree_functionality() {
+        let source = r#"
+        contract TestContract {
+            uint256 public value1;
+            uint256 public value2;
+
+            function setValue1(uint256 newValue) public {
+                value1 = newValue;
+                emit ValueSet1(newValue);
+            }
+
+            function setValue2(uint256 newValue) public {
+                value2 = newValue;
+                emit ValueSet2(newValue);
+            }
+
+            event ValueSet1(uint256 value);
+            event ValueSet2(uint256 value);
+        }
+        "#;
+
+        let version = Version::parse("0.8.19").unwrap();
+        let source_unit = compile_contract_source_to_source_unit(version, source, true)
+            .expect("Failed to compile contract");
+
+        let mut visitor = SkipFunctionBodiesVisitor::new();
+        source_unit.walk(&mut visitor).expect("Failed to walk AST");
+
+        // Should count the contract definition and variable declarations
+        // but skip all nodes inside function bodies due to SkipSubtree
+        assert_eq!(visitor.function_count, 2, "Should have visited 2 functions");
+        assert!(visitor.node_count > 0, "Should have counted some nodes");
+        assert!(visitor.node_count < 20, "Should have skipped many nodes due to SkipSubtree");
+    }
+}

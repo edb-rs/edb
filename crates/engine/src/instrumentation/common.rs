@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::{AnalysisResult, SourceResult, StepAnalysisResult};
+use crate::{AnalysisResult, SourceAnalysis, StepRef};
 use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
 
@@ -24,7 +24,7 @@ pub fn instrument(input: &SolcInput, analysis: &AnalysisResult) -> Result<SolcIn
 fn instrument_inner(
     path: &PathBuf,
     source: &Source,
-    analysis_result: &SourceResult,
+    analysis_result: &SourceAnalysis,
 ) -> Result<Source> {
     let mut source_text = source.content.to_string();
 
@@ -52,24 +52,24 @@ fn instrument_inner(
     Ok(Source::new(source_text))
 }
 
-fn instrument_before_step(source_text: &mut String, step_result: &StepAnalysisResult) {
+fn instrument_before_step(source_text: &mut String, step_result: &StepRef) {
     let checkpoint_call = format!(
         "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode({}));\n",
-        step_result.source_step.usid,
+        step_result.usid,
     );
 
-    let start = step_result.source_step.source_location.start.unwrap_or(0);
+    let start = step_result.src.start.unwrap_or(0);
     source_text.insert_str(start, checkpoint_call.as_str());
 }
 
-fn instrument_variable_in_scope(source_text: &mut String, step_result: &StepAnalysisResult) {
+fn instrument_variable_in_scope(source_text: &mut String, step_result: &StepRef) {
     // TODO (ZZ): Implement variable in scope instrumentation
 }
 
-fn instrument_variable_out_of_scope(source_text: &mut String, step_result: &StepAnalysisResult) {
+fn instrument_variable_out_of_scope(source_text: &mut String, step_result: &StepRef) {
     // TODO (ZZ): Implement variable out of scope instrumentation
 }
 
-fn instrument_variable_update(source_text: &mut String, step_result: &StepAnalysisResult) {
+fn instrument_variable_update(source_text: &mut String, step_result: &StepRef) {
     // TODO (ZZ): Implement variable update instrumentation
 }

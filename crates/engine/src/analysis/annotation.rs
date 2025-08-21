@@ -2,7 +2,7 @@ use foundry_compilers::artifacts::{
     FunctionDefinition, StateMutability, VariableDeclaration, Visibility,
 };
 
-use crate::Visitor;
+use crate::{analysis::visitor::VisitorAction, Visitor};
 
 /// Enum representing different types of annotation changes that can be made to Solidity code
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ impl Visitor for AnnotationAnalyzer {
     fn visit_variable_declaration(
         &mut self,
         declaration: &VariableDeclaration,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<VisitorAction> {
         if declaration.state_variable {
             // we need to change the visibility of the state variable to public
             if declaration.visibility != Visibility::Public {
@@ -70,10 +70,13 @@ impl Visitor for AnnotationAnalyzer {
                 });
             }
         }
-        Ok(())
+        Ok(VisitorAction::Continue)
     }
 
-    fn visit_function_definition(&mut self, definition: &FunctionDefinition) -> eyre::Result<()> {
+    fn visit_function_definition(
+        &mut self,
+        definition: &FunctionDefinition,
+    ) -> eyre::Result<VisitorAction> {
         if definition.visibility != Visibility::Public
             || definition
                 .state_mutability
@@ -86,7 +89,7 @@ impl Visitor for AnnotationAnalyzer {
                 mutability: None,
             });
         }
-        Ok(())
+        Ok(VisitorAction::Continue)
     }
 }
 
