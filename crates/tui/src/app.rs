@@ -28,6 +28,8 @@ pub struct App {
     panels: HashMap<PanelType, Box<dyn Panel>>,
     /// Whether the application should exit
     should_exit: bool,
+    /// Main panel type for compact layout (Trace or Code)
+    compact_main_panel: PanelType,
 }
 
 impl App {
@@ -43,7 +45,14 @@ impl App {
         panels.insert(PanelType::Display, Box::new(DisplayPanel::new()));
         panels.insert(PanelType::Terminal, Box::new(TerminalPanel::new()));
 
-        Ok(Self { rpc_client, layout_manager, current_panel, panels, should_exit: false })
+        Ok(Self {
+            rpc_client,
+            layout_manager,
+            current_panel,
+            panels,
+            should_exit: false,
+            compact_main_panel: PanelType::Code, // Default to Code in compact mode
+        })
     }
 
     /// Render the application
@@ -127,8 +136,8 @@ impl App {
         // Set focus for panels
         self.update_panel_focus();
 
-        // Render main panel (code for now)
-        if let Some(panel) = self.panels.get_mut(&PanelType::Code) {
+        // Render main panel (switch between Trace/Code)
+        if let Some(panel) = self.panels.get_mut(&self.compact_main_panel) {
             panel.render(frame, chunks[0]);
         }
         if let Some(panel) = self.panels.get_mut(&PanelType::Display) {
@@ -187,8 +196,23 @@ impl App {
                 return Ok(EventResponse::Handled);
             }
             KeyCode::Tab => {
-                self.cycle_panels();
-                return Ok(EventResponse::Handled);
+                match self.layout_manager.layout_type() {
+                    LayoutType::Compact => {
+                        // In compact mode, Tab switches main panel between Trace/Code
+                        self.compact_main_panel = match self.compact_main_panel {
+                            PanelType::Trace => PanelType::Code,
+                            PanelType::Code => PanelType::Trace,
+                            _ => PanelType::Code, // Fallback
+                        };
+                        debug!("Switched compact main panel to: {:?}", self.compact_main_panel);
+                        return Ok(EventResponse::Handled);
+                    }
+                    _ => {
+                        // In full/mobile mode, Tab cycles through panels
+                        self.cycle_panels();
+                        return Ok(EventResponse::Handled);
+                    }
+                }
             }
 
             // Function keys for mobile layout
@@ -238,29 +262,74 @@ impl App {
                 return Ok(EventResponse::Exit);
             }
 
+            KeyCode::Char(' ') => {
+                // Space key toggles main panel in compact mode
+                if matches!(self.layout_manager.layout_type(), LayoutType::Compact) {
+                    self.compact_main_panel = match self.compact_main_panel {
+                        PanelType::Trace => PanelType::Code,
+                        PanelType::Code => PanelType::Trace,
+                        _ => PanelType::Code,
+                    };
+                    debug!("Toggled compact main panel to: {:?}", self.compact_main_panel);
+                    return Ok(EventResponse::Handled);
+                }
+                // Otherwise, forward to current panel
+                if let Some(panel) = self.panels.get_mut(&self.current_panel) {
+                    return panel.handle_key_event(key);
+                }
+                return Ok(EventResponse::NotHandled);
+            }
+
             // Ctrl+number for direct panel access
             KeyCode::Char('1')
                 if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
-                self.current_panel = PanelType::Trace;
+                match self.layout_manager.layout_type() {
+                    LayoutType::Compact => {
+                        // In compact mode, Ctrl+1 focuses main panel (whichever is showing)
+                        self.current_panel = self.compact_main_panel;
+                    }
+                    _ => {
+                        self.current_panel = PanelType::Trace;
+                    }
+                }
                 return Ok(EventResponse::Handled);
             }
             KeyCode::Char('2')
                 if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
-                self.current_panel = PanelType::Code;
+                match self.layout_manager.layout_type() {
+                    LayoutType::Compact => {
+                        // In compact mode, Ctrl+2 focuses display panel
+                        self.current_panel = PanelType::Display;
+                    }
+                    _ => {
+                        self.current_panel = PanelType::Code;
+                    }
+                }
                 return Ok(EventResponse::Handled);
             }
             KeyCode::Char('3')
                 if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
-                self.current_panel = PanelType::Display;
+                match self.layout_manager.layout_type() {
+                    LayoutType::Compact => {
+                        // In compact mode, Ctrl+3 focuses terminal panel
+                        self.current_panel = PanelType::Terminal;
+                    }
+                    _ => {
+                        self.current_panel = PanelType::Display;
+                    }
+                }
                 return Ok(EventResponse::Handled);
             }
             KeyCode::Char('4')
                 if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
-                self.current_panel = PanelType::Terminal;
+                // Ctrl+4 only works in full layout
+                if matches!(self.layout_manager.layout_type(), LayoutType::Full) {
+                    self.current_panel = PanelType::Terminal;
+                }
                 return Ok(EventResponse::Handled);
             }
 

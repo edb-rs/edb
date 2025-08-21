@@ -37,8 +37,12 @@ pub struct TerminalPanel {
     history_position: Option<usize>,
     /// Output lines
     output_lines: VecDeque<String>,
+    /// Scroll offset for output (0 = bottom/latest)
+    output_scroll_offset: usize,
     /// Whether this panel is focused
     focused: bool,
+    /// Whether output area is focused (for scrolling with arrow keys)
+    output_focused: bool,
     /// Color scheme for styling
     color_scheme: ColorScheme,
     /// Whether we're connected to the RPC server
@@ -58,7 +62,9 @@ impl TerminalPanel {
             command_history: VecDeque::new(),
             history_position: None,
             output_lines: VecDeque::new(),
+            output_scroll_offset: 0,
             focused: false,
+            output_focused: false,
             color_scheme: ColorScheme::default(),
             connected: true,
             snapshot_info: Some((127, 348)),
@@ -80,6 +86,8 @@ impl TerminalPanel {
             self.output_lines.pop_front();
         }
         self.output_lines.push_back(line.to_string());
+        // Auto-scroll to bottom when new output is added
+        self.output_scroll_offset = 0;
     }
 
     /// Execute a command
@@ -344,11 +352,21 @@ impl Panel for TerminalPanel {
     }
 
     fn title(&self) -> String {
-        if let Some((current, total)) = self.snapshot_info {
-            format!("{} Debug Terminal [{}/{}]", Icons::PROCESSING, current, total)
+        let status = if let Some((current, total)) = self.snapshot_info {
+            format!(" [{}/{}]", current, total)
         } else {
-            format!("{} Debug Terminal", Icons::PROCESSING)
-        }
+            String::new()
+        };
+
+        let focus_hint = if self.output_focused {
+            " - Output Focus (↑/↓ to scroll, Esc to exit)"
+        } else if self.focused {
+            " - Tab: Focus output, PageUp/Down: Scroll"
+        } else {
+            ""
+        };
+
+        format!("{} Debug Terminal{}{}", Icons::PROCESSING, status, focus_hint)
     }
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
@@ -386,10 +404,19 @@ impl Panel for TerminalPanel {
             self.render_status_line(frame, status_rect);
         }
 
-        // Render output area with enhanced styling
+        // Render output area with enhanced styling and scrolling
+        let total_lines = self.output_lines.len();
+        let visible_height = chunks[0].height.saturating_sub(2) as usize; // Account for borders
+
+        // Calculate the range of lines to display based on scroll offset
+        let end_idx = total_lines.saturating_sub(self.output_scroll_offset);
+        let start_idx = end_idx.saturating_sub(visible_height);
+
         let output_items: Vec<ListItem<'_>> = self
             .output_lines
             .iter()
+            .skip(start_idx)
+            .take(visible_height)
             .map(|line| {
                 // Add color coding for different types of output
                 let styled_line = if line.starts_with(&format!("{}", Icons::SUCCESS)) {
@@ -427,10 +454,32 @@ impl Panel for TerminalPanel {
             })
             .collect();
 
+        // Show scroll indicator in title if scrolled up
+        let scroll_indicator = if self.output_scroll_offset > 0 {
+            format!(" [↑{}]", self.output_scroll_offset)
+        } else {
+            String::new()
+        };
+
+        // Different border color for output area when focused
+        let output_border_color = if self.output_focused {
+            self.color_scheme.focused_border
+        } else if self.focused {
+            self.color_scheme.unfocused_border
+        } else {
+            border_color
+        };
+
+        let output_title = if self.output_focused {
+            format!("{} Output{} [Focus Mode]", Icons::FILE, scroll_indicator)
+        } else {
+            format!("{} Output{}", Icons::FILE, scroll_indicator)
+        };
+
         let output_block = Block::default()
-            .title(format!("{} Output", Icons::FILE))
+            .title(output_title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color));
+            .border_style(Style::default().fg(output_border_color));
 
         let output_list = List::new(output_items).block(output_block);
 
@@ -477,6 +526,33 @@ impl Panel for TerminalPanel {
     fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
         if event.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
+        }
+
+        // Handle Tab to switch between input and output focus
+        if event.code == KeyCode::Tab {
+            self.output_focused = !self.output_focused;
+            return Ok(EventResponse::Handled);
+        }
+
+        // When output is focused, handle arrow keys for scrolling
+        if self.output_focused {
+            match event.code {
+                KeyCode::Up => {
+                    let max_scroll = self.output_lines.len().saturating_sub(1);
+                    self.output_scroll_offset = (self.output_scroll_offset + 1).min(max_scroll);
+                    return Ok(EventResponse::Handled);
+                }
+                KeyCode::Down => {
+                    self.output_scroll_offset = self.output_scroll_offset.saturating_sub(1);
+                    return Ok(EventResponse::Handled);
+                }
+                KeyCode::Esc => {
+                    // Exit output focus mode
+                    self.output_focused = false;
+                    return Ok(EventResponse::Handled);
+                }
+                _ => {}
+            }
         }
 
         match event.code {
@@ -553,10 +629,23 @@ impl Panel for TerminalPanel {
                 self.add_output("^C (press again quickly to exit)");
                 Ok(EventResponse::Handled)
             }
+            KeyCode::PageUp => {
+                // Scroll up by 10 lines
+                let max_scroll = self.output_lines.len().saturating_sub(1);
+                self.output_scroll_offset = (self.output_scroll_offset + 10).min(max_scroll);
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::PageDown => {
+                // Scroll down by 10 lines
+                self.output_scroll_offset = self.output_scroll_offset.saturating_sub(10);
+                Ok(EventResponse::Handled)
+            }
             KeyCode::Char(c) => {
                 self.input_buffer.insert(self.cursor_position, c);
                 self.cursor_position += 1;
                 self.history_position = None;
+                // Reset scroll to bottom when typing
+                self.output_scroll_offset = 0;
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),
@@ -565,11 +654,14 @@ impl Panel for TerminalPanel {
 
     fn on_focus(&mut self) {
         self.focused = true;
+        // Reset to input focus when panel gains focus
+        self.output_focused = false;
         debug!("Terminal panel gained focus");
     }
 
     fn on_blur(&mut self) {
         self.focused = false;
+        self.output_focused = false;
         debug!("Terminal panel lost focus");
     }
 }

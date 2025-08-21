@@ -74,21 +74,23 @@ pub struct CodePanel {
 impl CodePanel {
     /// Create a new code panel
     pub fn new() -> Self {
-        // Mock server response - says source is available
+        // Mock server response - for addresses WITH source code
+        // In reality, if has_source_code is true, we show source
+        // If has_source_code is false, we show opcodes
         let display_info = CodeDisplayInfo {
-            has_source_code: true,
+            has_source_code: true, // This address has source code
             preferred_display: CodeMode::Source,
-            opcodes_available: true,
+            opcodes_available: false, // When we have source, we don't show opcodes
             available_files: vec![
                 "contracts/SimpleToken.sol".to_string(),
                 "contracts/interfaces/IERC20.sol".to_string(),
             ],
         };
 
-        Self {
-            mode: display_info.preferred_display, // Use server preference
-            display_info,
-            source_lines: vec![
+        // If we have source code, populate source_lines
+        // Otherwise, populate opcode_lines (but never both!)
+        let source_lines = if display_info.has_source_code {
+            vec![
                 "// SPDX-License-Identifier: MIT".to_string(),
                 "pragma solidity ^0.8.0;".to_string(),
                 "".to_string(),
@@ -102,8 +104,13 @@ impl CodePanel {
                 "        balances[to] += amount;".to_string(),
                 "    }".to_string(),
                 "}".to_string(),
-            ],
-            opcode_lines: vec![
+            ]
+        } else {
+            vec![]
+        };
+
+        let opcode_lines = if !display_info.has_source_code {
+            vec![
                 "000: PUSH1 0x80".to_string(),
                 "002: PUSH1 0x40".to_string(),
                 "004: MSTORE".to_string(),
@@ -115,7 +122,16 @@ impl CodePanel {
                 "012: PUSH1 0x00".to_string(),
                 "014: DUP1".to_string(),
                 "015: REVERT".to_string(),
-            ],
+            ]
+        } else {
+            vec![]
+        };
+
+        Self {
+            mode: display_info.preferred_display, // Use server preference
+            display_info,
+            source_lines,
+            opcode_lines,
             source_paths: vec![
                 "SimpleToken.sol".to_string(),
                 "IERC20.sol".to_string(),
@@ -130,21 +146,11 @@ impl CodePanel {
         }
     }
 
-    /// Toggle between source and opcode display (only if source available)
-    fn toggle_mode(&mut self) {
-        // Only allow toggle if source code is actually available
-        if !self.display_info.has_source_code {
-            // No source code - stuck in opcodes mode
-            self.mode = CodeMode::Opcodes;
-            return;
-        }
-
-        self.mode = match self.mode {
-            CodeMode::Source => CodeMode::Opcodes,
-            CodeMode::Opcodes => CodeMode::Source,
-        };
-        debug!("Switched code panel mode to: {:?}", self.mode);
-    }
+    // REMOVED: toggle_mode function
+    // Source and opcodes are mutually exclusive per address
+    // If has_source_code = true, we show source
+    // If has_source_code = false, we show opcodes
+    // There is no toggling between them
 
     /// Switch to next source path
     fn next_source_path(&mut self) {
@@ -334,10 +340,8 @@ impl Panel for CodePanel {
                 width: area.width - 2,
                 height: 1,
             };
-            let o_toggle =
-                if self.display_info.has_source_code { "O: Toggle mode" } else { "O: (No source)" };
             let help_text =
-                format!("{} • Space: Switch cursor • ↑/↓: Move cursor • B: Breakpoint", o_toggle);
+                "Space: Switch cursor • ↑/↓: Scroll • j/k: Move cursor • B: Breakpoint".to_string();
             let help_paragraph =
                 Paragraph::new(help_text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(help_paragraph, help_area);
@@ -350,10 +354,7 @@ impl Panel for CodePanel {
         }
 
         match event.code {
-            KeyCode::Char('o') | KeyCode::Char('O') => {
-                self.toggle_mode();
-                Ok(EventResponse::Handled)
-            }
+            // 'O' key removed - source/opcodes are mutually exclusive
             KeyCode::Tab => {
                 self.next_source_path();
                 Ok(EventResponse::Handled)
@@ -372,35 +373,13 @@ impl Panel for CodePanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::Up => {
-                // ONLY move user cursor - execution cursor is read-only
-                // Execution cursor can only be moved by debug commands in terminal
-                if self.active_cursor == CursorType::User {
-                    if let Some(line) = self.user_cursor_line {
-                        self.user_cursor_line = Some(line.saturating_sub(1).max(1));
-                    }
-                } else {
-                    // When execution cursor is active, just scroll the view
-                    debug!(
-                        "Execution cursor is read-only - use debug commands in terminal to move"
-                    );
-                }
+                // Arrow keys now ONLY scroll, they don't move cursors
+                // User cursor can be moved with 'j'/'k' keys if needed
                 self.scroll_up();
                 Ok(EventResponse::Handled)
             }
             KeyCode::Down => {
-                // ONLY move user cursor - execution cursor is read-only
-                // Execution cursor can only be moved by debug commands in terminal
-                if self.active_cursor == CursorType::User {
-                    if let Some(line) = self.user_cursor_line {
-                        let max_lines = self.get_display_lines().len();
-                        self.user_cursor_line = Some((line + 1).min(max_lines));
-                    }
-                } else {
-                    // When execution cursor is active, just scroll the view
-                    debug!(
-                        "Execution cursor is read-only - use debug commands in terminal to move"
-                    );
-                }
+                // Arrow keys now ONLY scroll, they don't move cursors
                 self.scroll_down();
                 Ok(EventResponse::Handled)
             }
@@ -423,6 +402,25 @@ impl Panel for CodePanel {
             KeyCode::End => {
                 let max_lines = self.get_display_lines().len();
                 self.scroll_offset = max_lines.saturating_sub(1);
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('j') | KeyCode::Char('J') => {
+                // Move user cursor down (vim-style)
+                if self.active_cursor == CursorType::User {
+                    if let Some(line) = self.user_cursor_line {
+                        let max_lines = self.get_display_lines().len();
+                        self.user_cursor_line = Some((line + 1).min(max_lines));
+                    }
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                // Move user cursor up (vim-style)
+                if self.active_cursor == CursorType::User {
+                    if let Some(line) = self.user_cursor_line {
+                        self.user_cursor_line = Some(line.saturating_sub(1).max(1));
+                    }
+                }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('b') | KeyCode::Char('B') => {
