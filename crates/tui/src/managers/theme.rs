@@ -2,7 +2,10 @@
 //!
 //! Provides centralized theme management across all panels with real-time switching.
 
-use crate::{config::{Config, PanelConfig}, ColorScheme, Theme};
+use crate::{
+    config::{Config, PanelConfig},
+    ColorScheme, Theme,
+};
 use eyre::Result;
 use ratatui::style::Color;
 use std::sync::{Arc, RwLock};
@@ -26,7 +29,7 @@ impl ThemeManager {
         if let Some(theme) = self.config.get_active_theme() {
             theme.clone().into()
         } else {
-            Theme::default().into()
+            ColorScheme::default()
         }
     }
 
@@ -40,7 +43,9 @@ impl ThemeManager {
         self.config
             .list_themes()
             .into_iter()
-            .map(|(name, theme)| (name.clone(), theme.name().to_string(), theme.description().to_string()))
+            .map(|(name, theme)| {
+                (name.clone(), theme.display_name().to_string(), theme.description().to_string())
+            })
             .collect()
     }
 

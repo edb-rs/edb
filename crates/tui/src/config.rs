@@ -86,9 +86,8 @@ impl Default for Config {
 
 impl Default for ThemeConfig {
     fn default() -> Self {
-        let themes = Theme::all().iter()
-            .map(|theme| (theme.name().to_string(), theme.clone()))
-            .collect();
+        let themes =
+            Theme::all().iter().map(|theme| (theme.name().to_string(), theme.clone())).collect();
 
         Self { active: Theme::default().name().to_string(), themes }
     }

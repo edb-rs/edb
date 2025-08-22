@@ -16,7 +16,6 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
-use revm::handler::execution;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
@@ -244,9 +243,7 @@ impl CodePanel {
         let line_num_text = format!("{:>width$} ", line_num, width = line_num_width);
         let line_num_span = Span::styled(
             line_num_text,
-            Style::default()
-                .fg(self.color_scheme.line_number)
-                .bg(self.color_scheme.line_number_bg),
+            Style::default().fg(self.color_scheme.line_number).bg(self.color_scheme.line_number_bg),
         );
 
         // Tokenize the line for syntax highlighting
@@ -514,7 +511,7 @@ impl CodePanel {
 
                 // Apply background highlighting for execution/cursor lines
                 let item_style = if is_execution {
-                    Style::default().bg(self.color_scheme.warning_color)
+                    Style::default().bg(self.color_scheme.current_line_bg)
                 } else if is_user_cursor {
                     Style::default().bg(self.color_scheme.highlight_bg)
                 } else {
@@ -866,7 +863,8 @@ impl PanelTr for CodePanel {
     }
 
     async fn fetch_data(&mut self) -> Result<()> {
-        self.color_scheme = self.theme_mgr().get_current_colors();  
+        let color_scheme = self.theme_mgr().get_current_colors();
+        self.color_scheme = color_scheme;
         Ok(())
     }
 }

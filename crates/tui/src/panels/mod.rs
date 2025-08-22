@@ -2,7 +2,10 @@
 //!
 //! This module contains the panel trait and all panel implementations.
 
-use crate::{managers::{ExecutionManager, ResourceManager, ThemeManager}, ColorScheme};
+use crate::{
+    managers::{ExecutionManager, ResourceManager, ThemeManager},
+    ColorScheme,
+};
 use crossterm::event::{Event, KeyEvent};
 use eyre::Result;
 use ratatui::{layout::Rect, Frame};

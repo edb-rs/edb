@@ -91,7 +91,7 @@ pub struct TerminalPanel {
     vim_number_prefix: String,
     /// VIM mode cursor absolute line number in terminal history (1-based, like code panel)
     vim_cursor_line: usize,
-    
+
     // ========== Data ==========
     /// Color Scheme:
     color_scheme: ColorScheme,
@@ -433,9 +433,9 @@ impl TerminalPanel {
         let active_theme = self.theme_mgr().get_active_theme_name();
 
         self.add_output("Available themes:");
-        for (name, display_name, description) in themes {
+        for (name, _display_name, description) in themes {
             let marker = if name == active_theme { "→" } else { " " };
-            self.add_output(&format!("{} {} - {}", marker, display_name, description));
+            self.add_output(&format!("{} {} | {}", marker, name, description));
         }
         self.add_output("");
         self.add_output("Usage:");
@@ -1097,7 +1097,8 @@ impl PanelTr for TerminalPanel {
     }
 
     async fn fetch_data(&mut self) -> Result<()> {
-        self.color_scheme = self.theme_mgr().get_current_colors();
+        let color_scheme = self.theme_mgr().get_current_colors();
+        self.color_scheme = color_scheme;
         Ok(())
     }
 }

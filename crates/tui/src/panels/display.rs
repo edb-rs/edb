@@ -93,7 +93,6 @@ pub struct DisplayPanel {
     /// Whether this panel is focused
     focused: bool,
 
-
     // ========== Data ==========
     /// Mock data for different modes
     variables: Vec<String>,
@@ -417,7 +416,8 @@ impl PanelTr for DisplayPanel {
     }
 
     async fn fetch_data(&mut self) -> Result<()> {
-        self.color_scheme = self.theme_mgr().get_current_colors();
+        let color_scheme = self.theme_mgr().get_current_colors();
+        self.color_scheme = color_scheme;
         Ok(())
     }
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use alloy_primitives::{Address, TxHash};
+use alloy_dyn_abi::abi;
+use alloy_primitives::{Address, Selector, TxHash};
 use edb_common::{types::Trace, ForkInfo};
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
@@ -61,11 +62,30 @@ where
     fn finalize_trace(&mut self) {
         for entry in &mut self.trace {
             let trace_id = entry.id;
+            let calldata = entry.input.as_ref();
+
+            // We first update the snapshot id
             for (snapshot_id, (frame_id, _)) in self.snapshots.iter().enumerate() {
                 if frame_id.trace_entry_id() == trace_id {
                     entry.first_snapshot_id = Some(snapshot_id);
                     break;
                 }
+            }
+
+            // We then try to update the function abi
+            if entry.created_contract {
+                // TODO
+            } else if calldata.len() >= 4 {
+                let address = entry.code_address;
+                let selector = Selector::from_slice(&calldata[..4]);
+
+                entry.function_abi = self
+                    .artifacts
+                    .get(&address)
+                    .and_then(|artifact| artifact.contract())
+                    .and_then(|contract| contract.abi.as_ref())
+                    .and_then(|abi| abi.function_by_selector(selector))
+                    .cloned();
             }
         }
     }
