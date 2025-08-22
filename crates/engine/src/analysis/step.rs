@@ -13,8 +13,8 @@ use foundry_compilers::artifacts::{
     ExpressionOrVariableDeclarationStatement,
     ExpressionStatement,
     FunctionCall,
-    Statement,
-    // SourceUnit,
+    FunctionDefinition,
+    Statement, // SourceUnit,
 };
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -166,7 +166,10 @@ impl Step {
 
 /// The variant types for source steps.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum StepVariant {
+    /// A function entry step.
+    FunctionEntry(FunctionDefinition),
     /// A single statement that is executed in a single debug step.
     Statement(Statement),
     /// A consecutive list of statements that are executed in a single debug step.

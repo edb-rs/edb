@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use eyre::{OptionExt, Result};
 use foundry_compilers::{
     artifacts::{
-        output_selection::OutputSelection, Ast, Node, NodeType, Settings, Source, SourceUnit,
-        Sources,
+        output_selection::OutputSelection, Ast, Node, NodeType, Settings, Severity, Source,
+        SourceFile, SourceUnit, Sources,
     },
     solc::{SolcCompiler, SolcLanguage, SolcSettings, SolcVersionedInput},
-    Compiler, CompilerInput,
+    CompilationError, Compiler, CompilerInput,
 };
 use semver::Version;
 
@@ -27,6 +27,18 @@ pub fn compile_contract_source_to_source_unit(
         SolcVersionedInput::build(sources, settings, SolcLanguage::Solidity, solc_version);
     let compiler = SolcCompiler::AutoDetect;
     let output = compiler.compile(&solc_input)?;
+
+    // return error if compiler error
+    let errors = output
+        .errors
+        .iter()
+        .filter(|e| e.severity() == Severity::Error)
+        .map(|e| format!("{e}"))
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(eyre::eyre!("Compiler error: {}", errors.join("\n")));
+    }
+
     let mut ast = output
         .sources
         .get(&phantom_file_name)
@@ -35,7 +47,8 @@ pub fn compile_contract_source_to_source_unit(
         .clone()
         .expect("AST is not selected as output");
 
-    ASTPruner::convert(&mut ast, prune)
+    let source_unit = ASTPruner::convert(&mut ast, prune)?;
+    Ok(source_unit)
 }
 
 /// We prune the AST to remove or refine nodes that are not strongly related to analysis.

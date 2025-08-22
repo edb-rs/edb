@@ -53,6 +53,19 @@ pub enum VisitorAction {
     SkipSubtree,
 }
 
+impl VisitorAction {
+    /// Execute the given function if the visitor action is `Continue`.
+    pub fn and_then<F, E>(self, f: F) -> Result<Self, E>
+    where
+        F: FnOnce() -> Result<Self, E>,
+    {
+        match self {
+            Self::Continue => f(),
+            _ => Ok(self),
+        }
+    }
+}
+
 /// Trait for implementing AST visitors that can traverse Solidity source code.
 ///
 /// This trait provides methods for visiting each type of AST node in a Solidity

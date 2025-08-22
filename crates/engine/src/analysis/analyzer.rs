@@ -1,16 +1,14 @@
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, Ast, Block, ContractDefinition, EventDefinition, ForStatement,
+    ast::SourceLocation, Block, ContractDefinition, EventDefinition, ForStatement,
     FunctionDefinition, Source, SourceUnit, StateMutability, Statement, UncheckedBlock,
     VariableDeclaration, Visibility,
 };
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::log::*;
 use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
@@ -21,8 +19,6 @@ use crate::{
     new_uvid,
     sloc_ldiff,
     sloc_rdiff,
-    utils::Artifact,
-    ASTPruner,
     VariableRef,
     USID,
     UVID,
@@ -47,8 +43,6 @@ pub struct SourceAnalysis {
     pub id: u32,
     /// File system path to the source file
     pub path: PathBuf,
-    /// Original source content and metadata
-    pub source: Source,
     /// Processed source unit ready for analysis
     pub unit: SourceUnit,
     /// Global variable scope of the source file
@@ -151,11 +145,10 @@ impl SourceAnalysis {
     ///   - balance (visibility: Private)
     /// === End Report ===
     /// ```
-    pub fn pretty_display(&self) {
+    pub fn pretty_display(&self, sources: &BTreeMap<u32, Source>) {
         println!("=== Source Analysis Report ===");
         println!("File ID: {}", self.id);
         println!("Path: {}", self.path.display());
-        println!("Source Content Length: {} characters", self.source.content.len());
         println!();
 
         // Display variable scope information
@@ -175,7 +168,7 @@ impl SourceAnalysis {
             );
 
             // Display source code
-            if let Some(source_code) = self.extract_source_code(&step.src) {
+            if let Some(source_code) = self.extract_source_code(sources, &step.src) {
                 println!("  Source: {}", source_code.trim());
             }
 
@@ -197,6 +190,7 @@ impl SourceAnalysis {
     /// Returns a human-readable name for the step variant.
     fn step_variant_name(&self, variant: &StepVariant) -> String {
         match variant {
+            StepVariant::FunctionEntry(_) => "Function Entry".to_string(),
             StepVariant::Statement(stmt) => self.statement_name(stmt),
             StepVariant::Statements(_) => "Multiple Statements".to_string(),
             StepVariant::IfCondition(_) => "If Condition".to_string(),
@@ -227,23 +221,17 @@ impl SourceAnalysis {
             Statement::WhileStatement(_) => "While".to_string(),
         }
     }
-
-    /// Formats a list of hooks into a human-readable string.
-    fn format_hooks(&self, hooks: &[StepHook]) -> String {
-        hooks.iter().map(|hook| hook.variant_name()).collect::<Vec<_>>().join(", ")
-    }
-
     /// Formats a list of hooks with detailed UVID/USID information.
     fn format_hooks_detailed(&self, hooks: &[StepHook]) -> String {
         hooks
             .iter()
             .map(|hook| match hook {
-                StepHook::BeforeStep(usid) => format!("BeforeStep(USID: {})", usid),
-                StepHook::VariableInScope(uvid) => format!("VariableInScope(UVID: {:?})", uvid),
+                StepHook::BeforeStep(usid) => format!("BeforeStep(USID: {usid})"),
+                StepHook::VariableInScope(uvid) => format!("VariableInScope(UVID: {uvid:?})"),
                 StepHook::VariableOutOfScope(uvid) => {
-                    format!("VariableOutOfScope(UVID: {:?})", uvid)
+                    format!("VariableOutOfScope(UVID: {uvid:?})")
                 }
-                StepHook::VariableUpdate(uvid) => format!("VariableUpdate(UVID: {:?})", uvid),
+                StepHook::VariableUpdate(uvid) => format!("VariableUpdate(UVID: {uvid:?})"),
             })
             .collect::<Vec<_>>()
             .join(", ")
@@ -252,13 +240,19 @@ impl SourceAnalysis {
     /// Extracts the source code for a given source location.
     fn extract_source_code(
         &self,
-        src: &foundry_compilers::artifacts::ast::SourceLocation,
+        sources: &BTreeMap<u32, Source>,
+        src: &SourceLocation,
     ) -> Option<String> {
-        let start = src.start? as usize;
-        let length = src.length? as usize;
+        let start = src.start?;
+        let length = src.length?;
+        let index = src.index?;
 
-        if start + length <= self.source.content.len() {
-            Some(self.source.content[start..start + length].to_string())
+        if let Some(source) = sources.get(&(index as u32)) {
+            if start + length <= source.content.len() {
+                Some(source.content[start..start + length].to_string())
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -300,7 +294,7 @@ impl SourceAnalysis {
                 let mutability = func
                     .state_mutability
                     .as_ref()
-                    .map(|m| format!("{:?}", m))
+                    .map(|m| format!("{m:?}"))
                     .unwrap_or_else(|| "None".to_string());
                 println!("  - {} (mutability: {})", func.name, mutability);
             }
@@ -341,77 +335,57 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    /// Analyzes a compiled Solidity artifact to extract execution steps and variable information.
+    /// Creates a new instance of the Analyzer.
     ///
-    /// This is the main entry point for source code analysis. It processes the compiled
-    /// artifact, walks through the AST of each source file, and extracts detailed
-    /// information about executable steps, variable scopes, and function requirements.
-    ///
-    /// # Arguments
-    ///
-    /// * `artifact` - The compiled Solidity artifact containing source files and AST data
+    /// This method initializes a fresh analyzer with default state, ready to analyze
+    /// Solidity source code.
     ///
     /// # Returns
     ///
-    /// Returns a vector of `SourceAnalysis` results, one for each source file, or an
-    /// `AnalysisError` if the analysis fails.
+    /// A new `Analyzer` instance with empty scope stack and step collections.
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Analyzes a source unit and returns the analysis results.
+    ///
+    /// This method walks through the AST of the source unit, identifies execution steps,
+    /// manages variable scopes, and collects recommendations for code improvements.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_id` - Unique identifier for the source file
+    /// * `source_path` - File system path to the source file
+    /// * `source_unit` - The source unit to analyze
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the `SourceAnalysis` on success, or an `AnalysisError` on failure.
     ///
     /// # Errors
     ///
-    /// This function can return the following errors:
-    /// - `AnalysisError::MissingAst`: When AST data is not available in the artifact
-    /// - `AnalysisError::ASTConversionError`: When AST conversion fails
-    /// - `AnalysisError::StepPartitionError`: When step partitioning fails
-    /// - `AnalysisError::Other`: For other analysis-related errors
-    pub fn analyze(artifact: &Artifact) -> Result<Vec<SourceAnalysis>, AnalysisError> {
-        let _begin_at = Instant::now();
-        let _input_sources = &artifact.input.sources;
-        let output_sources = &artifact.output.sources;
-        debug!(files = output_sources.len(), "Analyzing sources");
-
-        let start_ast = Instant::now();
-        let asts = output_sources
-            .par_iter()
-            .map(|(path, source)| {
-                let mut ast = source.ast.clone().ok_or(AnalysisError::MissingAst)?;
-                let unit = ASTPruner::convert(&mut ast, false)
-                    .map_err(AnalysisError::ASTConversionError)?;
-                Ok::<(PathBuf, usize, SourceUnit), AnalysisError>((
-                    path.clone(),
-                    source.id as usize,
-                    unit,
-                ))
-            })
-            .collect::<Result<Vec<_>, AnalysisError>>()?;
-        trace!(asts = asts.len(), time = ?start_ast.elapsed(), "Converted to typed ASTs");
-
-        let results = asts
-            .into_par_iter()
-            .map(|(path, id, unit)| {
-                let mut analyzer = Self::new();
-                unit.walk(&mut analyzer).map_err(AnalysisError::Other)?;
-                let global_scope =
-                    analyzer.scope_stack.pop().expect("global scope should not be empty");
-                let steps = analyzer.finished_steps.into_iter().map(Arc::new).collect();
-                Ok(SourceAnalysis {
-                    id: id as u32,
-                    source: artifact.input.sources[&path].clone(),
-                    path,
-                    unit,
-                    global_scope,
-                    steps,
-                    private_state_variables: analyzer.private_state_variables,
-                    private_functions: analyzer.private_functions,
-                    immutable_functions: analyzer.immutable_functions,
-                })
-            })
-            .collect::<Result<Vec<_>, AnalysisError>>()?;
-
-        Ok(results)
-    }
-
-    fn new() -> Self {
-        Default::default()
+    /// Returns an error if the AST walk fails or if there are issues with step partitioning.
+    pub fn analyze(
+        mut self,
+        source_id: u32,
+        source_path: &PathBuf,
+        source_unit: &SourceUnit,
+    ) -> Result<SourceAnalysis, AnalysisError> {
+        source_unit.walk(&mut self).map_err(AnalysisError::Other)?;
+        assert!(self.scope_stack.len() == 1, "scope stack should have exactly one scope");
+        assert!(self.current_step.is_none(), "current step should be none");
+        let global_scope = self.scope_stack.pop().expect("global scope should not be empty");
+        let steps = self.finished_steps.into_iter().map(Arc::new).collect();
+        Ok(SourceAnalysis {
+            id: source_id,
+            path: source_path.clone(),
+            unit: source_unit.clone(),
+            global_scope,
+            steps,
+            private_state_variables: self.private_state_variables,
+            private_functions: self.private_functions,
+            immutable_functions: self.immutable_functions,
+        })
     }
 }
 
@@ -428,6 +402,11 @@ impl Analyzer {
     }
 
     fn declare_variable(&mut self, declaration: &VariableDeclaration) -> eyre::Result<()> {
+        if declaration.name.is_empty() {
+            // if a variable has no name, we skip the variable declaration
+            return Ok(());
+        }
+
         // add a new variable to the current scope
         let scope = self.current_scope();
         let uvid = new_uvid();
@@ -467,9 +446,7 @@ impl Analyzer {
 
 /* Step partition utils */
 impl Analyzer {
-    // TODO: function entry should be a step.
-    // TODO: unnamed function return value should be excluded from variable scope.
-    fn enter_new_step(&mut self, statement: &Statement) -> eyre::Result<VisitorAction> {
+    fn enter_new_statement_step(&mut self, statement: &Statement) -> eyre::Result<VisitorAction> {
         assert!(self.current_step.is_none(), "Step cannot be nested");
 
         macro_rules! step {
@@ -519,7 +496,7 @@ impl Analyzer {
                 }
 
                 // end the for statement step early and then walk the body of the for statement.
-                self.exit_current_step(statement)?;
+                self.exit_current_statement_step(statement)?;
                 for_statement.body.walk(self)?;
 
                 // skip the subtree of the for statement since we have already walked it
@@ -535,7 +512,7 @@ impl Analyzer {
                 if_statement.condition.walk(&mut single_step_walker)?;
 
                 // end the if statement step early and then walk the true and false body of the if statement.
-                self.exit_current_step(statement)?;
+                self.exit_current_statement_step(statement)?;
                 if_statement.true_body.walk(self)?;
                 if let Some(false_body) = &if_statement.false_body {
                     false_body.walk(self)?;
@@ -559,7 +536,7 @@ impl Analyzer {
                 try_statement.external_call.walk(&mut single_step_walker)?;
 
                 // end the try statement step early and then walk the clauses of the try statement.
-                self.exit_current_step(statement)?;
+                self.exit_current_statement_step(statement)?;
                 for clause in &try_statement.clauses {
                     clause.block.walk(self)?;
                 }
@@ -581,7 +558,7 @@ impl Analyzer {
                 while_statement.condition.walk(&mut single_step_walker)?;
 
                 // end the while statement step early and then walk the body of the while statement.
-                self.exit_current_step(statement)?;
+                self.exit_current_statement_step(statement)?;
                 while_statement.body.walk(self)?;
 
                 // skip the subtree of the while statement since we have already walked it
@@ -591,7 +568,37 @@ impl Analyzer {
         Ok(VisitorAction::Continue)
     }
 
-    fn exit_current_step(&mut self, statement: &Statement) -> eyre::Result<()> {
+    fn enter_new_function_step(
+        &mut self,
+        function: &FunctionDefinition,
+    ) -> eyre::Result<VisitorAction> {
+        assert!(self.current_step.is_none(), "Step cannot be nested");
+
+        if function.body.is_none() {
+            // if a function has no body, we skip the function step
+            return Ok(VisitorAction::SkipSubtree);
+        }
+
+        self.current_step =
+            Some(Step::new(StepVariant::FunctionEntry(function.clone()), function.src));
+
+        // we take over the walk of the sub ast tree in the function step.
+        let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
+        function.parameters.walk(&mut single_step_walker)?;
+        function.return_parameters.walk(&mut single_step_walker)?;
+
+        // end the function step early and then walk the body of the function.
+        let step = self.current_step.take().unwrap();
+        self.finished_steps.push(step);
+        if let Some(body) = &function.body {
+            body.walk(self)?;
+        }
+
+        // skip the subtree of the function since we have already walked it
+        Ok(VisitorAction::SkipSubtree)
+    }
+
+    fn exit_current_statement_step(&mut self, statement: &Statement) -> eyre::Result<()> {
         if self.current_step.is_none() {
             return Ok(());
         }
@@ -698,7 +705,9 @@ impl Visitor for Analyzer {
 
         // enter a variable scope for the function
         self.enter_new_scope(ScopeNode::FunctionDefinition(definition.clone()))?;
-        Ok(VisitorAction::Continue)
+
+        // enter a function step
+        self.enter_new_function_step(definition)
     }
 
     fn post_visit_function_definition(
@@ -751,13 +760,12 @@ impl Visitor for Analyzer {
 
     fn visit_statement(&mut self, _statement: &Statement) -> eyre::Result<VisitorAction> {
         // try to enter a new step
-        self.enter_new_step(_statement)?;
-        Ok(VisitorAction::Continue)
+        self.enter_new_statement_step(_statement)
     }
 
     fn post_visit_statement(&mut self, _statement: &Statement) -> eyre::Result<()> {
         // exit the current step
-        self.exit_current_step(_statement)?;
+        self.exit_current_statement_step(_statement)?;
         Ok(())
     }
 
@@ -822,399 +830,187 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_analyze() {
-        // Create a Solidity contract with a function containing three sequential simple statements
-        let source = r#"
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+    const TEST_CONTRACT_SOURCE_PATH: &str = "test.sol";
+    const TEST_CONTRACT_SOURCE_ID: u32 = 0;
 
+    /// Utility function to compile Solidity source code and analyze it
+    ///
+    /// This function encapsulates the common pattern used across all tests:
+    /// 1. Compile the source code to get the AST
+    /// 2. Create an analyzer and analyze the contract
+    /// 3. Return the analysis result
+    ///
+    /// # Arguments
+    /// * `source` - The Solidity source code as a string
+    ///
+    /// # Returns
+    /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
+    fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
+        // Compile the source code to get the AST
+        let version = Version::parse("0.8.19").unwrap();
+        let result = compile_contract_source_to_source_unit(version, source, false);
+        assert!(result.is_ok(), "Source compilation should succeed: {}", result.unwrap_err());
+
+        let source_unit = result.unwrap();
+        let sources = BTreeMap::from([(TEST_CONTRACT_SOURCE_ID, Source::new(source))]);
+
+        // Create an analyzer and analyze the contract
+        let analyzer = Analyzer::new();
+        let analysis = analyzer
+            .analyze(
+                TEST_CONTRACT_SOURCE_ID,
+                &PathBuf::from(TEST_CONTRACT_SOURCE_PATH),
+                &source_unit,
+            )
+            .unwrap();
+
+        (sources, analysis)
+    }
+
+    macro_rules! count_step_by_variant {
+        ($analysis:expr, $variant:ident()) => {
+            $analysis.steps.iter().filter(|s| matches!(s.variant, StepVariant::$variant(_))).count()
+        };
+
+        ($analysis:expr, $variant:ident{}) => {
+            $analysis
+                .steps
+                .iter()
+                .filter(|s| matches!(s.variant, StepVariant::$variant { .. }))
+                .count()
+        };
+    }
+
+    #[test]
+    fn test_function_step() {
+        // Create a simple contract with a function to test function step extraction
+        let source = r#"
+abstract contract TestContract {
+    function setValue(uint256 newValue) public {}
+
+    function getValue() public view returns (uint256) {
+        return 0;
+    }
+
+    function getBalance() public view returns (uint256 balance) {}
+
+    function template() public virtual returns (uint256);
+}
+"#;
+
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        // Assert all non-empty functions are present as steps
+        assert!(count_step_by_variant!(analysis, FunctionEntry()) == 3);
+    }
+
+    #[test]
+    fn test_statement_step() {
+        // Create a simple contract with a function to test statement step extraction
+        let source = r#"
 contract TestContract {
-    uint256 public value;
-
-    function testFunction() public {
-        uint256 a = 1;
-        uint256 b = 2;
-        value = a + b;
+    function getValue() public view returns (uint256) {
+        uint256 value = 0;
+        return 0;
     }
 }
 "#;
 
-        // Compile the source code to get the AST
-        let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source, false);
-        assert!(result.is_ok(), "Compilation should succeed");
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
+        analysis.pretty_display(&_sources);
 
-        let source_unit = result.unwrap();
-
-        // Create an analyzer and walk through the AST
-        let mut analyzer = Analyzer::new();
-        let walk_result = source_unit.walk(&mut analyzer);
-        assert!(walk_result.is_ok(), "AST walk should succeed");
-
-        // Verify that the scope stack is properly managed
-        // After walking the entire AST, we should have exactly one scope left (the global scope)
-        assert_eq!(
-            analyzer.scope_stack.len(),
-            1,
-            "Should have exactly one scope (global scope) after analysis"
-        );
-
-        // Verify that we have finished steps
-        assert!(!analyzer.finished_steps.is_empty(), "Should have analyzed some steps");
-
-        // Verify that the current step is None (all steps should be finished)
-        assert!(analyzer.current_step.is_none(), "Current step should be None after analysis");
-
-        // Get the global scope and verify it contains the expected structure
-        let global_scope = analyzer.scope_stack.last().expect("Global scope should exist");
-
-        // Verify that the global scope has children (contract definition)
-        assert!(
-            !global_scope.children.is_empty(),
-            "Global scope should have contract definition as child"
-        );
-
-        // Verify that the global scope has children (contract definition)
-        assert!(
-            !global_scope.children.is_empty(),
-            "Global scope should have contract definition as child"
-        );
-
-        // Get the contract scope and verify it contains the state variable
-        let contract_scope = &global_scope.children[0];
-        assert!(
-            !contract_scope.variables.is_empty(),
-            "Contract scope should contain state variables"
-        );
-
-        // Check that we have the expected number of variables in the contract scope
-        let contract_variables = contract_scope.variables.len();
-        assert!(contract_variables >= 1, "Should have at least the state variable 'value'");
-
-        // Verify that the finished steps contain the expected step types
-        // We should have steps for the variable declarations and the assignment
-        let step_count = analyzer.finished_steps.len();
-        assert!(
-            step_count >= 3,
-            "Should have at least 3 steps (2 variable declarations + 1 assignment)"
-        );
-
-        // Verify that each step has the expected structure
-        for step in &analyzer.finished_steps {
-            assert!(!step.pre_hooks.is_empty(), "Each step should have pre-hooks");
-
-            // Verify the step variant is appropriate
-            match &step.variant {
-                StepVariant::Statement(stmt) => {
-                    // Should be variable declaration statements or expression statements
-                    match stmt {
-                        Statement::VariableDeclarationStatement(_) => {
-                            // Variable declaration should have variable in scope hook
-                            assert!(
-                                step.post_hooks
-                                    .iter()
-                                    .any(|hook| matches!(hook, StepHook::VariableInScope(_))),
-                                "Variable declaration should have VariableInScope hook"
-                            );
-                        }
-                        Statement::ExpressionStatement(_) => {
-                            // Expression statement (assignment) should not have variable hooks
-                            assert!(
-                                !step
-                                    .post_hooks
-                                    .iter()
-                                    .any(|hook| matches!(hook, StepHook::VariableInScope(_))),
-                                "Expression statement should not have VariableInScope hook"
-                            );
-                        }
-                        _ => {
-                            // Other statement types are acceptable
-                        }
-                    }
-                }
-                _ => {
-                    // Other step variants are acceptable
-                }
-            }
-        }
-
-        // Verify that the source location information is valid
-        for step in &analyzer.finished_steps {
-            assert!(step.src.start.is_some(), "Step should have start location");
-            assert!(step.src.length.is_some(), "Step should have length");
-            assert!(step.src.start.unwrap() > 0, "Step start should be positive");
-            assert!(step.src.length.unwrap() > 0, "Step length should be positive");
-        }
-
-        // Verify that all USIDs are unique
-        let usids: std::collections::HashSet<USID> =
-            analyzer.finished_steps.iter().map(|s| s.usid).collect();
-        assert_eq!(usids.len(), analyzer.finished_steps.len(), "All USIDs should be unique");
-
-        // Verify that the scope hierarchy is properly structured
-        assert!(
-            !contract_scope.children.is_empty(),
-            "Contract scope should have function as child"
-        );
-
-        // Verify that the function scope contains local variables
-        let function_scope = &contract_scope.children[0];
-        assert!(
-            !function_scope.variables.is_empty(),
-            "Function scope should contain local variables"
-        );
-
-        // Count total variables across all scopes
-        fn count_variables(scope: &VariableScope) -> usize {
-            let mut count = scope.variables.len();
-            for child in &scope.children {
-                count += count_variables(child);
-            }
-            count
-        }
-        let total_vars = count_variables(global_scope);
-        assert!(total_vars >= 3, "Should have at least 3 variables total (1 state + 2 local)");
+        // Assert that we have two statement steps
+        assert!(count_step_by_variant!(analysis, Statement()) == 2);
     }
 
     #[test]
-    fn test_analyze_complex_contract() {
-        // Create a moderately complex Solidity contract to test the analyzer
+    fn test_if_step() {
+        // Create a simple contract with a function to test if statement extraction
         let source = r#"
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract ComplexContract {
-    uint256 public totalSupply;
-    mapping(address => uint256) public balances;
-    address public owner;
-
-    event Transfer(address indexed from, address indexed to, uint256 value);
-
-    constructor(uint256 _initialSupply) {
-        totalSupply = _initialSupply;
-        balances[msg.sender] = _initialSupply;
-        owner = msg.sender;
-    }
-
-    function transfer(address to, uint256 amount) public returns (bool) {
-        require(to != address(0), "Transfer to zero address");
-        require(balances[msg.sender] >= amount, "Insufficient balance");
-
-        uint balance = balances[msg.sender];
-        balances[msg.sender] = balance - amount;
-        balances[to] += amount;
-
-        emit Transfer(msg.sender, to, amount);
-        return true;
-    }
-
-    function approve(address spender, uint256 amount) public returns (bool) {
-        if (spender == address(0)) {
-            revert("Approve to zero address");
+contract TestContract {
+    function getValue() public view returns (uint256) {
+        if (true) {
+            return 0;
+        } else {
+            return 1;
         }
-        return true;
-    }
-
-    function getBalance(address account) public view returns (uint256) {
-        return balances[account];
     }
 }
 "#;
 
-        // Compile the source code to get the AST
-        let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source, false);
-        assert!(result.is_ok(), "Complex contract compilation should succeed");
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
 
-        let source_unit = result.unwrap();
-
-        // Create an analyzer and walk through the AST
-        let mut analyzer = Analyzer::new();
-        let walk_result = source_unit.walk(&mut analyzer);
-        assert!(walk_result.is_ok(), "Complex contract AST walk should succeed");
-
-        // Verify scope management
-        assert_eq!(
-            analyzer.scope_stack.len(),
-            1,
-            "Should have exactly one scope (global scope) after analysis"
-        );
-
-        // Verify that we have finished steps due to the contract logic
-        assert!(
-            analyzer.finished_steps.len() >= 10,
-            "Complex contract should have multiple steps, got {}",
-            analyzer.finished_steps.len()
-        );
-
-        // Verify that the current step is None (all steps should be finished)
-        assert!(analyzer.current_step.is_none(), "Current step should be None after analysis");
-
-        // Get the global scope and verify it contains the expected structure
-        let global_scope = analyzer.scope_stack.last().expect("Global scope should exist");
-
-        // Verify that the global scope has children (contract definition)
-        assert!(
-            !global_scope.children.is_empty(),
-            "Global scope should have contract definition as child"
-        );
-
-        // Get the contract scope and verify it contains state variables
-        let contract_scope = &global_scope.children[0];
-
-        // The contract should have several state variables
-        let state_variables = contract_scope.variables.len();
-        assert!(
-            state_variables >= 3,
-            "Should have at least 3 state variables (totalSupply, balances, owner), got {}",
-            state_variables
-        );
-
-        // Verify that we have function scopes as children of contract scope
-        assert!(
-            contract_scope.children.len() >= 4,
-            "Contract should have multiple function scopes, got {}",
-            contract_scope.children.len()
-        );
-
-        // Count total variables across all scopes
-        fn count_variables_recursive(scope: &VariableScope) -> usize {
-            let mut count = scope.variables.len();
-            for child in &scope.children {
-                count += count_variables_recursive(child);
-            }
-            count
-        }
-
-        let total_vars = count_variables_recursive(global_scope);
-
-        assert!(
-            total_vars >= 13,
-            "Complex contract should have at least 13 variables across all scopes, got {}",
-            total_vars
-        );
-
-        // Verify that we have different types of steps
-        let mut statement_steps = 0;
-        let mut statements_steps = 0;
-        let mut condition_steps = 0;
-        let mut loop_steps = 0;
-
-        for step in &analyzer.finished_steps {
-            match &step.variant {
-                StepVariant::Statement(_) => statement_steps += 1,
-                StepVariant::Statements(_) => statements_steps += 1,
-                StepVariant::IfCondition(_) => condition_steps += 1,
-                StepVariant::ForLoop { .. } => loop_steps += 1,
-                StepVariant::WhileLoop(_) => loop_steps += 1,
-                StepVariant::Try(_) => condition_steps += 1,
-            }
-        }
-
-        assert!(statement_steps > 0, "Should have statement steps");
-        // Note: Other step types might be 0 depending on the contract complexity
-
-        // Verify that steps have proper hooks
-        let mut steps_with_pre_hooks = 0;
-        let mut steps_with_post_hooks = 0;
-
-        for step in &analyzer.finished_steps {
-            if !step.pre_hooks.is_empty() {
-                steps_with_pre_hooks += 1;
-            }
-            if !step.post_hooks.is_empty() {
-                steps_with_post_hooks += 1;
-            }
-        }
-
-        assert!(steps_with_pre_hooks > 0, "Should have steps with pre-hooks");
-
-        // Verify that we identified functions that should be made public
-        // (private functions in the contract)
-        println!("Private functions to be made public: {}", analyzer.private_functions.len());
-
-        // Verify that we identified state variables that should be made public
-        println!(
-            "Private state variables to be made public: {}",
-            analyzer.private_state_variables.len()
-        );
-
-        // Verify that we identified functions that should be made mutable
-        println!("Immutable functions to be made mutable: {}", analyzer.immutable_functions.len());
-
-        println!("Analysis completed successfully for complex contract:");
-        println!("  - Total steps: {}", analyzer.finished_steps.len());
-        println!("  - Total variables: {}", total_vars);
-        println!("  - Statement steps: {}", statement_steps);
-        println!("  - Statements steps: {}", statements_steps);
-        println!("  - Condition steps: {}", condition_steps);
-        println!("  - Loop steps: {}", loop_steps);
-        println!("  - Steps with pre-hooks: {}", steps_with_pre_hooks);
-        println!("  - Steps with post-hooks: {}", steps_with_post_hooks);
-
-        // pretty display the analyzer
-        let analysis = SourceAnalysis {
-            id: 0,
-            path: PathBuf::from("test.sol"),
-            source: Source::new(source.to_string()),
-            unit: source_unit,
-            global_scope: analyzer.scope_stack.pop().expect("global scope should exist"),
-            steps: analyzer.finished_steps.into_iter().map(Arc::new).collect(),
-            private_state_variables: analyzer.private_state_variables,
-            private_functions: analyzer.private_functions,
-            immutable_functions: analyzer.immutable_functions,
-        };
-
-        analysis.pretty_display();
+        // Assert that we have one if step, and two statement steps
+        assert!(count_step_by_variant!(analysis, IfCondition()) == 1);
+        assert!(count_step_by_variant!(analysis, Statement()) == 2);
     }
 
     #[test]
-    fn test_pretty_display() {
-        // Create a simple Solidity contract to test pretty_display
+    fn test_for_step() {
+        // Create a simple contract with a function to test for statement extraction
         let source = r#"
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
-
-contract SimpleContract {
-    uint256 private balance;
-
-    function deposit(uint256 amount) public {
-        balance += amount;
-    }
-
-    function getBalance() public view returns (uint256 _balance) {
-        return balance;
+contract TestContract {
+    function getValue() public view returns (uint256) {
+        for (uint256 i = 0; i < 10; i++) {
+            return 0;
+        }
     }
 }
 "#;
 
-        // Compile the source code to get the AST
-        let version = Version::parse("0.8.19").unwrap();
-        let result = compile_contract_source_to_source_unit(version, source, false);
-        assert!(result.is_ok(), "Simple contract compilation should succeed");
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
 
-        let source_unit = result.unwrap();
+        // Assert that we have one for step, and one statement step
+        assert!(count_step_by_variant!(analysis, ForLoop {}) == 1);
+        assert!(count_step_by_variant!(analysis, Statement()) == 1);
+    }
 
-        // Create an analyzer and walk through the AST
-        let mut analyzer = Analyzer::new();
-        let walk_result = source_unit.walk(&mut analyzer);
-        assert!(walk_result.is_ok(), "Simple contract AST walk should succeed");
+    #[test]
+    fn test_while_step() {
+        // Create a simple contract with a function to test while statement extraction
+        let source = r#"
+contract TestContract {
+    function getValue() public view returns (uint256) {
+        while (true) {
+            return 0;
 
-        // Create a minimal SourceAnalysis instance for testing
-        let source_analysis = SourceAnalysis {
-            id: 1,
-            path: PathBuf::from("test.sol"),
-            source: Source::new(source.to_string()),
-            unit: source_unit,
-            global_scope: analyzer.scope_stack.pop().expect("global scope should exist"),
-            steps: analyzer.finished_steps.into_iter().map(Arc::new).collect(),
-            private_state_variables: analyzer.private_state_variables,
-            private_functions: analyzer.private_functions,
-            immutable_functions: analyzer.immutable_functions,
-        };
+        }
+    }
+}
+"#;
 
-        // Test that pretty_display doesn't panic
-        source_analysis.pretty_display();
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        // Assert that we have one while step, and one statement step
+        assert!(count_step_by_variant!(analysis, WhileLoop()) == 1);
+        assert!(count_step_by_variant!(analysis, Statement()) == 1);
+    }
+
+    #[test]
+    fn test_try_step() {
+        // Create a simple contract with a function to test try statement extraction
+        let source = r#"
+contract TestContract {
+    function getValue() public view returns (uint256) {
+        try this.getValue() {
+            revert();
+        } catch {
+            return 1;
+        }
+    }
+}
+"#;
+
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        // Assert that we have one try step, and two statement steps
+        assert!(count_step_by_variant!(analysis, Try()) == 1);
+        assert!(count_step_by_variant!(analysis, Statement()) == 2);
     }
 }

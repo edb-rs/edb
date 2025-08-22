@@ -41,20 +41,14 @@
 //! }
 //! ```
 
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::warn;
 
 use crate::{
     analysis::{AnalysisError, Analyzer, SourceAnalysis, StepRef},
-    // utils::ASTPruner,
-    // AnnotationsToChange,
-    Artifact,
-    // StepHook,
-    VariableRef,
-    USID,
-    UVID,
+    ASTPruner, Artifact, VariableRef, USID, UVID,
 };
 
 /// Main analysis result containing debugging information from source code analysis.
@@ -144,10 +138,19 @@ pub struct AnalysisResult {
 /// This function can return the following errors:
 /// - `AnalysisError::StepPartitionError`: When step partitioning fails
 pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
-    let source_results = Analyzer::analyze(artifact)?;
-    let source_results = source_results
-        .into_par_iter()
-        .map(|mut source_result| {
+    let source_results: Vec<SourceAnalysis> = artifact
+        .output
+        .sources
+        .par_iter()
+        .map(|(path, source_result)| {
+            let source_id = source_result.id;
+            let mut source_ast = source_result.ast.clone().ok_or(AnalysisError::MissingAst)?;
+            let source_unit = ASTPruner::convert(&mut source_ast, false)
+                .map_err(AnalysisError::ASTConversionError)?;
+
+            let analyzer = Analyzer::new();
+            let mut source_result = analyzer.analyze(source_id, path, &source_unit)?;
+
             // sort steps in reverse order
             source_result.steps.sort_unstable_by_key(|step| step.src.start);
             source_result.steps.reverse();
@@ -170,9 +173,9 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
                 }
             }
 
-            source_result
+            Ok(source_result)
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, AnalysisError>>()?;
 
     // build lookup tables
     let mut usid_to_step = HashMap::new();
