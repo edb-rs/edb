@@ -4,6 +4,7 @@
 //! including multiple professional themes and semantic color mapping.
 
 use ratatui::style::Color;
+use serde::{Deserialize, Serialize};
 
 /// Semantic color mapping for consistent theming
 #[derive(Debug, Clone)]
@@ -50,7 +51,7 @@ pub struct ColorScheme {
 }
 
 /// Available themes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq,  Serialize, Deserialize)]
 pub enum Theme {
     /// Dark cyberpunk theme with purples and neon colors
     CyberpunkDark,
@@ -62,14 +63,30 @@ pub enum Theme {
     HighContrast,
 }
 
+impl Default for Theme {
+    fn default() -> Self {
+        Theme::CyberpunkDark
+    }
+}
+
 impl Theme {
     /// Get all available themes
     pub fn all() -> &'static [Theme] {
         &[Theme::CyberpunkDark, Theme::TerminalHacker, Theme::ModernIDE, Theme::HighContrast]
     }
 
-    /// Get theme name for display
+    /// Get name for display (short and lowercases)
     pub fn name(&self) -> &'static str {
+        match self {
+            Theme::CyberpunkDark => "cyberpunk_dark",
+            Theme::TerminalHacker => "terminal_hacker",
+            Theme::ModernIDE => "modern_ide",
+            Theme::HighContrast => "high_contrast",
+        }
+    }
+
+    /// Get theme description for display
+    pub fn description(&self) -> &'static str {
         match self {
             Theme::CyberpunkDark => "Cyberpunk Dark",
             Theme::TerminalHacker => "Terminal Hacker",

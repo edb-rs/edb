@@ -7,6 +7,7 @@ use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{BreakpointStatus, FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType, TokenStyle};
+use crate::ColorScheme;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -57,18 +58,7 @@ pub struct CodeDisplayInfo {
 /// Code panel implementation (stub)
 #[derive(Debug)]
 pub struct CodePanel {
-    /// Current code display mode (respects server preferences)
-    mode: CodeMode,
-    /// Server-provided display information
-    display_info: CodeDisplayInfo,
-    /// Mock source code lines
-    source_lines: Vec<String>,
-    /// Mock opcode lines
-    opcode_lines: Vec<String>,
-    /// Available source paths
-    source_paths: Vec<String>,
-    /// Currently selected source path index
-    selected_path_index: usize,
+    // ========== Display ==========
     /// Current execution line (server-controlled, 1-based)
     current_execution_line: Option<usize>,
     /// User cursor line (user-controlled for breakpoints, 1-based)
@@ -89,14 +79,32 @@ pub struct CodePanel {
     file_selector_height_percent: u16,
     /// Content height for the current panel
     context_height: usize,
+    /// Syntax highlighter for code
+    syntax_highlighter: SyntaxHighlighter,
+
+    // ========== Data ==========
+    /// Current code display mode (respects server preferences)
+    mode: CodeMode,
+    /// Server-provided display information
+    display_info: CodeDisplayInfo,
+    /// Mock source code lines
+    source_lines: Vec<String>,
+    /// Mock opcode lines
+    opcode_lines: Vec<String>,
+    /// Available source paths
+    source_paths: Vec<String>,
+    /// Currently selected source path index
+    selected_path_index: usize,
+    /// Color Scheme:
+    color_scheme: ColorScheme,
+
+    // ========== Managers ==========
     /// Shared execution state manager
     execution_manager: Arc<RwLock<ExecutionManager>>,
     /// Shared resource manager
     resource_manager: Arc<RwLock<ResourceManager>>,
     /// Theme manager for styling
     theme_manager: Arc<RwLock<ThemeManager>>,
-    /// Syntax highlighter for code
-    syntax_highlighter: SyntaxHighlighter,
 }
 
 impl CodePanel {
@@ -201,6 +209,7 @@ impl CodePanel {
             execution_manager,
             resource_manager,
             theme_manager,
+            color_scheme: ColorScheme::default(),
             syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
@@ -236,8 +245,8 @@ impl CodePanel {
         let line_num_span = Span::styled(
             line_num_text,
             Style::default()
-                .fg(self.theme_mgr().line_number_color())
-                .bg(self.theme_mgr().line_number_bg_color()),
+                .fg(self.color_scheme.line_number)
+                .bg(self.color_scheme.line_number_bg),
         );
 
         // Tokenize the line for syntax highlighting
@@ -279,20 +288,20 @@ impl CodePanel {
     /// Convert TokenStyle to ratatui Style using theme colors
     fn get_token_style(&self, token_style: TokenStyle) -> Style {
         let color = match token_style {
-            TokenStyle::Keyword => self.theme_mgr().syntax_keyword_color(),
-            TokenStyle::Type => self.theme_mgr().syntax_type_color(),
-            TokenStyle::String => self.theme_mgr().syntax_string_color(),
-            TokenStyle::Number => self.theme_mgr().syntax_number_color(),
-            TokenStyle::Comment => self.theme_mgr().syntax_comment_color(),
-            TokenStyle::Identifier => self.theme_mgr().syntax_identifier_color(),
-            TokenStyle::Operator => self.theme_mgr().syntax_operator_color(),
-            TokenStyle::Punctuation => self.theme_mgr().syntax_punctuation_color(),
-            TokenStyle::Address => self.theme_mgr().syntax_address_color(),
-            TokenStyle::Pragma => self.theme_mgr().syntax_pragma_color(),
+            TokenStyle::Keyword => self.color_scheme.syntax_keyword_color,
+            TokenStyle::Type => self.color_scheme.syntax_type_color,
+            TokenStyle::String => self.color_scheme.syntax_string_color,
+            TokenStyle::Number => self.color_scheme.syntax_number_color,
+            TokenStyle::Comment => self.color_scheme.syntax_comment_color,
+            TokenStyle::Identifier => self.color_scheme.syntax_identifier_color,
+            TokenStyle::Operator => self.color_scheme.syntax_operator_color,
+            TokenStyle::Punctuation => self.color_scheme.syntax_punctuation_color,
+            TokenStyle::Address => self.color_scheme.syntax_address_color,
+            TokenStyle::Pragma => self.color_scheme.syntax_pragma_color,
             TokenStyle::Opcode
             | TokenStyle::OpcodeNumber
             | TokenStyle::OpcodeAddress
-            | TokenStyle::OpcodeData => self.theme_mgr().syntax_opcode_color(),
+            | TokenStyle::OpcodeData => self.color_scheme.syntax_opcode_color,
             TokenStyle::Default => Color::Reset,
         };
 
@@ -402,10 +411,10 @@ impl CodePanel {
 
                 let style = if display_idx == self.file_selector_index {
                     Style::default()
-                        .bg(self.theme_mgr().selected_bg_color())
-                        .fg(self.theme_mgr().selected_fg_color())
+                        .bg(self.color_scheme.selection_bg)
+                        .fg(self.color_scheme.selection_fg)
                 } else if file_info.has_execution {
-                    Style::default().fg(self.theme_mgr().warning_color()) // Highlight files with current execution
+                    Style::default().fg(self.color_scheme.warning_color) // Highlight files with current execution
                 } else {
                     Style::default()
                 };
@@ -423,9 +432,9 @@ impl CodePanel {
                         sorted_files.len()
                     ))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(self.theme_mgr().success_color())),
+                    .border_style(Style::default().fg(self.color_scheme.success_color)),
             )
-            .highlight_style(Style::default().bg(self.theme_mgr().selected_bg_color()));
+            .highlight_style(Style::default().bg(self.color_scheme.selection_bg));
 
         frame.render_widget(file_list, area);
     }
@@ -448,8 +457,8 @@ impl CodePanel {
             let paragraph = Paragraph::new("No code available").block(BorderPresets::code(
                 self.focused,
                 self.title(),
-                self.theme_mgr().focused_border_color(),
-                self.theme_mgr().unfocused_border_color(),
+                self.color_scheme.focused_border,
+                self.color_scheme.unfocused_border,
             ));
             frame.render_widget(paragraph, area);
             return;
@@ -486,7 +495,7 @@ impl CodePanel {
                 };
 
                 let breakpoint_indicator = if has_breakpoint {
-                    Span::styled("●", Style::default().fg(self.theme_mgr().error_color()))
+                    Span::styled("●", Style::default().fg(self.color_scheme.error_color))
                 } else {
                     Span::raw(" ")
                 };
@@ -505,9 +514,9 @@ impl CodePanel {
 
                 // Apply background highlighting for execution/cursor lines
                 let item_style = if is_execution {
-                    Style::default().bg(self.theme_mgr().warning_color())
+                    Style::default().bg(self.color_scheme.warning_color)
                 } else if is_user_cursor {
-                    Style::default().bg(self.theme_mgr().highlight_bg_color())
+                    Style::default().bg(self.color_scheme.highlight_bg)
                 } else {
                     Style::default()
                 };
@@ -520,8 +529,8 @@ impl CodePanel {
         let code_list = List::new(list_items).block(BorderPresets::code(
             self.focused,
             self.title(),
-            self.theme_mgr().focused_border_color(),
-            self.theme_mgr().unfocused_border_color(),
+            self.color_scheme.focused_border,
+            self.color_scheme.unfocused_border,
         ));
 
         frame.render_widget(code_list, area);
@@ -553,7 +562,7 @@ impl CodePanel {
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_mgr().accent_color()));
+                .style(Style::default().fg(self.color_scheme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             // Help line - updated to include file selector
@@ -570,7 +579,7 @@ impl CodePanel {
                     .to_string()
             };
             let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_mgr().help_text_color()));
+                .style(Style::default().fg(self.color_scheme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -613,9 +622,9 @@ impl PanelTr for CodePanel {
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let border_color = if self.focused {
-            self.theme_mgr().focused_border_color()
+            self.color_scheme.focused_border
         } else {
-            self.theme_mgr().unfocused_border_color()
+            self.color_scheme.unfocused_border
         };
 
         // Split area if file selector is shown
@@ -748,7 +757,6 @@ impl PanelTr for CodePanel {
                 // Step: Move to next snapshot/instruction
                 // TODO: This will send a step command to the RPC server
                 debug!("Step (next instruction) requested from code panel");
-                let exec_mgr = &self.execution_manager;
                 // For now, simulate moving to next snapshot
                 let current = self.exec_mgr_mut().current_snapshot();
                 let total = self.exec_mgr_mut().total_snapshots();
@@ -775,7 +783,6 @@ impl PanelTr for CodePanel {
                 // Next: Step over function calls (skip internal calls)
                 // TODO: This will send a next command to the RPC server
                 debug!("Next (step over) requested from code panel");
-                let exec_mgr = &self.execution_manager;
                 // For now, simulate stepping over to next significant point
                 let current = self.exec_mgr_mut().current_snapshot();
                 let total = self.exec_mgr_mut().total_snapshots();
@@ -789,7 +796,6 @@ impl PanelTr for CodePanel {
                 // Previous: Step back over function calls (reverse step over)
                 // TODO: This will send a previous command to the RPC server
                 debug!("Previous (reverse step over) requested from code panel");
-                let exec_mgr = &self.execution_manager;
                 // For now, simulate stepping back to previous significant point
                 let current = self.exec_mgr_mut().current_snapshot();
                 let total = self.exec_mgr_mut().total_snapshots();
@@ -857,5 +863,10 @@ impl PanelTr for CodePanel {
     /// Get theme manager reference
     fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
         self.theme_manager.write().expect("ThemeManager lock poisoned")
+    }
+
+    async fn fetch_data(&mut self) -> Result<()> {
+        self.color_scheme = self.theme_mgr().get_current_colors();  
+        Ok(())
     }
 }

@@ -6,6 +6,7 @@ use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
+use crate::ColorScheme;
 use alloy_dyn_abi::{DynSolValue, JsonAbiExt};
 use alloy_json_abi::Function;
 use alloy_primitives::{hex, Address, Bytes, U256};
@@ -40,6 +41,8 @@ pub struct TracePanel {
     // ========== Data ==========
     /// Trace
     trace_data: Option<Trace>,
+    /// Color Scheme:
+    color_scheme: ColorScheme,
 
     // ========== Managers ==========
     /// Shared execution state manager
@@ -63,6 +66,7 @@ impl TracePanel {
             scroll_offset: 0,
             context_height: 0,
             trace_data: None,
+            color_scheme: ColorScheme::default(),
             execution_manager,
             resource_manager,
             theme_manager,
@@ -314,18 +318,14 @@ impl PanelTr for TracePanel {
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
         // Get theme manager colors, using defaults if not available
         let (focused_color, unfocused_color, accent_color, selected_bg, selected_fg, highlight_bg) =
-            if let Ok(theme) = self.theme_manager.read() {
                 (
-                    theme.focused_border_color(),
-                    theme.unfocused_border_color(),
-                    theme.accent_color(),
-                    theme.selected_bg_color(),
-                    theme.selected_fg_color(),
-                    theme.highlight_bg_color(),
-                )
-            } else {
-                (Color::Green, Color::Gray, Color::Cyan, Color::Blue, Color::White, Color::DarkGray)
-            };
+                    self.color_scheme.focused_border,
+                    self.color_scheme.unfocused_border,
+                    self.color_scheme.accent_color,
+                    self.color_scheme.selection_bg,
+                    self.color_scheme.selection_fg,
+                    self.color_scheme.highlight_bg,
+                );
 
         self.context_height = if self.focused && area.height > 10 {
             area.height.saturating_sub(4) // Account for borders and status lines
@@ -339,13 +339,13 @@ impl PanelTr for TracePanel {
             None => {
                 let paragraph = Paragraph::new(Line::from(vec![
                     Span::raw("Fetching execution trace "),
-                    Span::styled("⠋", Style::default().fg(self.theme_mgr().accent_color())),
+                    Span::styled("⠋", Style::default().fg(self.color_scheme.accent_color)),
                 ]))
                 .block(BorderPresets::trace(
                     self.focused,
                     self.title(),
-                    self.theme_mgr().focused_border_color(),
-                    self.theme_mgr().unfocused_border_color(),
+                    self.color_scheme.focused_border,
+                    self.color_scheme.unfocused_border,
                 ));
                 frame.render_widget(paragraph, area);
                 return;
@@ -356,8 +356,8 @@ impl PanelTr for TracePanel {
                     let paragraph = Paragraph::new("Trace is empty").block(BorderPresets::trace(
                         self.focused,
                         self.title(),
-                        self.theme_mgr().focused_border_color(),
-                        self.theme_mgr().unfocused_border_color(),
+                        self.color_scheme.focused_border,
+                        self.color_scheme.unfocused_border,
                     ));
                     frame.render_widget(paragraph, area);
                     return;
@@ -374,10 +374,10 @@ impl PanelTr for TracePanel {
 
                         let style = if i == self.selected_index && self.focused {
                             Style::default()
-                                .bg(self.theme_mgr().selected_bg_color())
-                                .fg(self.theme_mgr().selected_fg_color())
+                                .bg(self.color_scheme.selection_bg)
+                                .fg(self.color_scheme.selection_fg)
                         } else if i == self.selected_index {
-                            Style::default().bg(self.theme_mgr().highlight_bg_color())
+                            Style::default().bg(self.color_scheme.highlight_bg)
                         } else {
                             Style::default()
                         };
@@ -390,10 +390,10 @@ impl PanelTr for TracePanel {
                     .block(BorderPresets::trace(
                         self.focused,
                         self.title(),
-                        self.theme_mgr().focused_border_color(),
-                        self.theme_mgr().unfocused_border_color(),
+                        self.color_scheme.focused_border,
+                        self.color_scheme.unfocused_border,
                     ))
-                    .highlight_style(Style::default().bg(self.theme_mgr().selected_bg_color()));
+                    .highlight_style(Style::default().bg(self.color_scheme.selection_bg));
 
                 frame.render_widget(list, area);
 
@@ -421,7 +421,7 @@ impl PanelTr for TracePanel {
 
                     let status_text = status_bar.build();
                     let status_paragraph = Paragraph::new(status_text)
-                        .style(Style::default().fg(self.theme_mgr().accent_color()));
+                        .style(Style::default().fg(self.color_scheme.accent_color));
                     frame.render_widget(status_paragraph, status_area);
 
                     let help_area = Rect {
@@ -433,7 +433,7 @@ impl PanelTr for TracePanel {
                     let help_text =
                         "↑/↓: Navigate • Enter: Jump to snapshot • r: Refresh • Tab: Next panel";
                     let help_paragraph = Paragraph::new(help_text)
-                        .style(Style::default().fg(self.theme_mgr().help_text_color()));
+                        .style(Style::default().fg(self.color_scheme.help_text_color));
                     frame.render_widget(help_paragraph, help_area);
                 }
             }
@@ -526,6 +526,8 @@ impl PanelTr for TracePanel {
         self.res_mgr_mut().fetch_trace().await?;
         let trace_data = self.res_mgr().get_trace().await.cloned();
         self.trace_data = trace_data;
+
+        self.color_scheme = self.theme_mgr().get_current_colors();
         Ok(())
     }
 }

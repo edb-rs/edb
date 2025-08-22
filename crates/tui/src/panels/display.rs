@@ -6,6 +6,7 @@ use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
+use crate::ColorScheme;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -80,6 +81,7 @@ impl DisplayMode {
 /// Display panel implementation (stub)
 #[derive(Debug)]
 pub struct DisplayPanel {
+    // ========== Display ==========
     /// Current display mode
     mode: DisplayMode,
     /// Selected item index
@@ -88,12 +90,18 @@ pub struct DisplayPanel {
     scroll_offset: usize,
     /// Content height for viewport calculations
     context_height: usize,
+    /// Whether this panel is focused
+    focused: bool,
+
+
+    // ========== Data ==========
     /// Mock data for different modes
     variables: Vec<String>,
     stack: Vec<String>,
     memory: Vec<String>,
-    /// Whether this panel is focused
-    focused: bool,
+    color_scheme: ColorScheme,
+
+    // ========== Managers ==========
     /// Shared execution state manager
     execution_manager: Arc<RwLock<ExecutionManager>>,
     /// Shared resource manager
@@ -142,6 +150,7 @@ impl DisplayPanel {
             execution_manager,
             resource_manager,
             theme_manager,
+            color_scheme: ColorScheme::default(),
         }
     }
 
@@ -217,9 +226,9 @@ impl PanelTr for DisplayPanel {
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let border_color = if self.focused {
-            self.theme_mgr().focused_border_color()
+            self.color_scheme.focused_border
         } else {
-            self.theme_mgr().unfocused_border_color()
+            self.color_scheme.unfocused_border
         };
 
         // Calculate context height for viewport calculations
@@ -237,8 +246,8 @@ impl PanelTr for DisplayPanel {
                     .block(BorderPresets::display(
                         self.focused,
                         self.title(),
-                        self.theme_mgr().focused_border_color(),
-                        self.theme_mgr().unfocused_border_color(),
+                        self.color_scheme.focused_border,
+                        self.color_scheme.unfocused_border,
                     ));
             frame.render_widget(paragraph, area);
             return;
@@ -253,10 +262,10 @@ impl PanelTr for DisplayPanel {
             .map(|(i, item)| {
                 let style = if i == self.selected_index && self.focused {
                     Style::default()
-                        .bg(self.theme_mgr().selected_bg_color())
-                        .fg(self.theme_mgr().selected_fg_color())
+                        .bg(self.color_scheme.selection_bg)
+                        .fg(self.color_scheme.selection_fg)
                 } else if i == self.selected_index {
-                    Style::default().bg(self.theme_mgr().highlight_bg_color())
+                    Style::default().bg(self.color_scheme.highlight_bg)
                 } else {
                     Style::default()
                 };
@@ -268,10 +277,10 @@ impl PanelTr for DisplayPanel {
             .block(BorderPresets::display(
                 self.focused,
                 self.title(),
-                self.theme_mgr().focused_border_color(),
-                self.theme_mgr().unfocused_border_color(),
+                self.color_scheme.focused_border,
+                self.color_scheme.unfocused_border,
             ))
-            .highlight_style(Style::default().bg(self.theme_mgr().selected_bg_color()));
+            .highlight_style(Style::default().bg(self.color_scheme.selection_bg));
 
         frame.render_widget(list, area);
 
@@ -292,7 +301,7 @@ impl PanelTr for DisplayPanel {
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_mgr().accent_color()));
+                .style(Style::default().fg(self.color_scheme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             let help_area = Rect {
@@ -303,7 +312,7 @@ impl PanelTr for DisplayPanel {
             };
             let help_text = "←/→: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
             let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_mgr().help_text_color()));
+                .style(Style::default().fg(self.color_scheme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -405,5 +414,10 @@ impl PanelTr for DisplayPanel {
     /// Get theme manager reference
     fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
         self.theme_manager.write().expect("ThemeManager lock poisoned")
+    }
+
+    async fn fetch_data(&mut self) -> Result<()> {
+        self.color_scheme = self.theme_mgr().get_current_colors();
+        Ok(())
     }
 }

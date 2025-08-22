@@ -62,6 +62,7 @@ pub enum TerminalMode {
 /// Terminal panel implementation with vim-style navigation
 #[derive(Debug)]
 pub struct TerminalPanel {
+    // ========== Display ==========
     /// All terminal content (commands + output intermixed)
     lines: Vec<TerminalLine>,
     /// Current interaction mode
@@ -80,8 +81,6 @@ pub struct TerminalPanel {
     content_height: usize,
     /// Whether this panel is focused
     focused: bool,
-    /// Color scheme for styling
-    color_scheme: ColorScheme,
     /// Whether we're connected to the RPC server
     connected: bool,
     /// Current snapshot info (current_index, total_count)
@@ -92,6 +91,12 @@ pub struct TerminalPanel {
     vim_number_prefix: String,
     /// VIM mode cursor absolute line number in terminal history (1-based, like code panel)
     vim_cursor_line: usize,
+    
+    // ========== Data ==========
+    /// Color Scheme:
+    color_scheme: ColorScheme,
+
+    // ========== Managers ==========
     /// Shared execution state manager
     execution_manager: Arc<RwLock<ExecutionManager>>,
     /// Shared resource manager
@@ -563,12 +568,12 @@ impl TerminalPanel {
 
         let status_paragraph = Paragraph::new(Line::from(vec![Span::styled(
             status_text,
-            Style::default().fg(self.theme_mgr().info_color()),
+            Style::default().fg(self.color_scheme.info_color),
         )]))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(self.theme_mgr().unfocused_border_color())),
+                .border_style(Style::default().fg(self.color_scheme.unfocused_border)),
         );
 
         frame.render_widget(status_paragraph, area);
@@ -820,10 +825,10 @@ impl TerminalPanel {
             .enumerate()
             .map(|(display_row, terminal_line)| {
                 let base_style = match terminal_line.line_type {
-                    LineType::Command => Style::default().fg(self.theme_mgr().info_color()),
+                    LineType::Command => Style::default().fg(self.color_scheme.info_color),
                     LineType::Output => Style::default(),
-                    LineType::Error => Style::default().fg(self.theme_mgr().error_color()),
-                    LineType::System => Style::default().fg(self.theme_mgr().success_color()),
+                    LineType::Error => Style::default().fg(self.color_scheme.error_color),
+                    LineType::System => Style::default().fg(self.color_scheme.success_color),
                 };
 
                 // Create the line content with base style
@@ -854,8 +859,8 @@ impl TerminalPanel {
                     // Apply highlighting to entire ListItem (full width like code panel)
                     list_item.style(
                         Style::default()
-                            .bg(self.theme_mgr().highlight_bg_color())
-                            .fg(self.theme_mgr().highlight_fg_color()),
+                            .bg(self.color_scheme.highlight_bg)
+                            .fg(self.color_scheme.highlight_fg),
                     )
                 } else {
                     list_item
@@ -885,8 +890,8 @@ impl TerminalPanel {
         let terminal_block = BorderPresets::terminal(
             self.focused,
             terminal_title,
-            self.theme_mgr().focused_border_color(),
-            self.theme_mgr().unfocused_border_color(),
+            self.color_scheme.focused_border,
+            self.color_scheme.unfocused_border,
         );
 
         // Use the full area since status/help are handled separately
@@ -911,7 +916,7 @@ impl TerminalPanel {
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_mgr().accent_color()));
+                .style(Style::default().fg(self.color_scheme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             // Help text
@@ -928,7 +933,7 @@ impl TerminalPanel {
             };
 
             let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_mgr().help_text_color()));
+                .style(Style::default().fg(self.color_scheme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -956,9 +961,9 @@ impl PanelTr for TerminalPanel {
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let border_color = if self.focused {
-            self.theme_mgr().focused_border_color()
+            self.color_scheme.focused_border
         } else {
-            self.theme_mgr().unfocused_border_color()
+            self.color_scheme.unfocused_border
         };
 
         // Add status line if there's enough space
@@ -1089,5 +1094,10 @@ impl PanelTr for TerminalPanel {
     /// Get theme manager reference
     fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
         self.theme_manager.write().expect("ThemeManager lock poisoned")
+    }
+
+    async fn fetch_data(&mut self) -> Result<()> {
+        self.color_scheme = self.theme_mgr().get_current_colors();
+        Ok(())
     }
 }
