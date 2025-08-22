@@ -14,7 +14,15 @@ exclude.workspace = true
 [lints]
 workspace = true
 
+[[bin]]
+name = "edb-tui"
+path = "src/bin/main.rs"
+
 [dependencies]
+# cli
+clap = { workspace = true, features = ["derive"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
 # async
 tokio = { workspace = true, features = ["full"] }
 futures.workspace = true
@@ -38,5 +46,15 @@ tracing.workspace = true
 dirs.workspace = true
 regex = "1.11"
 
-[dev-dependencies]
+# common components
 edb-common = { path = "../common" }
+
+# alloy for trace formatting
+alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
+alloy-json-abi = { workspace = true }
+alloy-dyn-abi = { workspace = true }
+
+# revm for trace types
+revm = { workspace = true, features = ["std", "serde", "alloydb"] }
+
+[dev-dependencies]

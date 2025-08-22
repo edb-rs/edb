@@ -7,12 +7,13 @@
 //! network overhead for multiple debugging sessions.
 
 pub mod cache;
-mod health;
+pub mod health;
 pub mod metrics;
-mod providers;
+pub mod providers;
 pub mod proxy;
-mod registry;
-mod rpc;
+pub mod registry;
+pub mod rpc;
+pub mod tui;
 
 pub use cache::CacheEntry;
 pub use proxy::{ProxyServer, ProxyServerBuilder};

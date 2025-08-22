@@ -86,7 +86,7 @@ impl Tui {
 
         // Create app with layout manager
         let layout_config = LayoutConfig { enable_mouse: config.enable_mouse };
-        let app = App::new(rpc_client, layout_config)?;
+        let app = App::new(rpc_client, layout_config).await?;
 
         Ok(Self { app, terminal, config })
     }

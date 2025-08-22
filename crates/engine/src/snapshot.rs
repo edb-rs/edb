@@ -132,7 +132,7 @@ where
 }
 
 // IntoIterator for owned Trace (moves out its contents)
-impl<DB> IntoIterator for Snapshots<DB> 
+impl<DB> IntoIterator for Snapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
@@ -146,7 +146,7 @@ where
 }
 
 // IntoIterator for &Trace (shared iteration)
-impl<'a, DB> IntoIterator for &'a Snapshots<DB> 
+impl<'a, DB> IntoIterator for &'a Snapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,

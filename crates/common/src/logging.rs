@@ -161,6 +161,79 @@ fn log_environment_info(component_name: &str) {
     }
 }
 
+/// Initialize file-only logging for TUI applications
+///
+/// This function sets up logging that only writes to a file, not to stdout/stderr.
+/// This is essential for TUI applications that need full control over the terminal.
+///
+/// # Arguments
+/// * `component_name` - Name of the component (e.g., "edb-tui")
+///
+/// # Returns
+/// * `Result<PathBuf>` - The path to the log file on success
+///
+/// # Examples
+/// ```rust
+/// use edb_common::logging;
+///
+/// #[tokio::main]
+/// async fn main() -> eyre::Result<()> {
+///     // Initialize file-only logging for TUI
+///     let log_path = logging::init_file_only_logging("edb-tui")?;
+///     eprintln!("Logs are being written to: {}", log_path.display());
+///     
+///     tracing::info!("TUI started");
+///     Ok(())
+/// }
+/// ```
+pub fn init_file_only_logging(component_name: &str) -> Result<PathBuf> {
+    // Create environment filter with default INFO level
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("info"))
+        .expect("Failed to create environment filter");
+
+    // Create log directory in temp folder
+    let log_dir = create_log_directory(component_name)?;
+    let log_file_path = log_dir.join(format!("{}.log", component_name));
+
+    // Create file appender with daily rotation
+    let file_appender = rolling::daily(&log_dir, format!("{}.log", component_name));
+    let (non_blocking_appender, guard) = non_blocking(file_appender);
+
+    // Store guard to prevent it from being dropped
+    std::mem::forget(guard);
+
+    // Create file-only layer (no console output)
+    let file_layer = fmt::layer()
+        .with_target(true)
+        .with_thread_ids(false) // Less verbose for TUI logs
+        .with_thread_names(false)
+        .with_file(true)
+        .with_line_number(true)
+        .with_span_events(FmtSpan::CLOSE)
+        .with_timer(LocalTime::rfc_3339())
+        .with_ansi(false) // No colors in files
+        .with_writer(non_blocking_appender);
+
+    // Initialize subscriber with only file layer (no console output)
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer)
+        .try_init()
+        .map_err(|e| eyre::eyre!("Failed to initialize TUI file logging: {}", e))?;
+
+    tracing::info!(
+        component = component_name,
+        log_file = %log_file_path.display(),
+        "File-only logging initialized"
+    );
+
+    // Log some useful information
+    log_environment_info(component_name);
+
+    Ok(log_file_path)
+}
+
 /// Initialize simple logging (console only, no fancy formatting)
 ///
 /// This is useful for tests or simple utilities that don't need

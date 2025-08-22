@@ -1983,7 +1983,6 @@ dependencies = [
  "dotenv",
  "edb-common",
  "edb-engine",
- "edb-tui",
  "edb-webui",
  "eyre",
  "foundry-compilers",
@@ -2123,6 +2122,10 @@ dependencies = [
 name = "edb-tui"
 version = "0.0.1"
 dependencies = [
+ "alloy-dyn-abi",
+ "alloy-json-abi",
+ "alloy-primitives",
+ "clap",
  "crossterm",
  "dirs 5.0.1",
  "edb-common",
@@ -2132,11 +2135,13 @@ dependencies = [
  "ratatui",
  "regex",
  "reqwest",
+ "revm",
  "serde",
  "serde_json",
  "tokio",
  "toml",
  "tracing",
+ "tracing-subscriber 0.3.19",
 ]
 
 [[package]]

@@ -9,14 +9,14 @@ use eyre::Result;
 use std::net::SocketAddr;
 use tracing::{info, warn};
 
-mod cache;
-mod health;
-mod metrics;
-mod providers;
-mod proxy;
-mod registry;
-mod rpc;
-mod tui;
+use edb_rpc_proxy::cache;
+use edb_rpc_proxy::health;
+use edb_rpc_proxy::metrics;
+use edb_rpc_proxy::providers;
+use edb_rpc_proxy::proxy;
+use edb_rpc_proxy::registry;
+use edb_rpc_proxy::rpc;
+use edb_rpc_proxy::tui;
 
 use proxy::ProxyServerBuilder;
 

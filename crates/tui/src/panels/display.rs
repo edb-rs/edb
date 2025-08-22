@@ -2,8 +2,8 @@
 //!
 //! This panel can switch between different display modes based on context.
 
-use super::{BreakpointManager, EventResponse, Panel, PanelType};
-use crate::managers::{ExecutionManager, ThemeManager};
+use super::{EventResponse, PanelTr, PanelType};
+use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -14,6 +14,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
 /// Display modes for the panel
@@ -93,20 +94,20 @@ pub struct DisplayPanel {
     memory: Vec<String>,
     /// Whether this panel is focused
     focused: bool,
-    /// Shared breakpoint manager
-    breakpoint_manager: BreakpointManager,
     /// Shared execution state manager
-    execution_manager: ExecutionManager,
+    execution_manager: Arc<RwLock<ExecutionManager>>,
+    /// Shared resource manager
+    resource_manager: Arc<RwLock<ResourceManager>>,
     /// Theme manager for styling
-    theme_manager: ThemeManager,
+    theme_manager: Arc<RwLock<ThemeManager>>,
 }
 
 impl DisplayPanel {
-    /// Create a new display panel with required managers
-    pub fn new_with_managers(
-        breakpoint_manager: BreakpointManager,
-        execution_manager: ExecutionManager,
-        theme_manager: ThemeManager,
+    /// Create a new display panel
+    pub fn new(
+        execution_manager: Arc<RwLock<ExecutionManager>>,
+        resource_manager: Arc<RwLock<ResourceManager>>,
+        theme_manager: Arc<RwLock<ThemeManager>>,
     ) -> Self {
         Self {
             mode: DisplayMode::Variables,
@@ -138,8 +139,8 @@ impl DisplayPanel {
                 "0x60: 0xa9059cbb000000000000000000000000456...def000000000000000003e8".to_string(),
             ],
             focused: false,
-            breakpoint_manager,
             execution_manager,
+            resource_manager,
             theme_manager,
         }
     }
@@ -172,16 +173,8 @@ impl DisplayPanel {
                 vec!["Transition state display not implemented".to_string()]
             }
             DisplayMode::Breakpoints => {
-                let mgr = &self.breakpoint_manager;
-                let breakpoints = mgr.get_all_breakpoints();
-                if breakpoints.is_empty() {
-                    vec!["No breakpoints set".to_string()]
-                } else {
-                    breakpoints
-                        .iter()
-                        .map(|line| format!("● Line {} (SimpleToken.sol)", line))
-                        .collect()
-                }
+                // TODO
+                vec!["No breakpoints set".to_string()]
             }
         }
     }
@@ -212,7 +205,7 @@ impl DisplayPanel {
     }
 }
 
-impl Panel for DisplayPanel {
+impl PanelTr for DisplayPanel {
     fn panel_type(&self) -> PanelType {
         PanelType::Display
     }
@@ -224,9 +217,9 @@ impl Panel for DisplayPanel {
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let border_color = if self.focused {
-            self.theme_manager.focused_border_color()
+            self.theme_mgr().focused_border_color()
         } else {
-            self.theme_manager.unfocused_border_color()
+            self.theme_mgr().unfocused_border_color()
         };
 
         // Calculate context height for viewport calculations
@@ -244,8 +237,8 @@ impl Panel for DisplayPanel {
                     .block(BorderPresets::display(
                         self.focused,
                         self.title(),
-                        self.theme_manager.focused_border_color(),
-                        self.theme_manager.unfocused_border_color(),
+                        self.theme_mgr().focused_border_color(),
+                        self.theme_mgr().unfocused_border_color(),
                     ));
             frame.render_widget(paragraph, area);
             return;
@@ -260,10 +253,10 @@ impl Panel for DisplayPanel {
             .map(|(i, item)| {
                 let style = if i == self.selected_index && self.focused {
                     Style::default()
-                        .bg(self.theme_manager.selected_bg_color())
-                        .fg(self.theme_manager.selected_fg_color())
+                        .bg(self.theme_mgr().selected_bg_color())
+                        .fg(self.theme_mgr().selected_fg_color())
                 } else if i == self.selected_index {
-                    Style::default().bg(self.theme_manager.highlight_bg_color())
+                    Style::default().bg(self.theme_mgr().highlight_bg_color())
                 } else {
                     Style::default()
                 };
@@ -275,10 +268,10 @@ impl Panel for DisplayPanel {
             .block(BorderPresets::display(
                 self.focused,
                 self.title(),
-                self.theme_manager.focused_border_color(),
-                self.theme_manager.unfocused_border_color(),
+                self.theme_mgr().focused_border_color(),
+                self.theme_mgr().unfocused_border_color(),
             ))
-            .highlight_style(Style::default().bg(self.theme_manager.selected_bg_color()));
+            .highlight_style(Style::default().bg(self.theme_mgr().selected_bg_color()));
 
         frame.render_widget(list, area);
 
@@ -299,7 +292,7 @@ impl Panel for DisplayPanel {
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_manager.accent_color()));
+                .style(Style::default().fg(self.theme_mgr().accent_color()));
             frame.render_widget(status_paragraph, status_area);
 
             let help_area = Rect {
@@ -310,7 +303,7 @@ impl Panel for DisplayPanel {
             };
             let help_text = "←/→: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
             let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_manager.help_text_color()));
+                .style(Style::default().fg(self.theme_mgr().help_text_color()));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -382,5 +375,35 @@ impl Panel for DisplayPanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    /// Get execution manager read-only reference
+    fn exec_mgr(&self) -> RwLockReadGuard<'_, ExecutionManager> {
+        self.execution_manager.read().expect("ExecutionManager lock poisoned")
+    }
+
+    /// Get execution manager reference
+    fn exec_mgr_mut(&self) -> RwLockWriteGuard<'_, ExecutionManager> {
+        self.execution_manager.write().expect("ExecutionManager lock poisoned")
+    }
+
+    /// Get resource manager read-only reference
+    fn res_mgr(&self) -> RwLockReadGuard<'_, ResourceManager> {
+        self.resource_manager.read().expect("ResourceManager lock poisoned")
+    }
+
+    /// Get resource manager reference
+    fn res_mgr_mut(&self) -> RwLockWriteGuard<'_, ResourceManager> {
+        self.resource_manager.write().expect("ResourceManager lock poisoned")
+    }
+
+    /// Get theme manager reference
+    fn theme_mgr(&self) -> RwLockReadGuard<'_, ThemeManager> {
+        self.theme_manager.read().expect("ThemeManager lock poisoned")
+    }
+
+    /// Get theme manager reference
+    fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
+        self.theme_manager.write().expect("ThemeManager lock poisoned")
     }
 }

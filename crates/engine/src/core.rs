@@ -33,7 +33,15 @@ use edb_common::{
 };
 
 use crate::{
-    analysis::AnalysisResult, analyze, inspector::{CallTracer, TraceReplayResult}, instrument, rpc::RpcServerHandle, start_debug_server, utils::{next_etherscan_api_key, Artifact, OnchainCompiler}, CodeTweaker, EngineContext, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector, OpcodeSnapshots, Snapshots
+    analysis::AnalysisResult,
+    analyze,
+    inspector::{CallTracer, TraceReplayResult},
+    instrument,
+    rpc::RpcServerHandle,
+    start_debug_server,
+    utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
+    CodeTweaker, EngineContext, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector,
+    OpcodeSnapshots, Snapshots,
 };
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)

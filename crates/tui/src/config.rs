@@ -174,7 +174,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "cyan".to_string(),
-                    accent: "bright_cyan".to_string(),
+                    accent: "light_cyan".to_string(),
                     // Syntax highlighting
                     keyword: "light_blue".to_string(),
                     type_name: "light_green".to_string(),
@@ -211,7 +211,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "white".to_string(),
-                    accent: "bright_white".to_string(),
+                    accent: "white".to_string(),
                     // Syntax highlighting
                     keyword: "white".to_string(),
                     type_name: "light_green".to_string(),
@@ -248,7 +248,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "blue".to_string(),
-                    accent: "bright_blue".to_string(),
+                    accent: "light_blue".to_string(),
                     // Syntax highlighting
                     keyword: "blue".to_string(),
                     type_name: "green".to_string(),
@@ -285,7 +285,7 @@ impl Default for ThemeConfig {
                     error: "red".to_string(),
                     warning: "yellow".to_string(),
                     info: "cyan".to_string(),
-                    accent: "bright_magenta".to_string(),
+                    accent: "light_magenta".to_string(),
                     // Syntax highlighting (Monokai-inspired)
                     keyword: "magenta".to_string(),
                     type_name: "light_blue".to_string(),
@@ -345,6 +345,22 @@ impl Config {
             toml::from_str(&content).with_context(|| "Failed to parse config file as TOML")?;
 
         debug!("Loaded configuration from {:?}", config_path);
+        Ok(config)
+    }
+
+    /// Load configuration from a specific path
+    pub fn load_from_path(path: PathBuf) -> Result<Self> {
+        if !path.exists() {
+            return Err(eyre::eyre!("Config file not found at {:?}", path));
+        }
+
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read config file: {:?}", path))?;
+
+        let config: Config =
+            toml::from_str(&content).with_context(|| "Failed to parse config file as TOML")?;
+
+        debug!("Loaded configuration from {:?}", path);
         Ok(config)
     }
 

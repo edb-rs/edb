@@ -3,9 +3,9 @@
 //! This module contains the core application state management and event handling.
 
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
-use crate::managers::{BreakpointManager, ExecutionManager, ThemeManager};
+use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::panels::{
-    CodePanel, DisplayPanel, EventResponse, Panel, PanelType, TerminalPanel, TracePanel,
+    CodePanel, DisplayPanel, EventResponse, Panel, PanelTr, PanelType, TerminalPanel, TracePanel,
 };
 use crate::rpc::RpcClient;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent};
@@ -14,9 +14,9 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     Frame,
 };
+use std::sync::{Arc, RwLock};
 use std::{
     collections::HashMap,
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing::{debug, warn};
@@ -115,17 +115,17 @@ pub struct App {
     /// Current focused panel
     current_panel: PanelType,
     /// All panels
-    panels: HashMap<PanelType, Box<dyn Panel>>,
+    panels: HashMap<PanelType, Panel>,
     /// Whether the application should exit
     should_exit: bool,
     /// Main panel type for compact layout (Trace/Code/Display cycle)
     compact_main_panel: PanelType,
-    /// Shared breakpoint manager
-    breakpoint_manager: BreakpointManager,
     /// Shared execution state manager
-    execution_manager: ExecutionManager,
+    _execution_manager: Arc<RwLock<ExecutionManager>>,
+    /// Shared resource manager
+    _resource_manager: Arc<RwLock<ResourceManager>>,
     /// Shared theme manager
-    theme_manager: ThemeManager,
+    _theme_manager: Arc<RwLock<ThemeManager>>,
     /// RPC connection status and health monitoring
     connection_status: ConnectionStatus,
     /// Last health check time for periodic monitoring
@@ -137,43 +137,52 @@ pub struct App {
 
 impl App {
     /// Create a new application instance
-    pub fn new(rpc_client: Arc<RpcClient>, _config: LayoutConfig) -> Result<Self> {
+    pub async fn new(rpc_client: Arc<RpcClient>, _config: LayoutConfig) -> Result<Self> {
         let layout_manager = LayoutManager::new();
         let current_panel = PanelType::Terminal;
-        let breakpoint_manager = BreakpointManager::new();
-        let execution_manager = ExecutionManager::new();
-        let theme_manager = ThemeManager::new();
 
-        // Initialize panels with shared breakpoint manager
-        let mut panels: HashMap<PanelType, Box<dyn Panel>> = HashMap::new();
+        // Create managers wrapped in Arc<RwLock<T>>
+        let execution_manager = Arc::new(RwLock::new(ExecutionManager::new()));
+        let theme_manager = Arc::new(RwLock::new(ThemeManager::new()));
+
+        // Create resource manager with RPC client and fetch trace data during initialization
+        let mut resource_manager_instance = ResourceManager::new(rpc_client.clone());
+        if let Err(e) = resource_manager_instance.fetch_trace().await {
+            tracing::warn!("Failed to fetch initial trace data: {}", e);
+        }
+        let resource_manager = Arc::new(RwLock::new(resource_manager_instance));
+
+        // Initialize panels - they start with no managers and will get them set later
+        let mut panels: HashMap<PanelType, Panel> = HashMap::new();
         panels.insert(
             PanelType::Trace,
-            Box::new(TracePanel::new_with_managers(
+            Panel::Trace(TracePanel::new(
                 execution_manager.clone(),
+                resource_manager.clone(),
                 theme_manager.clone(),
             )),
         );
         panels.insert(
             PanelType::Code,
-            Box::new(CodePanel::new_with_managers(
-                breakpoint_manager.clone(),
+            Panel::Code(CodePanel::new(
                 execution_manager.clone(),
+                resource_manager.clone(),
                 theme_manager.clone(),
             )),
         );
         panels.insert(
             PanelType::Display,
-            Box::new(DisplayPanel::new_with_managers(
-                breakpoint_manager.clone(),
+            Panel::Display(DisplayPanel::new(
                 execution_manager.clone(),
+                resource_manager.clone(),
                 theme_manager.clone(),
             )),
         );
         panels.insert(
             PanelType::Terminal,
-            Box::new(TerminalPanel::new_with_managers(
-                breakpoint_manager.clone(),
+            Panel::Terminal(TerminalPanel::new(
                 execution_manager.clone(),
+                resource_manager.clone(),
                 theme_manager.clone(),
             )),
         );
@@ -185,9 +194,9 @@ impl App {
             panels,
             should_exit: false,
             compact_main_panel: PanelType::Code, // Default to Code in compact mode
-            breakpoint_manager,
-            execution_manager,
-            theme_manager,
+            _execution_manager: execution_manager,
+            _resource_manager: resource_manager,
+            _theme_manager: theme_manager,
             connection_status: ConnectionStatus::new(),
             last_health_check: None,
             vertical_split: 50,   // 50% left panel width
@@ -214,6 +223,10 @@ impl App {
     pub async fn update(&mut self) -> Result<()> {
         // Perform periodic health checks
         self.check_connection_health().await;
+        // Perform data fetching for each panel
+        for panel in self.panels.values_mut() {
+            panel.fetch_data().await?;
+        }
         Ok(())
     }
 
@@ -703,16 +716,5 @@ impl App {
     /// Get current connection status for display
     pub fn connection_status(&self) -> &ConnectionStatus {
         &self.connection_status
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_app_creation() {
-        // This would need a running RPC server to test properly
-        // For now, just test that the module compiles
     }
 }

@@ -21,7 +21,6 @@ workspace = true
 [dependencies]
 # workspace crates
 edb-engine = { path = "../engine" }
-edb-tui = { path = "../tui" }
 edb-webui = { path = "../webui" }
 edb-common = { path = "../common" }
 

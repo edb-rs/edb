@@ -16,6 +16,7 @@ use std::{
 use tracing::{debug, error};
 
 /// RPC client for debug server communication
+#[derive(Debug)]
 pub struct RpcClient {
     client: HttpClient,
     server_url: String,
@@ -132,6 +133,12 @@ impl RpcClient {
             &format!("Setting snapshot to {}", index),
         )
         .await
+    }
+
+    /// Get execution trace
+    pub async fn get_trace(&self) -> Result<Value> {
+        self.request_with_spinner("edb_getTrace", rpc_params::build(), "Fetching execution trace")
+            .await
     }
 
     /// Get server URL

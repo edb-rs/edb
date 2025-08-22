@@ -2,7 +2,11 @@ use std::collections::HashMap;
 
 use alloy_primitives::{Address, TxHash};
 use edb_common::{types::Trace, ForkInfo};
-use revm::{context::{BlockEnv, CfgEnv, TxEnv}, database::CacheDB, Database, DatabaseCommit, DatabaseRef};
+use revm::{
+    context::{BlockEnv, CfgEnv, TxEnv},
+    database::CacheDB,
+    Database, DatabaseCommit, DatabaseRef,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{analysis::AnalysisResult, Artifact, Snapshots};
@@ -60,7 +64,7 @@ where
             for (snapshot_id, (frame_id, _)) in self.snapshots.iter().enumerate() {
                 if frame_id.trace_entry_id() == trace_id {
                     entry.first_snapshot_id = Some(snapshot_id);
-                    break
+                    break;
                 }
             }
         }

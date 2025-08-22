@@ -4,8 +4,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 
 use crate::{EngineContext, RpcError};
 
-
-pub fn get_trace<DB>(context: &Arc<EngineContext<DB>>) -> Result<serde_json::Value, RpcError> 
+pub fn get_trace<DB>(context: &Arc<EngineContext<DB>>) -> Result<serde_json::Value, RpcError>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,

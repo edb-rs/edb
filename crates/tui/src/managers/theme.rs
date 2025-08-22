@@ -11,20 +11,19 @@ use tracing::{debug, info};
 /// Thread-safe theme manager for real-time theme switching
 #[derive(Debug, Clone)]
 pub struct ThemeManager {
-    config: Arc<RwLock<Config>>,
+    config: Config,
 }
 
 impl ThemeManager {
     /// Create a new theme manager
     pub fn new() -> Self {
         let config = Config::load().unwrap_or_default();
-        Self { config: Arc::new(RwLock::new(config)) }
+        Self { config }
     }
 
     /// Get the currently active theme's color scheme
     pub fn get_current_colors(&self) -> ColorScheme {
-        let config = self.config.read().unwrap();
-        if let Some(theme) = config.get_active_theme() {
+        if let Some(theme) = self.config.get_active_theme() {
             theme.colors.clone()
         } else {
             // Fallback to default theme colors
@@ -34,13 +33,12 @@ impl ThemeManager {
 
     /// Get active theme name
     pub fn get_active_theme_name(&self) -> String {
-        self.config.read().unwrap().theme.active.clone()
+        self.config.theme.active.clone()
     }
 
     /// List all available themes
     pub fn list_themes(&self) -> Vec<(String, String, String)> {
-        let config = self.config.read().unwrap();
-        config
+        self.config
             .list_themes()
             .into_iter()
             .map(|(name, theme)| (name.clone(), theme.name.clone(), theme.description.clone()))
@@ -48,13 +46,9 @@ impl ThemeManager {
     }
 
     /// Switch to a different theme
-    pub fn switch_theme(&self, theme_name: &str) -> Result<()> {
-        {
-            let mut config = self.config.write().unwrap();
-            config.set_theme(theme_name)?;
-            config.save()?;
-        }
-
+    pub fn switch_theme(&mut self, theme_name: &str) -> Result<()> {
+        self.config.set_theme(theme_name)?;
+        self.config.save()?;
         info!("Theme switched to: {}", theme_name);
         Ok(())
     }
@@ -187,15 +181,15 @@ impl ThemeManager {
     }
 
     /// Reload configuration from disk
-    pub fn reload(&self) -> Result<()> {
+    pub fn reload(&mut self) -> Result<()> {
         let new_config = Config::load()?;
-        *self.config.write().unwrap() = new_config;
+        self.config = new_config;
         debug!("Theme manager configuration reloaded");
         Ok(())
     }
 
     /// Get current panel configuration
     pub fn get_panel_config(&self) -> crate::config::PanelConfig {
-        self.config.read().unwrap().panels.clone()
+        self.config.panels.clone()
     }
 }

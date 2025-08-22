@@ -25,6 +25,7 @@ use eyre::Result;
 
 mod cmd;
 mod proxy;
+mod utils;
 
 /// Command-line interface for EDB
 #[derive(Debug, Parser)]
@@ -136,17 +137,27 @@ async fn main() -> Result<()> {
     let ui_handle = match cli.ui {
         UiMode::Tui => {
             tracing::info!("Launching Terminal UI...");
-            let tui_config = edb_tui::TuiConfig {
-                rpc_url: format!("http://{}", rpc_server_handle.addr),
-                ..Default::default()
-            };
 
-            // Spawn TUI in a separate task
-            tokio::spawn(async move {
-                if let Err(e) = edb_tui::api::start_tui(tui_config).await {
-                    tracing::error!("TUI failed: {}", e);
-                }
-            })
+            // Find the edb-tui binary
+            let tui_binary = utils::find_tui_binary()?;
+            tracing::debug!("Found TUI binary at: {:?}", tui_binary);
+
+            // Spawn TUI as a child process with inherited stdio
+            let mut child = std::process::Command::new(&tui_binary)
+                .arg("--url")
+                .arg(format!("http://{}", rpc_server_handle.addr))
+                .stdin(std::process::Stdio::inherit())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()
+                .map_err(|e| eyre::eyre!("Failed to spawn TUI: {}", e))?;
+
+            // Wait for TUI to exit
+            let status = child.wait()?;
+            tracing::info!("TUI exited with status: {:?}", status);
+
+            // Return a dummy handle since we're waiting synchronously
+            tokio::spawn(async {})
         }
         UiMode::Web => {
             tracing::info!("Launching Web UI...");

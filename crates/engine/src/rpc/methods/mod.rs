@@ -40,9 +40,7 @@ where
         debug!("Handling RPC method: {}", method);
 
         match method {
-            "debug.getTrace" => {
-                trace::get_trace(&self.context)
-            }
+            "edb_getTrace" => trace::get_trace(&self.context),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: -32601,

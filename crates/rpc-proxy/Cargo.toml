@@ -17,7 +17,7 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "edb-rpc-proxy"
-path = "src/main.rs"
+path = "src/bin/main.rs"
 
 [dependencies]
 # alloy

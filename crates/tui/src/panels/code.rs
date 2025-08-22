@@ -2,8 +2,8 @@
 //!
 //! This panel shows source code with syntax highlighting and current line indication.
 
-use super::{BreakpointManager, EventResponse, Panel, PanelType};
-use crate::managers::{ExecutionManager, ThemeManager};
+use super::{EventResponse, PanelTr, PanelType};
+use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{BreakpointStatus, FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType, TokenStyle};
@@ -15,6 +15,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
+use revm::handler::execution;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
 /// Code display mode
@@ -87,22 +89,22 @@ pub struct CodePanel {
     file_selector_height_percent: u16,
     /// Content height for the current panel
     context_height: usize,
-    /// Shared breakpoint manager
-    breakpoint_manager: BreakpointManager,
     /// Shared execution state manager
-    execution_manager: ExecutionManager,
+    execution_manager: Arc<RwLock<ExecutionManager>>,
+    /// Shared resource manager
+    resource_manager: Arc<RwLock<ResourceManager>>,
     /// Theme manager for styling
-    theme_manager: ThemeManager,
+    theme_manager: Arc<RwLock<ThemeManager>>,
     /// Syntax highlighter for code
     syntax_highlighter: SyntaxHighlighter,
 }
 
 impl CodePanel {
-    /// Create a new code panel with required managers
-    pub fn new_with_managers(
-        breakpoint_manager: BreakpointManager,
-        execution_manager: ExecutionManager,
-        theme_manager: ThemeManager,
+    /// Create a new code panel
+    pub fn new(
+        execution_manager: Arc<RwLock<ExecutionManager>>,
+        resource_manager: Arc<RwLock<ResourceManager>>,
+        theme_manager: Arc<RwLock<ThemeManager>>,
     ) -> Self {
         // Mock server response - for addresses WITH source code
         // In reality, if has_source_code is true, we show source
@@ -180,30 +182,25 @@ impl CodePanel {
         };
 
         Self {
-            mode: display_info.preferred_display, // Use server preference
+            mode: display_info.preferred_display,
             display_info,
             source_lines,
-            opcode_lines,
-            source_paths: vec![
-                "SimpleToken.sol".to_string(),
-                "IERC20.sol".to_string(),
-                "SafeMath.sol".to_string(),
-                "Context.sol".to_string(),
-            ],
+            opcode_lines: vec![],
+            source_paths: vec!["contracts/SimpleToken.sol".to_string()],
             selected_path_index: 0,
-            current_execution_line: Some(9),
-            user_cursor_line: Some(9), // Initially follows execution
+            current_execution_line: Some(10),
+            user_cursor_line: Some(1),
             scroll_offset: 0,
             focused: false,
-            breakpoint_manager,
-            execution_manager,
-            theme_manager,
-            context_height: 0,
             show_file_selector: false,
             file_selector_index: 0,
             file_selector_scroll_offset: 0,
             file_selector_context_height: 0,
-            file_selector_height_percent: 20, // Default to 20% of panel height
+            file_selector_height_percent: 20,
+            context_height: 0,
+            execution_manager,
+            resource_manager,
+            theme_manager,
             syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
@@ -239,8 +236,8 @@ impl CodePanel {
         let line_num_span = Span::styled(
             line_num_text,
             Style::default()
-                .fg(self.theme_manager.line_number_color())
-                .bg(self.theme_manager.line_number_bg_color()),
+                .fg(self.theme_mgr().line_number_color())
+                .bg(self.theme_mgr().line_number_bg_color()),
         );
 
         // Tokenize the line for syntax highlighting
@@ -282,20 +279,20 @@ impl CodePanel {
     /// Convert TokenStyle to ratatui Style using theme colors
     fn get_token_style(&self, token_style: TokenStyle) -> Style {
         let color = match token_style {
-            TokenStyle::Keyword => self.theme_manager.syntax_keyword_color(),
-            TokenStyle::Type => self.theme_manager.syntax_type_color(),
-            TokenStyle::String => self.theme_manager.syntax_string_color(),
-            TokenStyle::Number => self.theme_manager.syntax_number_color(),
-            TokenStyle::Comment => self.theme_manager.syntax_comment_color(),
-            TokenStyle::Identifier => self.theme_manager.syntax_identifier_color(),
-            TokenStyle::Operator => self.theme_manager.syntax_operator_color(),
-            TokenStyle::Punctuation => self.theme_manager.syntax_punctuation_color(),
-            TokenStyle::Address => self.theme_manager.syntax_address_color(),
-            TokenStyle::Pragma => self.theme_manager.syntax_pragma_color(),
+            TokenStyle::Keyword => self.theme_mgr().syntax_keyword_color(),
+            TokenStyle::Type => self.theme_mgr().syntax_type_color(),
+            TokenStyle::String => self.theme_mgr().syntax_string_color(),
+            TokenStyle::Number => self.theme_mgr().syntax_number_color(),
+            TokenStyle::Comment => self.theme_mgr().syntax_comment_color(),
+            TokenStyle::Identifier => self.theme_mgr().syntax_identifier_color(),
+            TokenStyle::Operator => self.theme_mgr().syntax_operator_color(),
+            TokenStyle::Punctuation => self.theme_mgr().syntax_punctuation_color(),
+            TokenStyle::Address => self.theme_mgr().syntax_address_color(),
+            TokenStyle::Pragma => self.theme_mgr().syntax_pragma_color(),
             TokenStyle::Opcode
             | TokenStyle::OpcodeNumber
             | TokenStyle::OpcodeAddress
-            | TokenStyle::OpcodeData => self.theme_manager.syntax_opcode_color(),
+            | TokenStyle::OpcodeData => self.theme_mgr().syntax_opcode_color(),
             TokenStyle::Default => Color::Reset,
         };
 
@@ -405,10 +402,10 @@ impl CodePanel {
 
                 let style = if display_idx == self.file_selector_index {
                     Style::default()
-                        .bg(self.theme_manager.selected_bg_color())
-                        .fg(self.theme_manager.selected_fg_color())
+                        .bg(self.theme_mgr().selected_bg_color())
+                        .fg(self.theme_mgr().selected_fg_color())
                 } else if file_info.has_execution {
-                    Style::default().fg(self.theme_manager.warning_color()) // Highlight files with current execution
+                    Style::default().fg(self.theme_mgr().warning_color()) // Highlight files with current execution
                 } else {
                     Style::default()
                 };
@@ -426,9 +423,9 @@ impl CodePanel {
                         sorted_files.len()
                     ))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(self.theme_manager.success_color())),
+                    .border_style(Style::default().fg(self.theme_mgr().success_color())),
             )
-            .highlight_style(Style::default().bg(self.theme_manager.selected_bg_color()));
+            .highlight_style(Style::default().bg(self.theme_mgr().selected_bg_color()));
 
         frame.render_widget(file_list, area);
     }
@@ -451,8 +448,8 @@ impl CodePanel {
             let paragraph = Paragraph::new("No code available").block(BorderPresets::code(
                 self.focused,
                 self.title(),
-                self.theme_manager.focused_border_color(),
-                self.theme_manager.unfocused_border_color(),
+                self.theme_mgr().focused_border_color(),
+                self.theme_mgr().unfocused_border_color(),
             ));
             frame.render_widget(paragraph, area);
             return;
@@ -472,7 +469,7 @@ impl CodePanel {
                 let is_execution =
                     self.current_execution_line.map_or(false, |exec| exec == line_num);
                 let is_user_cursor = self.user_cursor_line.map_or(false, |user| user == line_num);
-                let has_breakpoint = self.breakpoint_manager.has_breakpoint(line_num);
+                let has_breakpoint = false; // TODO
 
                 // Start with syntax-highlighted line
                 let highlighted_line = self.highlight_line(line, line_num, max_line_num);
@@ -489,7 +486,7 @@ impl CodePanel {
                 };
 
                 let breakpoint_indicator = if has_breakpoint {
-                    Span::styled("●", Style::default().fg(self.theme_manager.error_color()))
+                    Span::styled("●", Style::default().fg(self.theme_mgr().error_color()))
                 } else {
                     Span::raw(" ")
                 };
@@ -508,9 +505,9 @@ impl CodePanel {
 
                 // Apply background highlighting for execution/cursor lines
                 let item_style = if is_execution {
-                    Style::default().bg(self.theme_manager.warning_color())
+                    Style::default().bg(self.theme_mgr().warning_color())
                 } else if is_user_cursor {
-                    Style::default().bg(self.theme_manager.highlight_bg_color())
+                    Style::default().bg(self.theme_mgr().highlight_bg_color())
                 } else {
                     Style::default()
                 };
@@ -523,8 +520,8 @@ impl CodePanel {
         let code_list = List::new(list_items).block(BorderPresets::code(
             self.focused,
             self.title(),
-            self.theme_manager.focused_border_color(),
-            self.theme_manager.unfocused_border_color(),
+            self.theme_mgr().focused_border_color(),
+            self.theme_mgr().unfocused_border_color(),
         ));
 
         frame.render_widget(code_list, area);
@@ -556,7 +553,7 @@ impl CodePanel {
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_manager.accent_color()));
+                .style(Style::default().fg(self.theme_mgr().accent_color()));
             frame.render_widget(status_paragraph, status_area);
 
             // Help line - updated to include file selector
@@ -573,13 +570,13 @@ impl CodePanel {
                     .to_string()
             };
             let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_manager.help_text_color()));
+                .style(Style::default().fg(self.theme_mgr().help_text_color()));
             frame.render_widget(help_paragraph, help_area);
         }
     }
 }
 
-impl Panel for CodePanel {
+impl PanelTr for CodePanel {
     fn panel_type(&self) -> PanelType {
         PanelType::Code
     }
@@ -616,9 +613,9 @@ impl Panel for CodePanel {
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let border_color = if self.focused {
-            self.theme_manager.focused_border_color()
+            self.theme_mgr().focused_border_color()
         } else {
-            self.theme_manager.unfocused_border_color()
+            self.theme_mgr().unfocused_border_color()
         };
 
         // Split area if file selector is shown
@@ -681,8 +678,8 @@ impl Panel for CodePanel {
                     // Allow breakpoints to work in file selector mode
                     KeyCode::Char('b') | KeyCode::Char('B') => {
                         if let Some(line) = self.user_cursor_line {
-                            let mgr = &self.breakpoint_manager;
-                            let added = mgr.toggle_breakpoint(line);
+                            // TODO
+                            let added = false;
                             if added {
                                 debug!("Added breakpoint at line {}", line);
                             } else {
@@ -735,8 +732,8 @@ impl Panel for CodePanel {
             KeyCode::Char('b') | KeyCode::Char('B') => {
                 // Toggle breakpoint at user cursor position
                 if let Some(line) = self.user_cursor_line {
-                    let mgr = &self.breakpoint_manager;
-                    let added = mgr.toggle_breakpoint(line);
+                    // TODO
+                    let added = false;
                     if added {
                         debug!("Added breakpoint at line {}", line);
                     } else {
@@ -753,10 +750,10 @@ impl Panel for CodePanel {
                 debug!("Step (next instruction) requested from code panel");
                 let exec_mgr = &self.execution_manager;
                 // For now, simulate moving to next snapshot
-                let current = exec_mgr.current_snapshot();
-                let total = exec_mgr.total_snapshots();
+                let current = self.exec_mgr_mut().current_snapshot();
+                let total = self.exec_mgr_mut().total_snapshots();
                 if current < total.saturating_sub(1) {
-                    exec_mgr.update_state(current + 1, total, Some(current + 10), None);
+                    self.exec_mgr_mut().update_state(current + 1, total, Some(current + 10), None);
                     debug!("Stepped to snapshot {}", current + 1);
                 }
                 Ok(EventResponse::Handled)
@@ -765,12 +762,11 @@ impl Panel for CodePanel {
                 // Reverse step: Move to previous snapshot/instruction
                 // TODO: This will send a reverse step command to the RPC server
                 debug!("Reverse step (previous instruction) requested from code panel");
-                let exec_mgr = &self.execution_manager;
                 // For now, simulate moving to previous snapshot
-                let current = exec_mgr.current_snapshot();
-                let total = exec_mgr.total_snapshots();
+                let current = self.exec_mgr_mut().current_snapshot();
+                let total = self.exec_mgr_mut().total_snapshots();
                 if current > 0 {
-                    exec_mgr.update_state(current - 1, total, Some(current + 8), None);
+                    self.exec_mgr_mut().update_state(current - 1, total, Some(current + 8), None);
                     debug!("Reverse stepped to snapshot {}", current - 1);
                 }
                 Ok(EventResponse::Handled)
@@ -781,10 +777,10 @@ impl Panel for CodePanel {
                 debug!("Next (step over) requested from code panel");
                 let exec_mgr = &self.execution_manager;
                 // For now, simulate stepping over to next significant point
-                let current = exec_mgr.current_snapshot();
-                let total = exec_mgr.total_snapshots();
+                let current = self.exec_mgr_mut().current_snapshot();
+                let total = self.exec_mgr_mut().total_snapshots();
                 let next_pos = (current + 5).min(total.saturating_sub(1));
-                exec_mgr.update_state(next_pos, total, Some(next_pos + 9), None);
+                self.exec_mgr_mut().update_state(next_pos, total, Some(next_pos + 9), None);
                 debug!("Next (step over) to snapshot {}", next_pos);
 
                 Ok(EventResponse::Handled)
@@ -795,10 +791,10 @@ impl Panel for CodePanel {
                 debug!("Previous (reverse step over) requested from code panel");
                 let exec_mgr = &self.execution_manager;
                 // For now, simulate stepping back to previous significant point
-                let current = exec_mgr.current_snapshot();
-                let total = exec_mgr.total_snapshots();
+                let current = self.exec_mgr_mut().current_snapshot();
+                let total = self.exec_mgr_mut().total_snapshots();
                 let prev_pos = current.saturating_sub(5);
-                exec_mgr.update_state(prev_pos, total, Some(prev_pos + 9), None);
+                self.exec_mgr_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
                 debug!("Previous (reverse step over) to snapshot {}", prev_pos);
 
                 Ok(EventResponse::Handled)
@@ -831,5 +827,35 @@ impl Panel for CodePanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    /// Get execution manager read-only reference
+    fn exec_mgr(&self) -> RwLockReadGuard<'_, ExecutionManager> {
+        self.execution_manager.read().expect("ExecutionManager lock poisoned")
+    }
+
+    /// Get execution manager reference
+    fn exec_mgr_mut(&self) -> RwLockWriteGuard<'_, ExecutionManager> {
+        self.execution_manager.write().expect("ExecutionManager lock poisoned")
+    }
+
+    /// Get resource manager read-only reference
+    fn res_mgr(&self) -> RwLockReadGuard<'_, ResourceManager> {
+        self.resource_manager.read().expect("ResourceManager lock poisoned")
+    }
+
+    /// Get resource manager reference
+    fn res_mgr_mut(&self) -> RwLockWriteGuard<'_, ResourceManager> {
+        self.resource_manager.write().expect("ResourceManager lock poisoned")
+    }
+
+    /// Get theme manager reference
+    fn theme_mgr(&self) -> RwLockReadGuard<'_, ThemeManager> {
+        self.theme_manager.read().expect("ThemeManager lock poisoned")
+    }
+
+    /// Get theme manager reference
+    fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
+        self.theme_manager.write().expect("ThemeManager lock poisoned")
     }
 }

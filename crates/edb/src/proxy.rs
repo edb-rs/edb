@@ -196,35 +196,7 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
 }
 
 fn find_proxy_binary() -> Result<std::path::PathBuf> {
-    // Try to find edb-rpc-proxy binary next to the current executable
-    let current_exe = std::env::current_exe()?;
-    let proxy_binary = current_exe
-        .parent()
-        .ok_or_else(|| eyre!("Could not get parent directory of current executable"))?
-        .join("edb-rpc-proxy");
-
-    if proxy_binary.exists() {
-        return Ok(proxy_binary);
-    }
-
-    // Try with .exe extension on Windows
-    #[cfg(windows)]
-    {
-        let proxy_binary_exe = proxy_binary.with_extension("exe");
-        if proxy_binary_exe.exists() {
-            return Ok(proxy_binary_exe);
-        }
-    }
-
-    // Try to find it in PATH
-    if let Ok(output) = Command::new("which").arg("edb-rpc-proxy").output() {
-        if output.status.success() {
-            let path = String::from_utf8(output.stdout)?.trim().to_string();
-            return Ok(std::path::PathBuf::from(path));
-        }
-    }
-
-    Err(eyre!("Could not find edb-rpc-proxy binary. Make sure it's built and in the same directory as edb or in PATH."))
+    crate::utils::find_proxy_binary()
 }
 
 async fn wait_for_proxy_ready(port: u16) -> Result<()> {
