@@ -1,245 +1,355 @@
-# EDB Architecture
+# EDB Architecture Documentation
 
 ## Overview
 
-EDB (Ethereum Debugger) is a step-by-step debugger for Ethereum transactions, designed to provide deep visibility into smart contract execution. It works by instrumenting contract bytecode with debugging hooks and replaying transactions in a controlled environment.
+EDB (Ethereum Debugger) is a sophisticated time-travel debugger for Ethereum transactions that provides source-level debugging capabilities through bytecode instrumentation and comprehensive state snapshots. The system achieves this by replaying transactions in a controlled environment with instrumented contracts that capture execution state at strategic points.
 
 ## System Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐
-│   CLI (edb)     │     │   Web Browser   │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         │                       │
-┌────────▼────────┐     ┌────────▼────────┐
-│   TUI Module    │     │  WebUI Module   │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         └───────────┬───────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                         User Interface                       │
+├─────────────────────────┬────────────────────────────────────┤
+│      Terminal UI        │           Web UI                   │
+│       (TUI Crate)       │        (WebUI Crate)              │
+└───────────┬─────────────┴──────────────┬────────────────────┘
+            │                            │
+            │      JSON-RPC API          │
+            └────────────┬───────────────┘
+                         │
+┌────────────────────────▼─────────────────────────────────────┐
+│                    Engine Module                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │                 Core Engine (core.rs)                │    │
+│  ├─────────────────────────────────────────────────────┤    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │    │
+│  │  │  Source  │  │ Analysis │  │  Instrumentation │  │    │
+│  │  │ Download │  │  (AST)   │  │   & Compilation  │  │    │
+│  │  └──────────┘  └──────────┘  └──────────────────┘  │    │
+│  ├─────────────────────────────────────────────────────┤    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │    │
+│  │  │  Tweak   │  │ Inspector│  │    Snapshots     │  │    │
+│  │  │ Bytecode │  │  (REVM)  │  │  (Dual-Layer)    │  │    │
+│  │  └──────────┘  └──────────┘  └──────────────────┘  │    │
+│  ├─────────────────────────────────────────────────────┤    │
+│  │              RPC Server (server.rs)                  │    │
+│  └─────────────────────────────────────────────────────┘    │
+└────────────────────┬─────────────────────────────────────────┘
                      │
-                     │ JSON-RPC
+┌────────────────────▼─────────────────────────────────────────┐
+│                    Common Module                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │   • Forking & Transaction Replay (forking.rs)        │    │
+│  │   • EVM Context Management (context.rs)              │    │
+│  │   • Caching Infrastructure (cache.rs)                │    │
+│  │   • Hardfork Specification (spec_id.rs)              │    │
+│  │   • Shared Types (types/)                            │    │
+│  └─────────────────────────────────────────────────────┘    │
+└────────────────────┬─────────────────────────────────────────┘
                      │
-            ┌────────▼────────┐
-            │  Engine Module  │
-            │                 │
-            │ ┌─────────────┐ │
-            │ │   Source    │ │
-            │ │  Download   │ │
-            │ ├─────────────┤ │
-            │ │Instrumenter │ │
-            │ ├─────────────┤ │
-            │ │  Compiler   │ │
-            │ ├─────────────┤ │
-            │ │ RPC Server  │ │
-            │ └─────────────┘ │
-            └─────┬───────────┘
-                  │
-                  │ Uses
-                  │
-            ┌─────▼───────────┐
-            │  Utils Module   │
-            │                 │
-            │ ┌─────────────┐ │
-            │ │   Forking   │ │
-            │ │   & Chain   │ │
-            │ │   Replay    │ │
-            │ └─────────────┘ │
-            └─────┬───────────┘
-                  │
-                  │
-            ┌─────▼───────────┐
-            │ Ethereum Node   │
-            │   (via RPC)     │
-            └─────────────────┘
+┌────────────────────▼─────────────────────────────────────────┐
+│                 RPC Proxy Module (Optional)                  │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │   • Multi-Provider Load Balancing                    │    │
+│  │   • Immutable Response Caching                       │    │
+│  │   • Health Monitoring & Metrics                      │    │
+│  └─────────────────────────────────────────────────────┘    │
+└────────────────────┬─────────────────────────────────────────┘
+                     │
+┌────────────────────▼─────────────────────────────────────────┐
+│              Ethereum Network (via RPC)                      │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## Core Components
 
 ### 1. EDB Binary (`crates/edb`)
 
-The main entry point that:
-- Parses command-line arguments using clap
-- **Handles chain forking and transaction replay** (calls utils crate)
-- Prepares database and environment for debugging
-- Calls engine with prepared inputs
-- Launches the selected UI (TUI or Web)
+The main orchestrator that coordinates the entire debugging workflow:
 
-**Key workflow:**
-1. Fork chain at target transaction's block
-2. Replay preceding transactions in the block
-3. Call `engine::analyze()` with forked database and environment
-4. Launch UI with results
+- **CLI Interface**: Command-line argument parsing and validation
+- **Proxy Management**: Ensures RPC proxy is running for optimal performance
+- **Workflow Orchestration**: Coordinates forking, engine preparation, and UI launch
+- **UI Selection**: Launches appropriate interface (TUI or Web) based on user preference
 
-### 2. Utils Module (`crates/utils`)
+**Key Files:**
+- `main.rs`: Entry point and CLI handling
+- `proxy.rs`: RPC proxy lifecycle management
+- `cmd/replay.rs`: Transaction replay command implementation
+- `cmd/debug.rs`: Foundry test debugging (future)
 
-**NEW** - Shared utilities for chain interaction:
+### 2. Common Module (`crates/common`)
 
-#### a. Forking Module (`forking.rs`)
-- **`fork_and_prepare()`**: Creates chain fork and prepares environment
-- **`replay_transaction()`**: Analyzes transactions to find touched contracts
-- **`analyze_block_transactions()`**: Identifies transaction dependencies
-- Uses Alloy provider for Ethereum RPC communication
-- Returns `ForkResult` with database, environment, and fork info
+Shared utilities and core functionality used across all components:
+
+#### Forking & Replay (`forking.rs`)
+- **Real REVM Execution**: Uses `transact_commit()` for accurate state changes
+- **Block History Replay**: Replays all preceding transactions in a block
+- **Progress Tracking**: Visual progress bars for long replay operations
+- **Fork Result**: Returns prepared context, environment, and fork information
+
+#### Context Management (`context.rs`)
+- **EdbContext**: Wrapper around REVM Context with debugging extensions
+- **EdbDB**: Database wrapper for state management
+- **Helper Methods**: Simplified EVM building and transaction execution
+
+#### Caching (`cache.rs`)
+- **Multi-Level Caching**: Etherscan, RPC, and compilation caches
+- **TTL Support**: Different expiration times for different data types
+- **Persistent Storage**: File-based caching across sessions
+
+#### Hardfork Specification (`spec_id.rs`)
+- **Mainnet Mapping**: Block numbers to Ethereum hardfork SpecIds
+- **All Hardforks**: From Frontier to Cancun and beyond
+- **Efficient Lookup**: BTreeMap-based implementation
 
 ### 3. Engine Module (`crates/engine`)
 
-The core analysis and instrumentation engine containing:
+The heart of EDB's debugging capabilities:
 
-#### a. Analysis Module (`analysis/`)
-- **Accepts pre-forked database and environment as inputs**
-- Performs instrumentation on already-identified contracts
-- No longer handles chain forking (moved to utils)
+#### Core Engine (`core.rs`)
+- **Preparation Workflow**: Orchestrates the entire debugging preparation
+- **Six-Step Process**:
+  1. Replay & trace collection
+  2. Source code download
+  3. Opcode snapshot collection
+  4. Source code analysis
+  5. Code instrumentation & compilation
+  6. Hook snapshot collection
 
-#### b. Source Download Module (`source.rs`)
-- Downloads verified source code from Etherscan and other explorers
-- Supports multiple block explorers with fallback
-- Caches downloaded sources
+#### Analysis Module (`analysis/`)
+- **AST Analysis**: Parses Solidity AST to identify execution steps
+- **Variable Scope Tracking**: Manages variable visibility across scopes
+- **Step Partitioning**: Breaks code into debuggable execution steps
+- **Visibility Analysis**: Identifies private functions/variables needing modification
 
-#### c. Instrumentation Directory (`instrumentation/`)
-- **Standalone directory** (not embedded in analysis)
-- Parses Solidity source code
-- Injects debugging precompile calls at function entry points
-- Preserves original contract semantics
+**Key Components:**
+- `analyzer.rs`: Main AST walker and analysis logic
+- `variable.rs`: Variable scope and lifetime management
+- `step.rs`: Execution step identification
+- `hook.rs`: Hook placement strategies
 
-#### d. Compiler Module (`compiler.rs`)
-- Recompiles instrumented contracts using foundry-compilers
-- Manages compilation artifacts
-- Handles complex multi-file contracts
+#### Instrumentation (`instrumentation/`)
+- **Source Modification**: Inserts debugging hooks at strategic points
+- **Hook Types**:
+  - `BeforeStep`: Before executing a statement
+  - `VariableInScope`: When variable becomes visible
+  - `VariableOutOfScope`: When variable leaves scope
+  - `VariableUpdate`: When variable value changes
+- **Compilation**: Uses Foundry's solc wrapper for recompilation
 
-#### e. RPC Server Directory (`rpc/`)
-- **Standalone directory** (not embedded in analysis)
-- Provides JSON-RPC interface for UI communication
-- Supports debugging commands (step, continue, inspect)
-- Manages debugging session state
+#### Inspector Module (`inspector/`)
+- **Call Tracer**: Captures all contract calls and interactions
+- **Opcode Inspector**: Fine-grained instruction-level snapshots
+- **Hook Inspector**: Captures state at instrumentation points
+- **Tweak Inspector**: Manages bytecode replacement
 
-### 4. TUI Module (`crates/tui`)
+#### Bytecode Tweaking (`tweak.rs`)
+- **Creation TX Discovery**: Finds contract creation transactions
+- **Init Code Extraction**: Gets original deployment bytecode
+- **Code Replacement**: Swaps original with instrumented bytecode
+- **Constructor Handling**: Preserves constructor arguments
 
-Terminal-based user interface that:
-- Connects to the engine via JSON-RPC
-- Displays transaction execution state
-- Provides interactive debugging controls
-- **Currently skeleton implementation**
+#### Snapshot Management (`snapshot.rs`)
+- **Dual-Layer System**: Merges opcode and hook snapshots
+- **Unified Interface**: Single snapshot list for debugging
+- **Frame Tracking**: Maintains call stack relationships
+- **State Capture**: Complete EVM state at each point
 
-### 5. WebUI Module (`crates/webui`)
+#### RPC Server (`rpc/`)
+- **JSON-RPC API**: Standard debugging protocol
+- **Methods**:
+  - `edb_getTrace`: Get execution trace
+  - `edb_getSnapshot`: Get state at specific point
+  - `edb_navigate`: Move through execution
+- **Thread-Safe**: Uses Arc for shared state access
 
-Browser-based user interface that:
-- Serves a web application
-- Connects to the engine via WebSocket/JSON-RPC
-- Provides rich visualization of execution
-- **Currently skeleton implementation**
+### 4. RPC Proxy Module (`crates/rpc-proxy`)
+
+Intelligent caching proxy for improved performance:
+
+#### Features
+- **Multi-Provider Support**: Load balancing across multiple RPC endpoints
+- **Smart Caching**: Caches immutable blockchain data
+- **Health Monitoring**: Automatic failover for unreliable providers
+- **Metrics Collection**: Performance and usage statistics
+- **Process Management**: Heartbeat-based lifecycle management
+
+#### Architecture
+- **Registry**: Manages provider pool and selection
+- **Cache**: In-memory and persistent caching layers
+- **Proxy Server**: Intercepts and routes RPC calls
+- **TUI**: Optional monitoring interface
+
+### 5. TUI Module (`crates/tui`)
+
+Rich terminal-based debugging interface:
+
+#### Panels
+- **Code Panel**: Syntax-highlighted source with execution position
+- **Trace Panel**: Interactive call hierarchy navigation
+- **Terminal Panel**: Command input and output
+- **Display Panel**: Variable and state inspection
+
+#### Features
+- **Syntax Highlighting**: Solidity and opcode highlighting
+- **Theme Support**: Customizable color schemes
+- **Keyboard Navigation**: Vi-like keybindings
+- **Resource Management**: Efficient terminal rendering
+
+### 6. WebUI Module (`crates/webui`)
+
+Browser-based debugging interface (in development):
+
+- **Axum Server**: Modern async web framework
+- **REST API**: HTTP interface to engine
+- **WebSocket**: Real-time debugging updates
+- **React Frontend**: (Planned) Interactive web application
 
 ## Debugging Workflow
 
-1. **Transaction Selection**
-   - User provides transaction hash via CLI: `edb replay <tx_hash>`
-   - EDB binary parses arguments and identifies target transaction
+### Phase 1: Transaction Preparation
 
-2. **Chain Forking** (EDB Binary → Utils)
-   - EDB calls `utils::fork_and_prepare()` with target transaction hash
-   - Utils connects to Ethereum RPC using Alloy provider
-   - Creates fork at target transaction's block
-   - Identifies preceding transactions that need replay
-   - Returns `ForkResult` with database, environment, and fork info
+1. **Parse Arguments**: Extract transaction hash and options
+2. **Start RPC Proxy**: Ensure caching proxy is running
+3. **Fork Chain**: Create isolated fork at target block
+4. **Replay History**: Execute preceding transactions
 
-3. **Engine Analysis** (EDB Binary → Engine)
-   - EDB calls `engine::analyze()` with forked database and environment
-   - Engine accepts pre-prepared inputs (no chain interaction)
+### Phase 2: Analysis & Instrumentation
 
-4. **Contract Analysis** (Engine)
-   - Uses transaction receipts to collect touched contract addresses
-   - Downloads source code for each contract from block explorers
-   - Caches sources for future use
+1. **Collect Traces**: Identify all touched contracts
+2. **Download Sources**: Fetch from Etherscan with caching
+3. **Analyze AST**: Parse code structure and identify steps
+4. **Insert Hooks**: Add debugging instrumentation
+5. **Recompile**: Generate instrumented bytecode
 
-5. **Instrumentation** (Engine)
-   - Parse Solidity source code using solang
-   - Inject precompile calls at debugging points (address `0x000...023333`)
-   - Recompile contracts with instrumentation using foundry-compilers
+### Phase 3: Execution & Snapshots
 
-6. **State Preparation** (Engine)
-   - Replace original bytecode with instrumented versions
-   - Reconstruct deployment state in forked environment
+1. **Tweak Bytecode**: Replace original with instrumented
+2. **Collect Opcode Snapshots**: Fine-grained state capture
+3. **Collect Hook Snapshots**: Source-level breakpoints
+4. **Merge Snapshots**: Create unified debugging timeline
 
-7. **Debugging Execution** (Engine → UI)
-   - Re-execute transaction with instrumentation
-   - Capture state snapshots at each debugging point
-   - Provide JSON-RPC interface for UI control
+### Phase 4: Interactive Debugging
 
-8. **User Interface**
-   - Launch TUI or Web UI based on CLI flag
-   - Connect to engine's JSON-RPC server
-   - Provide step-by-step debugging controls
+1. **Start RPC Server**: Launch debugging API
+2. **Launch UI**: Start TUI or Web interface
+3. **Connect to Engine**: Establish RPC connection
+4. **Debug Session**: Step through execution interactively
 
 ## Key Design Decisions
 
-### Instrumentation via Precompiles
+### 1. Dual-Layer Snapshot System
 
-We use a special precompile address (`0x000...023333`) for debugging hooks. This approach:
-- Minimizes gas overhead
-- Preserves contract behavior
-- Enables efficient state capture
+**Rationale**: Combines benefits of both approaches
+- **Opcode Snapshots**: Complete coverage, fine granularity
+- **Hook Snapshots**: Source-level accuracy, semantic meaning
+- **Intelligent Merging**: Prioritizes hook snapshots when available
 
-### Fork-based Isolation
+### 2. REVM Integration
 
-Each debugging session operates on an isolated fork, ensuring:
-- No interference with live networks
-- Reproducible debugging sessions
-- Safe experimentation
+**Benefits**:
+- **Accuracy**: Real EVM execution, not simulation
+- **Performance**: Optimized Rust implementation
+- **Flexibility**: Custom inspectors and modifications
+- **Compatibility**: Supports all Ethereum hardforks
 
-### Source-level Debugging
+### 3. Modular Architecture
 
-By working with source code rather than bytecode:
-- Developers debug in familiar Solidity
-- Variable names and structure are preserved
-- Complex logic is easier to follow
+**Advantages**:
+- **Separation of Concerns**: Each crate has clear responsibility
+- **Reusability**: Components can be used independently
+- **Testability**: Isolated units are easier to test
+- **Maintainability**: Changes are localized
 
-### Separation of Concerns
+### 4. Caching Strategy
 
-**NEW** - Clear architectural separation:
-- **EDB Binary**: Orchestration and forking workflow
-- **Utils Crate**: Chain interaction and transaction replay
-- **Engine Crate**: Analysis and instrumentation (no RPC dependencies)
-- **UI Crates**: Interface and visualization (skeleton only)
+**Levels**:
+1. **RPC Proxy**: Network-level caching
+2. **Etherscan Cache**: Source code caching
+3. **Compilation Cache**: Artifact caching
+4. **State Cache**: Snapshot caching
+
+### 5. Source-Level Debugging
+
+**Why Source, Not Bytecode**:
+- **Developer Friendly**: Work with familiar Solidity
+- **Semantic Understanding**: Preserve high-level concepts
+- **Variable Names**: Keep original identifiers
+- **Control Flow**: Understand program logic
+
+## Performance Optimizations
+
+### Caching
+- **Immutable Data**: Blocks, transactions, receipts cached forever
+- **TTL-Based**: Different expiration for different data types
+- **Memory + Disk**: Hot data in memory, cold on disk
+
+### Parallelization
+- **Async I/O**: Non-blocking network operations
+- **Concurrent Downloads**: Parallel source fetching
+- **Batch Processing**: Group related operations
+
+### Lazy Evaluation
+- **On-Demand Snapshots**: Only capture when needed
+- **Incremental Compilation**: Recompile only changed contracts
+- **Selective Instrumentation**: Instrument only relevant code
 
 ## Security Considerations
 
-- Never expose debugging infrastructure to untrusted networks
-- API keys for block explorers should be kept secure
-- Instrumented contracts should never be deployed to mainnet
+### Isolation
+- **Forked Environment**: No interaction with live network
+- **Sandboxed Execution**: Controlled EVM environment
+- **Read-Only by Default**: Explicit permission for state changes
 
-## Performance Considerations
+### API Security
+- **Local Only**: RPC server binds to localhost
+- **Authentication**: (Future) Token-based access control
+- **Rate Limiting**: (Future) Prevent resource exhaustion
 
-- Source download is cached to avoid repeated API calls
-- Compilation uses optimized settings for faster builds
-- State snapshots are created on-demand to minimize overhead
+### Data Protection
+- **API Key Management**: Secure storage of credentials
+- **Cache Encryption**: (Future) Encrypted cache storage
+- **Audit Logging**: (Future) Track all debugging operations
 
-## Implementation Status
+## Future Enhancements
 
-### ✅ Completed
-- **Project structure**: 5-crate workspace (edb, engine, utils, tui, webui)
-- **CLI interface**: Argument parsing with clap, transaction replay command
-- **Chain forking**: Full implementation with Alloy provider integration
-- **Transaction replay**: Analysis of transaction receipts and touched contracts
-- **Architecture**: Proper separation between forking (utils) and analysis (engine)
-- **Compilation**: Works with Rust 1.88 and latest Foundry dependencies
+### Near Term
+- **Complete Web UI**: Full-featured browser interface
+- **Foundry Integration**: Direct test debugging support
+- **Breakpoint Conditions**: Conditional breakpoints
+- **Watch Expressions**: Monitor specific variables
 
-### 🚧 In Development
-- **Engine analysis**: Core `analyze()` function accepts forked inputs
-- **Source download**: Basic structure for Etherscan integration
-- **Instrumentation**: Directory structure for bytecode modification
-- **RPC server**: JSON-RPC interface for UI communication
+### Medium Term
+- **Multi-Chain Support**: Polygon, Arbitrum, Optimism
+- **Collaborative Debugging**: Share debugging sessions
+- **Execution Recording**: Save and replay sessions
+- **Advanced Analysis**: Gas profiling, security checks
 
-### 📋 Todo
-- **Complete engine implementation**: Source download, instrumentation, compilation
-- **UI implementations**: TUI and WebUI beyond skeleton
-- **Real transaction testing**: Integration with live Ethereum data
-- **Documentation completion**: Full dev.md and updated README
+### Long Term
+- **AI Assistant**: Intelligent debugging suggestions
+- **Formal Verification**: Integration with verification tools
+- **Custom Inspectors**: Plugin system for extensions
+- **Cloud Debugging**: Remote debugging infrastructure
 
-## Future Extensions
+## Testing Strategy
 
-- Breakpoint support with conditional logic
-- Watch expressions for variable monitoring
-- Time-travel debugging with state snapshots
-- Multi-transaction debugging sessions
-- Integration with development frameworks (Hardhat, Foundry)
-- Support for additional block explorers beyond Etherscan
+### Unit Tests
+- **Pure Functions**: Type conversions, utilities
+- **Isolated Components**: Individual module testing
+- **Mock Dependencies**: Simulated external services
+
+### Integration Tests
+- **Real Transactions**: Mainnet transaction replay
+- **End-to-End**: Complete debugging workflow
+- **Performance**: Benchmark critical paths
+
+### Test Coverage Areas
+- **Forking**: Different block heights and transactions
+- **Analysis**: Various Solidity constructs
+- **Instrumentation**: Edge cases in code modification
+- **Snapshots**: State capture accuracy
+
+---
+
+*This architecture documentation was crafted with Claude with Love ❤️*

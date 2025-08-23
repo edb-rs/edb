@@ -1,233 +1,234 @@
-# EDB - Ethereum Debugger
+# EDB - Ethereum Debugger 🔍
 
-A powerful step-by-step debugger for Ethereum transactions, providing deep visibility into smart contract execution.
+**Advanced Time-Travel Debugger for Ethereum Transactions**
 
-_This document is created by Claude with ❤️._ 
+> ⚠️ **Note**: EDB is currently under active development. Features and APIs may change as we continue to improve the debugging experience.
 
-**The current open-source version is under construction.**
+EDB is a sophisticated step-by-step debugger for Ethereum transactions that provides time-travel debugging capabilities with source-level instrumentation. It allows developers to replay, analyze, and debug Ethereum transactions with unprecedented granularity and control.
 
-## Features
+## ✨ Key Features
 
-- 🔍 **Transaction Replay**: Debug any historical transaction by its hash
-- 🧪 **Test Debugging**: Debug Foundry test cases directly
-- 📝 **Source-Level Debugging**: Step through Solidity code, not bytecode
-- 🎯 **State Inspection**: View contract state, stack, memory at each step
-- 🖥️ **Multiple UIs**: Choose between Terminal UI or Web UI
-- 🔧 **Instrumentation**: Automatic contract instrumentation for debugging
+- **🕰️ Time-Travel Debugging**: Navigate through transaction execution history with full state snapshots at every step
+- **📝 Source-Level Instrumentation**: Automatically instruments Solidity source code for strategic breakpoint placement
+- **🔄 Real Transaction Replay**: Uses REVM for accurate transaction execution with proper hardfork handling
+- **⚡ Intelligent Caching**: Multi-level caching system for Etherscan data, RPC responses, and compiled contracts
+- **🖥️ Multiple Interfaces**: Both Terminal UI (TUI) and Web UI (coming soon) for different debugging preferences
+- **🔧 Dual-Layer Snapshots**: Combines opcode-level and hook-based snapshots for comprehensive debugging coverage
+- **🚀 RPC Proxy**: Built-in caching proxy server for improved performance and reliability
 
-## Installation
+## 🚀 Quick Start
 
-### From Source
+### Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/MedGa-eth/EDB.git
 cd EDB
+
+# Build the project
+cargo build --release
+
+# Install the binaries
 cargo install --path crates/edb
+cargo install --path crates/rpc-proxy
+cargo install --path crates/tui
 ```
 
 ### Prerequisites
 
-- Rust 1.88+ (required by latest foundry dependencies)
-- An Ethereum RPC endpoint
-- Etherscan API key (for verified contract source)
+- **Rust**: 1.88+ (required by latest REVM and Foundry dependencies)
+- **Ethereum RPC endpoint**: For blockchain access
+- **Etherscan API key**: For fetching verified source code (optional but recommended)
 
-## Quick Start
+### Basic Usage
 
-### Debug a Transaction
-
-```bash
-# Debug a mainnet transaction
-edb replay 0x1234567890abcdef... --rpc-url https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
-
-# With Etherscan API key for source code
-export ETHERSCAN_API_KEY=your_key_here
-edb replay 0x1234567890abcdef...
-```
-
-### Debug a Foundry Test
+Debug a mainnet transaction:
 
 ```bash
-# Debug a specific test case
-edb test testTransferFunction --rpc-url http://localhost:8545
+# Debug with Terminal UI (default)
+edb replay 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
+
+# Debug with Web UI (experimental)
+edb replay 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060 --ui web
+
+# Quick mode (skip historical replay for recent transactions)
+edb replay 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060 --quick
+
+# Use custom RPC endpoint
+edb replay 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060 --rpc-url https://eth.llamarpc.com
 ```
-
-### UI Options
-
-```bash
-# Use Terminal UI (default)
-edb replay 0x... --ui tui
-
-# Use Web UI
-edb replay 0x... --ui web
-```
-
-## Configuration
 
 ### Environment Variables
 
-Create a `.env` file in your project root:
+```bash
+# Set RPC endpoint
+export ETH_RPC_URL=https://eth.llamarpc.com
 
-```env
-# Ethereum RPC endpoint
-ETH_RPC_URL=http://localhost:8545
+# Set Etherscan API key for source download
+export ETHERSCAN_API_KEY=your_key_here
 
-# Etherscan API key for source download
-ETHERSCAN_API_KEY=your_api_key_here
-
-# Logging level
-RUST_LOG=info
+# Enable debug logging
+export RUST_LOG=debug
 ```
 
-### Command Line Options
+### RPC Proxy Management
 
-```
-edb [OPTIONS] <COMMAND>
-
-Commands:
-  replay  Replay an existing transaction
-  test    Debug a Foundry test case
-
-Options:
-  --rpc-url <URL>      Ethereum RPC endpoint [env: ETH_RPC_URL]
-  --ui <MODE>          User interface (tui/web) [default: tui]
-  --block <NUMBER>     Block number to fork at
-  --port <PORT>        Port for JSON-RPC server [default: 8545]
-  --help               Print help
-```
-
-## How It Works
-
-1. **Fork Creation**: EDB creates a local fork of the blockchain at the transaction's block
-2. **Contract Analysis**: Identifies all contracts involved in the transaction
-3. **Source Download**: Fetches verified source code from Etherscan
-4. **Instrumentation**: Injects debugging hooks into the source code
-5. **Recompilation**: Compiles instrumented contracts
-6. **Execution**: Replays transaction with debugging enabled
-7. **UI Connection**: Provides step-by-step control through chosen UI
-
-## Debugging Interface
-
-### Terminal UI Controls
-
-- `n` - Step to next execution point
-- `c` - Continue to next breakpoint
-- `q` - Quit debugger
-- `↑/↓` - Navigate stack frames
-- `Tab` - Switch between panels
-
-### Web UI Features
-
-- Visual execution flow
-- Interactive state inspector
-- Source code highlighting
-- Breakpoint management
-- Variable watches
-
-## Architecture
-
-EDB consists of five main components:
-
-- **EDB Binary**: CLI interface and workflow orchestration
-- **Utils Crate**: Chain forking and transaction replay
-- **Engine Crate**: Core analysis and instrumentation logic
-- **TUI Crate**: Terminal-based debugging interface (skeleton)
-- **WebUI Crate**: Browser-based debugging interface (skeleton)
-
-See [arch.md](arch.md) for detailed architecture documentation.
-
-## Implementation Status
-
-### ✅ Completed Features
-- **CLI Interface**: Full argument parsing and command handling
-- **Chain Forking**: Complete implementation with Alloy provider integration
-- **Transaction Analysis**: Receipt analysis and contract discovery
-- **Project Structure**: 5-crate workspace with proper separation
-
-### 🚧 In Development
-- **Engine Analysis**: Core debugging logic (partial implementation)
-- **Source Download**: Etherscan API integration framework
-- **Contract Instrumentation**: Solidity parsing and precompile injection
-- **RPC Server**: JSON-RPC interface for UI communication
-
-### 📋 Planned Features
-- **UI Implementation**: Complete TUI and WebUI interfaces
-- **Real Transaction Testing**: Integration with live Ethereum data
-- **Advanced Debugging**: Breakpoints, watch expressions, time-travel
-
-## Development
-
-See [dev.md](dev.md) for development setup and guidelines.
-
-### Building from Source
+EDB includes an intelligent caching RPC proxy that dramatically improves performance:
 
 ```bash
-# Build all components
-cargo build --workspace
+# Check proxy status
+edb proxy-status
 
-# Run tests (when implemented)
-cargo test --workspace
-
-# Test chain forking functionality (requires RPC access)
-RUST_LOG=debug cargo run --bin edb -- replay 0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
-
-# Build optimized release version
-cargo build --release
+# The proxy starts automatically when running replay/debug commands
+# It runs in the background and caches immutable blockchain data
 ```
 
-### Current Capabilities
+## 🏗️ Architecture Overview
 
-As of the current implementation, EDB can:
-- Parse command-line arguments and identify target transactions
-- Connect to Ethereum RPC endpoints using Alloy
-- Fork chains at specific blocks and analyze transaction dependencies  
-- Extract touched contract addresses from transaction receipts
-- Set up the foundation for source download and instrumentation
+EDB consists of several modular crates working together:
 
-**Note**: Complete end-to-end debugging is not yet functional as the engine analysis needs completion.
+| Crate | Purpose | Status |
+|-------|---------|--------|
+| **`edb`** | Main CLI orchestrator and workflow management | ✅ Complete |
+| **`engine`** | Core debugging engine with instrumentation | 🚧 In Development |
+| **`common`** | Shared utilities, types, and forking logic | ✅ Complete |
+| **`rpc-proxy`** | Caching proxy for RPC performance | ✅ Complete |
+| **`tui`** | Terminal-based debugging interface | 🚧 In Development |
+| **`webui`** | Browser-based debugging interface | 📋 Planned |
 
-## Current Limitations
+For detailed architecture documentation, see [ARCH.md](./ARCH.md).
 
-### Implementation Status
-- **UI interfaces are skeleton implementations only** - debugging interface not yet functional
-- **Engine analysis is partially implemented** - source download and instrumentation need completion
-- **Testing limited to compilation** - real transaction debugging not yet tested
+## 🔬 How It Works
 
-### Technical Limitations  
-- Only supports transactions with verified source code
-- Instrumentation may increase gas usage
-- Some complex contracts may fail to recompile
-- Limited to single transaction debugging (no cross-transaction state)
-- Requires Ethereum RPC access for chain forking
+### Debugging Workflow
 
-## Contributing
+1. **Transaction Replay**: EDB replays the target transaction using REVM with the exact blockchain state at that block
+2. **Trace Collection**: Captures all contract interactions and call traces during execution
+3. **Source Download**: Fetches verified source code from Etherscan for all touched contracts
+4. **Code Analysis**: Analyzes Solidity AST to identify execution steps, variable scopes, and instrumentation points
+5. **Instrumentation**: Inserts strategic debugging hooks into the source code
+6. **Recompilation**: Compiles instrumented contracts with debugging symbols
+7. **Bytecode Tweaking**: Replaces original bytecode with instrumented versions for debugging
+8. **Snapshot Collection**: Captures comprehensive state snapshots at both opcode and source levels
+9. **Interactive Debugging**: Provides time-travel debugging through TUI or Web interface with RPC API
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md).
+### Key Innovations
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- **Dual-Layer Snapshot System**: Intelligently merges opcode-level and hook-based snapshots
+- **Smart Bytecode Tweaking**: Downloads contract creation transactions and replaces deployed bytecode
+- **Real EVM Execution**: Uses REVM's `transact_commit()` for accurate transaction replay
+- **Comprehensive Caching**: Multi-level caching at Etherscan, RPC, and compilation layers
 
-## License
+## 🖥️ User Interfaces
 
-Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+### Terminal UI (TUI)
+
+The TUI provides a rich terminal-based debugging experience:
+
+- **Code Panel**: Syntax-highlighted Solidity source with current execution position
+- **Trace Panel**: Interactive call hierarchy and execution trace
+- **Terminal Panel**: Command input and debugging output
+- **Display Panel**: Variable inspection and state visualization
+
+**Controls:**
+- `n` / `Space` - Step to next execution point
+- `N` - Step backward
+- `c` - Continue to next breakpoint
+- `↑`/`↓` - Navigate trace
+- `Tab` - Switch panels
+- `q` - Quit debugger
+
+### Web UI (Coming Soon)
+
+The Web UI will provide:
+- Visual execution flow diagram
+- Interactive state inspector
+- Source code with inline variable values
+- Advanced breakpoint management
+- Watch expressions
+
+## 🛠️ Development
+
+See [DEV.md](./DEV.md) for detailed development instructions, including:
+- Building from source
+- Running tests
+- Contributing guidelines
+- Architecture details
+- Adding new features
+
+### Quick Development Setup
+
+```bash
+# Run all tests
+cargo test --workspace
+
+# Run with debug logging
+RUST_LOG=debug cargo run -- replay 0x...
+
+# Check code quality
+cargo clippy --all-targets --all-features
+cargo fmt --check
+```
+
+## 📊 Performance
+
+EDB is optimized for performance with:
+- **RPC Proxy Caching**: Reduces network calls by caching immutable data
+- **Parallel Processing**: Uses async/await for concurrent operations
+- **Smart Caching**: TTL-based caching for different data types
+- **Efficient State Management**: Optimized snapshot storage and retrieval
+
+## 🧪 Testing
+
+EDB includes comprehensive test coverage:
+
+```bash
+# Unit tests
+cargo test --lib
+
+# Integration tests (requires RPC)
+ETH_RPC_URL=https://eth.llamarpc.com cargo test --test '*' -- --ignored
+
+# Specific test suites
+cargo test -p edb-common --test forking_tests
+cargo test -p edb-engine --test source_tests
+```
+
+## 📄 License
 
 EDB is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
 
-This means:
-- ✅ You can use, modify, and distribute this software
-- ✅ You can use it for commercial purposes
-- ⚠️ You must disclose your source code when distributing
-- ⚠️ You must use the same license (AGPL-3.0)
-- ⚠️ You must state changes made to the code
+Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
 
-For commercial licensing options without AGPL restrictions, please contact the authors.
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
-See the [LICENSE](LICENSE) file for the full license text.
+See [LICENSE](./LICENSE) for the full license text.
 
-## Acknowledgments
+For commercial licensing inquiries without AGPL restrictions, please contact the authors.
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+
+Areas where we especially welcome contributions:
+- Web UI implementation
+- Additional blockchain support
+- Performance optimizations
+- Documentation improvements
+- Bug fixes and testing
+
+## 🙏 Acknowledgments
 
 - Built with [Alloy](https://github.com/alloy-rs/alloy) and [REVM](https://github.com/bluealloy/revm)
-- Inspired by traditional debuggers and Ethereum development tools
-- Special thanks to the Foundry and Ethereum development communities
+- Inspired by traditional debuggers and the Ethereum development community
+- Special thanks to the Foundry and Reth teams for their excellent libraries
+
+## 📬 Contact
+
+For questions, feedback, or support:
+- Open an issue on [GitHub](https://github.com/MedGa-eth/EDB/issues)
+- Contact the authors: Zhuo Zhang and Wuqi Zhang
+
+---
+
+*This documentation was crafted with Claude with Love ❤️*
