@@ -29,7 +29,7 @@ const MAX_TERMINAL_LINES: usize = 1000;
 const MAX_COMMAND_HISTORY: usize = 100;
 
 /// Type of terminal line
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LineType {
     /// User command (prefixed with ">")
     Command,
@@ -778,17 +778,8 @@ impl TerminalPanel {
             if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
             Icons::ARROW_RIGHT,
             if self.focused && self.mode == TerminalMode::Insert {
-                // Show line cursor in INSERT mode
-                let chars: Vec<char> = self.input_buffer.chars().collect();
-                if self.cursor_position == chars.len() {
-                    format!("{}│", self.input_buffer)
-                } else if self.cursor_position < chars.len() {
-                    let before: String = chars.iter().take(self.cursor_position).collect();
-                    let after: String = chars.iter().skip(self.cursor_position).collect();
-                    format!("{}│{}", before, after)
-                } else {
-                    self.input_buffer.clone()
-                }
+                // Don't modify the text here - we'll handle cursor overlay in rendering
+                self.input_buffer.clone()
             } else {
                 self.input_buffer.clone()
             }
@@ -831,8 +822,69 @@ impl TerminalPanel {
                     LineType::System => Style::default().fg(self.color_scheme.success_color),
                 };
 
-                // Create the line content with base style
-                let styled_line = Line::from(Span::styled(&terminal_line.content, base_style));
+                // Create the line content with base style, handling block cursor highlighting
+                let styled_line = if terminal_line.line_type == LineType::Command
+                    && display_row == all_content.len().saturating_sub(1) - start_idx  // Last line (input line)
+                    && self.focused
+                    && self.mode == TerminalMode::Insert
+                {
+                    // This is the input line - apply block cursor overlay
+                    let content = &terminal_line.content;
+                    let mut spans = Vec::new();
+
+                    // Find where the cursor should be in the displayed prompt
+                    // The prompt format is: "{icon} edb{arrow} {input}"
+                    // We need to find where the input starts
+                    let prompt_prefix = if self.connected {
+                        format!("{} edb{} ", Icons::CONNECTED, Icons::ARROW_RIGHT)
+                    } else {
+                        format!("{} edb{} ", Icons::DISCONNECTED, Icons::ARROW_RIGHT)
+                    };
+                    let prefix_len = prompt_prefix.chars().count();
+
+                    // Convert content to chars for proper indexing
+                    let chars: Vec<char> = content.chars().collect();
+                    let cursor_pos_in_line = prefix_len + self.cursor_position;
+
+                    // Build the line with cursor overlay
+                    for (i, ch) in chars.iter().enumerate() {
+                        if i == cursor_pos_in_line {
+                            // This is where the cursor should be - show as block
+                            spans.push(Span::styled(
+                                ch.to_string(),
+                                Style::default()
+                                    .bg(self.color_scheme.cursor_color)
+                                    .fg(self.color_scheme.panel_bg), // Invert colors for block cursor
+                            ));
+                        } else if i == chars.len() - 1 && cursor_pos_in_line >= chars.len() {
+                            // Cursor at end of line - add the character normally then add block
+                            spans.push(Span::styled(ch.to_string(), base_style));
+                            spans.push(Span::styled(
+                                " ", // Block cursor on empty space at end
+                                Style::default()
+                                    .bg(self.color_scheme.cursor_color)
+                                    .fg(self.color_scheme.panel_bg),
+                            ));
+                        } else {
+                            // Normal character
+                            spans.push(Span::styled(ch.to_string(), base_style));
+                        }
+                    }
+
+                    // If the input is empty but we're at the cursor position, show block cursor
+                    if chars.len() == prefix_len && self.cursor_position == 0 {
+                        spans.push(Span::styled(
+                            " ", // Block cursor on empty input
+                            Style::default()
+                                .bg(self.color_scheme.cursor_color)
+                                .fg(self.color_scheme.panel_bg),
+                        ));
+                    }
+
+                    Line::from(spans)
+                } else {
+                    Line::from(Span::styled(&terminal_line.content, base_style))
+                };
 
                 // Apply full-width highlighting to the ListItem if this is the current VIM cursor line
                 let list_item = ListItem::new(styled_line);
