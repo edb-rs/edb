@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 use std::{
     // collections::BTreeMap,
     fmt::Display,
@@ -207,16 +206,23 @@ impl Step {
     /// A new Step instance with a unique USID and default hooks.
     pub fn new(variant: StepVariant, src: SourceLocation, scope: VariableScopeRef) -> Self {
         let usid = new_usid();
-        Self {
+        let mut this = Self {
             usid,
             variant,
             src,
             function_calls: vec![],
             declared_variables: vec![],
             scope,
-            pre_hooks: vec![StepHook::BeforeStep(usid)],
+            pre_hooks: vec![],
             post_hooks: vec![],
+        };
+        match &this.variant {
+            StepVariant::FunctionEntry(_) => {}
+            _ => {
+                this.pre_hooks.push(StepHook::BeforeStep(usid));
+            }
         }
+        this
     }
 
     /// Adds a variable out-of-scope hook to this step.
