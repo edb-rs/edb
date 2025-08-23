@@ -16,6 +16,8 @@
 
 
 mod analyzer;
+use std::cell::RefCell;
+
 pub use analyzer::*;
 
 mod common;

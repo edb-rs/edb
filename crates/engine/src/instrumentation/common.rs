@@ -47,7 +47,9 @@ fn instrument_inner(
 
     for step_result in &analysis_result.steps {
         // We first handle post hooks
-        let hooks = step_result.post_hooks.iter().chain(step_result.pre_hooks.iter());
+        let post_hooks = &step_result.read().post_hooks;
+        let pre_hooks = &step_result.read().pre_hooks;
+        let hooks = post_hooks.iter().chain(pre_hooks.iter());
         for hook in hooks {
             match hook {
                 crate::StepHook::BeforeStep(_) => {
@@ -72,10 +74,10 @@ fn instrument_inner(
 fn instrument_before_step(source_text: &mut String, step_result: &StepRef) {
     let checkpoint_call = format!(
         "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode({}));\n",
-        step_result.usid,
+        step_result.read().usid,
     );
 
-    let start = step_result.src.start.unwrap_or(0);
+    let start = step_result.read().src.start.unwrap_or(0);
     source_text.insert_str(start, checkpoint_call.as_str());
 }
 

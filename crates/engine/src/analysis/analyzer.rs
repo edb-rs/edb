@@ -14,15 +14,15 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf};
 
 use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, Block, ContractDefinition, EventDefinition, ForStatement,
+    ast::SourceLocation, Block, ContractDefinition, EventDefinition, ForStatement, FunctionCall,
     FunctionDefinition, Source, SourceUnit, StateMutability, Statement, UncheckedBlock,
     VariableDeclaration, Visibility,
 };
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -30,7 +30,7 @@ use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
         visitor::VisitorAction, ScopeNode, Step, StepHook, StepRef, StepVariant, Variable,
-        VariableScope, Visitor, Walk,
+        VariableScope, VariableScopeRef, Visitor, Walk,
     },
     block_or_stmt_src,
     new_uvid,
@@ -63,7 +63,7 @@ pub struct SourceAnalysis {
     /// Processed source unit ready for analysis
     pub unit: SourceUnit,
     /// Global variable scope of the source file
-    pub global_scope: VariableScope,
+    pub global_scope: VariableScopeRef,
     /// List of analyzed execution steps in this file
     pub steps: Vec<StepRef>,
     /// State variables that should be made public
@@ -85,11 +85,11 @@ impl SourceAnalysis {
     /// A HashMap mapping UVIDs to their corresponding VariableRef instances.
     pub fn variable_table(&self) -> HashMap<UVID, VariableRef> {
         let mut table = HashMap::default();
-        fn walk_scope(scope: &VariableScope, table: &mut HashMap<UVID, VariableRef>) {
-            for (uvid, variable) in &scope.variables {
-                table.insert(*uvid, variable.clone());
+        fn walk_scope(scope: &VariableScopeRef, table: &mut HashMap<UVID, VariableRef>) {
+            for variable in scope.variables() {
+                table.insert(variable.read().id(), variable.clone());
             }
-            for child in &scope.children {
+            for child in scope.children() {
                 walk_scope(child, table);
             }
         }
@@ -108,7 +108,7 @@ impl SourceAnalysis {
     pub fn step_table(&self) -> HashMap<USID, StepRef> {
         let mut table = HashMap::default();
         for step in &self.steps {
-            table.insert(step.usid, step.clone());
+            table.insert(step.read().usid, step.clone());
         }
         table
     }
@@ -154,8 +154,13 @@ impl SourceAnalysis {
     ///   Type: Variable Declaration
     ///   Location: 45:12
     ///   Source: uint256 balance = 0;
-    ///   Pre-hooks: BeforeStep(USID: 0)
-    ///   Post-hooks: VariableInScope(UVID: UVID(2543528819662847697))
+    ///   Declared variables: balance (state): uint256 (Private)
+    ///
+    /// Step 2 (USID: 1):
+    ///   Type: Expression
+    ///   Location: 50:15
+    ///   Source: transfer(amount);
+    ///   Function calls: transfer(1 args)
     ///
     /// === Recommendations ===
     /// Private state variables that should be made public:
@@ -176,25 +181,33 @@ impl SourceAnalysis {
         // Display execution steps
         println!("=== Execution Steps ({} total) ===", self.steps.len());
         for (i, step) in self.steps.iter().enumerate() {
-            println!("Step {} (USID: {}):", i + 1, step.usid);
-            println!("  Type: {}", self.step_variant_name(&step.variant));
+            println!("Step {} (USID: {}):", i + 1, step.read().usid);
+            println!("  Type: {}", self.step_variant_name(&step.read().variant));
             println!(
                 "  Location: {}:{}",
-                step.src.start.map(|s| s.to_string()).unwrap_or_else(|| "?".to_string()),
-                step.src.length.map(|l| l.to_string()).unwrap_or_else(|| "?".to_string())
+                step.read().src.start.map(|s| s.to_string()).unwrap_or_else(|| "?".to_string()),
+                step.read().src.length.map(|l| l.to_string()).unwrap_or_else(|| "?".to_string())
             );
 
             // Display source code
-            if let Some(source_code) = self.extract_source_code(sources, &step.src) {
+            if let Some(source_code) = self.extract_source_code(sources, &step.read().src) {
                 println!("  Source: {}", source_code.trim());
             }
 
-            // Display hooks
-            if !step.pre_hooks.is_empty() {
-                println!("  Pre-hooks: {}", self.format_hooks_detailed(&step.pre_hooks));
+            // Display function calls
+            if !step.read().function_calls.is_empty() {
+                println!(
+                    "  Function calls: {}",
+                    self.format_function_calls(&step.read().function_calls)
+                );
             }
-            if !step.post_hooks.is_empty() {
-                println!("  Post-hooks: {}", self.format_hooks_detailed(&step.post_hooks));
+
+            // Display declared variables
+            if !step.read().declared_variables.is_empty() {
+                println!(
+                    "  Declared variables: {}",
+                    self.format_declared_variables(&step.read().declared_variables)
+                );
             }
             println!();
         }
@@ -249,6 +262,32 @@ impl SourceAnalysis {
                     format!("VariableOutOfScope(UVID: {uvid:?})")
                 }
                 StepHook::VariableUpdate(uvid) => format!("VariableUpdate(UVID: {uvid:?})"),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Formats a list of function calls with detailed information.
+    fn format_function_calls(&self, calls: &[FunctionCall]) -> String {
+        calls
+            .iter()
+            .map(|call| {
+                let args = call.arguments.len();
+                // The expression field contains the function being called
+                // We'll use a simple representation since extracting the name is complex
+                format!("function_call({args} args)")
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Formats a list of declared variables with detailed information.
+    fn format_declared_variables(&self, variables: &[VariableDeclaration]) -> String {
+        variables
+            .iter()
+            .map(|var| {
+                let name = &var.name;
+                name.to_string()
             })
             .collect::<Vec<_>>()
             .join(", ")
@@ -339,10 +378,10 @@ impl SourceAnalysis {
 /// - `immutable_functions`: Functions that should be made mutable
 #[derive(Debug, Clone, Default)]
 pub struct Analyzer {
-    scope_stack: Vec<VariableScope>,
+    scope_stack: Vec<VariableScopeRef>,
 
-    finished_steps: Vec<Step>,
-    current_step: Option<Step>,
+    finished_steps: Vec<StepRef>,
+    current_step: Option<StepRef>,
     /// State variables that should be made public
     private_state_variables: Vec<VariableDeclaration>,
     /// Functions that should be made public
@@ -392,7 +431,7 @@ impl Analyzer {
         assert!(self.scope_stack.len() == 1, "scope stack should have exactly one scope");
         assert!(self.current_step.is_none(), "current step should be none");
         let global_scope = self.scope_stack.pop().expect("global scope should not be empty");
-        let steps = self.finished_steps.into_iter().map(Arc::new).collect();
+        let steps = self.finished_steps;
         Ok(SourceAnalysis {
             id: source_id,
             path: source_path.clone(),
@@ -408,12 +447,18 @@ impl Analyzer {
 
 /* Scope analysis utils */
 impl Analyzer {
-    fn current_scope(&mut self) -> &mut VariableScope {
+    fn current_scope(&mut self) -> &mut VariableScopeRef {
         self.scope_stack.last_mut().expect("scope stack is empty")
     }
 
     fn enter_new_scope(&mut self, node: ScopeNode) -> eyre::Result<()> {
-        let new_scope = VariableScope { node, variables: HashMap::default(), children: vec![] };
+        let new_scope = VariableScope {
+            node,
+            variables: Vec::default(),
+            children: vec![],
+            parent: self.scope_stack.last().cloned(),
+        }
+        .into();
         self.scope_stack.push(new_scope);
         Ok(())
     }
@@ -429,11 +474,14 @@ impl Analyzer {
         let uvid = new_uvid();
         let state_variable = declaration.state_variable;
         let variable = Variable::Plain { uvid, declaration: declaration.clone(), state_variable };
-        scope.variables.insert(uvid, Arc::new(variable));
+        scope.write().variables.push(variable.into());
 
-        // after the step is executed, the variable becomes in scope
         if let Some(step) = self.current_step.as_mut() {
-            step.post_hooks.push(StepHook::VariableInScope(uvid));
+            // add the variable to the current step
+            step.write().declared_variables.push(declaration.clone());
+
+            // after the step is executed, the variable becomes in scope
+            step.write().post_hooks.push(StepHook::VariableInScope(uvid));
         }
         Ok(())
     }
@@ -446,16 +494,16 @@ impl Analyzer {
         );
         // close the scope
         let closed_scope = self.scope_stack.pop().expect("scope stack is empty");
-        let uvids = closed_scope.variables.keys().cloned().collect::<Vec<_>>();
+        let uvids = closed_scope.read().variables.iter().map(|v| v.read().id()).collect::<Vec<_>>();
         if let Some(parent) = self.scope_stack.last_mut() {
-            parent.children.push(Arc::new(closed_scope));
+            parent.write().children.push(closed_scope);
         }
 
         // when the scope is exited, all variables become out of scope
         if let Some(current_or_last_step) =
             self.current_step.as_mut().or_else(|| self.finished_steps.last_mut())
         {
-            current_or_last_step.add_variable_out_of_scope_hook(uvids);
+            current_or_last_step.write().add_variable_out_of_scope_hook(uvids);
         }
         Ok(())
     }
@@ -465,10 +513,14 @@ impl Analyzer {
 impl Analyzer {
     fn enter_new_statement_step(&mut self, statement: &Statement) -> eyre::Result<VisitorAction> {
         assert!(self.current_step.is_none(), "Step cannot be nested");
+        let current_scope = self.current_scope();
 
         macro_rules! step {
             ($variant:ident, $stmt:expr, $loc:expr) => {{
-                self.current_step = Some(Step::new(StepVariant::$variant($stmt.clone()), $loc));
+                self.current_step = Some(
+                    Step::new(StepVariant::$variant($stmt.clone()), $loc, current_scope.clone())
+                        .into(),
+                );
             }};
         }
         macro_rules! simple_stmt_to_step {
@@ -490,15 +542,15 @@ impl Analyzer {
             Statement::ForStatement(for_statement) => {
                 // the step is the `for(...)`
                 let loc = sloc_ldiff(for_statement.src, block_or_stmt_src(&for_statement.body));
-                let step = Step::new(
-                    StepVariant::ForLoop {
-                        initialization_expression: for_statement.initialization_expression.clone(),
-                        condition: for_statement.condition.clone(),
-                        loop_expression: for_statement.loop_expression.clone(),
-                    },
-                    loc,
+                step!(
+                    ForLoop,
+                    (
+                        for_statement.initialization_expression.clone(),
+                        for_statement.condition.clone(),
+                        for_statement.loop_expression.clone(),
+                    ),
+                    loc
                 );
-                self.current_step = Some(step);
 
                 // we take over the walk of the sub ast tree in the for statement step.
                 let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -596,8 +648,13 @@ impl Analyzer {
             return Ok(VisitorAction::SkipSubtree);
         }
 
-        self.current_step =
-            Some(Step::new(StepVariant::FunctionEntry(function.clone()), function.src));
+        // step is the function header
+        let current_scope = self.current_scope();
+        let loc = sloc_ldiff(function.src, function.body.as_ref().unwrap().src);
+        self.current_step = Some(
+            Step::new(StepVariant::FunctionEntry(function.clone()), loc, current_scope.clone())
+                .into(),
+        );
 
         // we take over the walk of the sub ast tree in the function step.
         let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -613,6 +670,14 @@ impl Analyzer {
 
         // skip the subtree of the function since we have already walked it
         Ok(VisitorAction::SkipSubtree)
+    }
+
+    /// Add a function call to the current step, if we are in a step.
+    fn add_function_call(&mut self, call: &FunctionCall) -> eyre::Result<()> {
+        if let Some(step) = self.current_step.as_mut() {
+            step.write().function_calls.push(call.clone());
+        }
+        Ok(())
     }
 
     fn exit_current_statement_step(&mut self, statement: &Statement) -> eyre::Result<()> {
@@ -786,6 +851,11 @@ impl Visitor for Analyzer {
         Ok(())
     }
 
+    fn visit_function_call(&mut self, function_call: &FunctionCall) -> eyre::Result<VisitorAction> {
+        self.add_function_call(function_call)?;
+        Ok(VisitorAction::Continue)
+    }
+
     fn visit_variable_declaration(
         &mut self,
         declaration: &VariableDeclaration,
@@ -807,6 +877,11 @@ struct AnalyzerSingleStepWalker<'a> {
 }
 
 impl<'a> Visitor for AnalyzerSingleStepWalker<'a> {
+    fn visit_function_call(&mut self, function_call: &FunctionCall) -> eyre::Result<VisitorAction> {
+        self.analyzer.add_function_call(function_call)?;
+        Ok(VisitorAction::Continue)
+    }
+
     fn visit_variable_declaration(
         &mut self,
         declaration: &VariableDeclaration,
@@ -886,14 +961,18 @@ mod tests {
 
     macro_rules! count_step_by_variant {
         ($analysis:expr, $variant:ident()) => {
-            $analysis.steps.iter().filter(|s| matches!(s.variant, StepVariant::$variant(_))).count()
+            $analysis
+                .steps
+                .iter()
+                .filter(|s| matches!(s.read().variant, StepVariant::$variant(_)))
+                .count()
         };
 
         ($analysis:expr, $variant:ident{}) => {
             $analysis
                 .steps
                 .iter()
-                .filter(|s| matches!(s.variant, StepVariant::$variant { .. }))
+                .filter(|s| matches!(s.read().variant, StepVariant::$variant { .. }))
                 .count()
         };
     }
@@ -1028,6 +1107,27 @@ contract TestContract {
 
         // Assert that we have one try step, and two statement steps
         assert!(count_step_by_variant!(analysis, Try()) == 1);
+        assert!(count_step_by_variant!(analysis, Statement()) == 2);
+    }
+
+    #[test]
+    fn test_if_statement_body() {
+        // Create a simple contract with a function to test if statement extraction
+        let source = r#"
+contract TestContract {
+    function getValue() public view returns (uint256) {
+        if (true) revert();
+        return 0;
+    }
+}
+"#;
+
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
+        analysis.pretty_display(&_sources);
+
+        // Assert that we have one if step, and one statement step
+        assert!(count_step_by_variant!(analysis, IfCondition()) == 1);
         assert!(count_step_by_variant!(analysis, Statement()) == 2);
     }
 }

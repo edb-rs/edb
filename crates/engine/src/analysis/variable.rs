@@ -29,16 +29,18 @@
 //! The module is designed to work with the broader analysis framework to provide
 //! comprehensive variable tracking and type information during contract analysis.
 
-use std::sync::{Arc, Mutex};
-
 use alloy_primitives::{map::foldhash::HashMap, U256};
+use delegate::delegate;
 use derive_more::From;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, Expression, ForStatement, FunctionDefinition,
     SourceUnit, UncheckedBlock, VariableDeclaration,
 };
 use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
+use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 // use crate::{
 //     // Visitor, Walk
@@ -142,7 +144,7 @@ impl From<UVID> for U256 {
 /// assert_ne!(uvid1, uvid2);
 /// ```
 pub fn new_uvid() -> UVID {
-    let mut uvid = NEXT_UVID.lock().unwrap();
+    let mut uvid = NEXT_UVID.lock();
     uvid.inc()
 }
 
@@ -151,7 +153,51 @@ pub fn new_uvid() -> UVID {
 /// This type alias provides shared ownership of Variable instances, allowing
 /// multiple parts of the analysis system to reference the same variable
 /// without copying the data.
-pub type VariableRef = Arc<Variable>;
+#[derive(Debug, Clone)]
+pub struct VariableRef {
+    inner: Arc<RwLock<Variable>>,
+}
+
+impl From<Variable> for VariableRef {
+    fn from(variable: Variable) -> Self {
+        Self::new(variable)
+    }
+}
+
+impl VariableRef {
+    pub fn new(inner: Variable) -> Self {
+        Self { inner: Arc::new(RwLock::new(inner)) }
+    }
+
+    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Variable> {
+        self.inner.read()
+    }
+
+    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Variable> {
+        self.inner.write()
+    }
+}
+
+impl Serialize for VariableRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Serialize the inner Variable directly
+        self.inner.read().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for VariableRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize as Variable and wrap it in VariableRef
+        let variable = Variable::deserialize(deserializer)?;
+        Ok(VariableRef::new(variable))
+    }
+}
 
 /// Represents a variable in a smart contract with its metadata and type information.
 ///
@@ -214,6 +260,15 @@ pub enum Variable {
 }
 
 impl Variable {
+    pub fn id(&self) -> UVID {
+        match self {
+            Self::Plain { uvid, .. } => *uvid,
+            Self::Member { base, .. } => base.read().id(),
+            Self::Index { base, .. } => base.read().id(),
+            Self::IndexRange { base, .. } => base.read().id(),
+        }
+    }
+
     /// Returns a human-readable string representation of the variable.
     ///
     /// This method provides a concise display format for variables:
@@ -224,18 +279,108 @@ impl Variable {
     pub fn pretty_display(&self) -> String {
         match self {
             Self::Plain { declaration, .. } => declaration.name.clone(),
-            Self::Member { base, member } => format!("{}.{}", base.pretty_display(), member),
-            Self::Index { base, .. } => format!("{}[.]", base.pretty_display()),
+            Self::Member { base, member } => format!("{}.{}", base.read().pretty_display(), member),
+            Self::Index { base, .. } => format!("{}[.]", base.read().pretty_display()),
             Self::IndexRange { base, .. } => {
-                format!("{}[..]", base.pretty_display())
+                format!("{}[..]", base.read().pretty_display())
             }
         }
     }
 }
 
 /// A reference-counted pointer to a VariableScope.
-pub type VariableScopeRef = Arc<VariableScope>;
+#[derive(Debug, Clone)]
+pub struct VariableScopeRef {
+    inner: Arc<RwLock<VariableScope>>,
 
+    children: OnceCell<Vec<VariableScopeRef>>,
+    variables: OnceCell<Vec<VariableRef>>,
+    variables_recursive: OnceCell<Vec<VariableRef>>,
+}
+
+impl From<VariableScope> for VariableScopeRef {
+    fn from(scope: VariableScope) -> Self {
+        Self::new(scope)
+    }
+}
+
+impl VariableScopeRef {
+    pub fn new(inner: VariableScope) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(inner)),
+            variables_recursive: OnceCell::new(),
+            variables: OnceCell::new(),
+            children: OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn read(&self) -> RwLockReadGuard<'_, VariableScope> {
+        self.inner.read()
+    }
+
+    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, VariableScope> {
+        self.inner.write()
+    }
+}
+
+/* Direct read methods */
+impl VariableScopeRef {
+    delegate! {
+        to self.inner.read() {
+            pub fn id(&self) -> usize;
+            pub fn src(&self) -> SourceLocation;
+            pub fn pretty_display(&self) -> String;
+        }
+    }
+}
+
+/* Cached read methods */
+impl VariableScopeRef {
+    pub fn clear_cache(&mut self) {
+        self.variables_recursive.take();
+        self.variables.take();
+        self.children.take();
+    }
+
+    pub fn children(&self) -> &Vec<VariableScopeRef> {
+        self.children.get_or_init(|| self.inner.read().children.clone())
+    }
+
+    pub fn variables(&self) -> &Vec<VariableRef> {
+        self.variables.get_or_init(|| self.inner.read().variables.clone())
+    }
+
+    pub fn variables_recursive(&self) -> &Vec<VariableRef> {
+        self.variables_recursive.get_or_init(|| {
+            let mut variables = self.variables().clone();
+            for child in self.children() {
+                variables.extend(child.variables_recursive().iter().cloned());
+            }
+            variables
+        })
+    }
+}
+
+impl Serialize for VariableScopeRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Serialize the inner VariableScope directly
+        self.inner.read().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for VariableScopeRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize as VariableScope and wrap it in VariableScopeRef
+        let scope = VariableScope::deserialize(deserializer)?;
+        Ok(VariableScopeRef::new(scope))
+    }
+}
 /// Represents the scope and visibility information for a variable.
 ///
 /// This structure contains information about where a variable is defined
@@ -255,7 +400,9 @@ pub struct VariableScope {
     /// The AST node that defines this scope
     pub node: ScopeNode,
     /// Variables declared in this scope, mapped by their UVID
-    pub variables: HashMap<UVID, VariableRef>,
+    pub variables: Vec<VariableRef>,
+    /// Parent scope
+    pub parent: Option<VariableScopeRef>,
     /// Child scopes contained within this scope
     pub children: Vec<VariableScopeRef>,
 }
@@ -288,7 +435,7 @@ impl VariableScope {
             result.push_str(&format!("{}Scope({}): {{}}", indent, self.node.variant_name()));
         } else {
             let mut variable_names: Vec<String> =
-                self.variables.values().map(|var| var.pretty_display()).collect();
+                self.variables.iter().map(|var| var.read().pretty_display()).collect();
             variable_names.sort(); // Sort for consistent output
             result.push_str(&format!(
                 "{}Scope({}): {{{}}}",
@@ -301,7 +448,7 @@ impl VariableScope {
         // Print children scopes recursively with increased indentation
         for child in &self.children {
             result.push('\n');
-            result.push_str(&child.pretty_display_with_indent(indent_level + 1));
+            result.push_str(&child.read().pretty_display_with_indent(indent_level + 1));
         }
 
         result

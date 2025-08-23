@@ -169,7 +169,7 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
             let mut source_result = analyzer.analyze(source_id, path, &source_unit)?;
 
             // sort steps in reverse order
-            source_result.steps.sort_unstable_by_key(|step| step.src.start);
+            source_result.steps.sort_unstable_by_key(|step| step.read().src.start);
             source_result.steps.reverse();
 
             // ensure we do not have overlapped steps
@@ -179,9 +179,13 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
             for (i, step) in source_result.steps.iter().enumerate() {
                 if i > 0 {
                     let prev = &source_result.steps[i - 1];
-                    let end = step.src.start.map(|start| start + step.src.length.unwrap_or(0));
+                    let end = step
+                        .read()
+                        .src
+                        .start
+                        .map(|start| start + step.read().src.length.unwrap_or(0));
 
-                    if end > prev.src.start {
+                    if end > prev.read().src.start {
                         warn!("Overlapping steps detected: {:?}", step);
                         // return Err(AnalysisError::StepPartitionError(eyre::eyre!(
                         //     "Overlapping steps detected"
@@ -299,7 +303,7 @@ contract SimpleContract {
 
         // Verify that the steps have hooks
         for step in &source_result.steps {
-            assert!(!step.pre_hooks.is_empty(), "Each step should have pre-hooks");
+            assert!(!step.read().pre_hooks.is_empty(), "Each step should have pre-hooks");
             // println!("{}\n", step.pretty_display(&source_result.source));
         }
     }

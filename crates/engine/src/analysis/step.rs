@@ -23,6 +23,7 @@ use std::{
 
 use alloy_primitives::ruint::FromUintError;
 // use derive_more::{Deref, DerefMut};
+use delegate::delegate;
 use foundry_compilers::artifacts::{
     ast::SourceLocation,
     BlockOrStatement,
@@ -31,15 +32,14 @@ use foundry_compilers::artifacts::{
     ExpressionStatement,
     FunctionCall,
     FunctionDefinition,
-    Statement, // SourceUnit,
+    Statement,
+    VariableDeclaration, // SourceUnit,
 };
 use lazy_static::lazy_static;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    analysis::{StepHook, UVID},
-    // Visitor, Walk,
-};
+use crate::analysis::{StepHook, VariableScope, VariableScopeRef, UVID};
 
 lazy_static! {
     /// The next USID to be assigned.
@@ -104,7 +104,59 @@ pub fn new_usid() -> USID {
 /// This type alias provides thread-safe reference counting for Step instances,
 /// allowing them to be shared between different parts of the analysis system
 /// without copying the entire step data.
-pub type StepRef = Arc<Step>;
+#[derive(Debug, Clone)]
+pub struct StepRef {
+    inner: Arc<RwLock<Step>>,
+}
+
+impl From<Step> for StepRef {
+    fn from(step: Step) -> Self {
+        Self::new(step)
+    }
+}
+
+impl Serialize for StepRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Serialize the inner Step directly
+        self.inner.read().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StepRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize as Step and wrap it in StepRef
+        let step = Step::deserialize(deserializer)?;
+        Ok(Self::new(step))
+    }
+}
+
+impl StepRef {
+    pub fn new(inner: Step) -> Self {
+        Self { inner: Arc::new(RwLock::new(inner)) }
+    }
+
+    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Step> {
+        self.inner.read()
+    }
+
+    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Step> {
+        self.inner.write()
+    }
+}
+
+impl StepRef {
+    delegate! {
+        to self.inner.read() {
+
+        }
+    }
+}
 
 /// Represents a single executable step in Solidity source code.
 ///
@@ -128,9 +180,17 @@ pub struct Step {
     pub variant: StepVariant,
     /// Source location information (file, line, column)
     pub src: SourceLocation,
+    /// Function calls made in this step
+    pub function_calls: Vec<FunctionCall>,
+    /// Variables declared in this step
+    pub declared_variables: Vec<VariableDeclaration>,
+    /// The scope of this step
+    pub scope: VariableScopeRef,
     /// Hooks to execute before this step
+    #[deprecated]
     pub pre_hooks: Vec<StepHook>,
     /// Hooks to execute after this step
+    #[deprecated]
     pub post_hooks: Vec<StepHook>,
 }
 
@@ -145,9 +205,18 @@ impl Step {
     /// # Returns
     ///
     /// A new Step instance with a unique USID and default hooks.
-    pub fn new(variant: StepVariant, src: SourceLocation) -> Self {
+    pub fn new(variant: StepVariant, src: SourceLocation, scope: VariableScopeRef) -> Self {
         let usid = new_usid();
-        Self { usid, variant, src, pre_hooks: vec![StepHook::BeforeStep(usid)], post_hooks: vec![] }
+        Self {
+            usid,
+            variant,
+            src,
+            function_calls: vec![],
+            declared_variables: vec![],
+            scope,
+            pre_hooks: vec![StepHook::BeforeStep(usid)],
+            post_hooks: vec![],
+        }
     }
 
     /// Adds a variable out-of-scope hook to this step.
@@ -160,6 +229,7 @@ impl Step {
     /// # Arguments
     ///
     /// * `uvids` - List of variable identifiers that go out of scope
+    #[deprecated]
     pub fn add_variable_out_of_scope_hook(&mut self, uvids: Vec<UVID>) {
         // for steps that result in a "jump" in the control flow (e.g., `break`, `continue`, `return`, `revert`, `throw`, etc.), the variable out of scope should be added as pre-hooks.
         let add_as_pre_hook = match &self.variant {
@@ -194,14 +264,16 @@ pub enum StepVariant {
     /// The condition of an if statement that is executed in a single debug step.
     IfCondition(Expression),
     /// The header of a for loop that is executed in a single debug step.
-    ForLoop {
-        /// The initialization expression of the for loop (optional)
-        initialization_expression: Option<ExpressionOrVariableDeclarationStatement>,
-        /// The condition expression of the for loop (optional)
-        condition: Option<Expression>,
-        /// The loop expression that executes at the end of each iteration (optional)
-        loop_expression: Option<ExpressionStatement>,
-    },
+    ForLoop(
+        (
+            // The initialization expression of the for loop (optional)
+            Option<ExpressionOrVariableDeclarationStatement>,
+            // The condition expression of the for loop (optional)
+            Option<Expression>,
+            // The loop expression that executes at the end of each iteration (optional)
+            Option<ExpressionStatement>,
+        ),
+    ),
     /// The condition of a while loop that is executed in a single debug step.
     WhileLoop(Expression),
     /// The try external call
