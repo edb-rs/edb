@@ -1,4 +1,4 @@
-use foundry_compilers::artifacts::ast::SourceLocation;
+use foundry_compilers::artifacts::{ast::SourceLocation, StateMutability, Visibility};
 
 /// Get the source string at the given location.
 ///
@@ -30,7 +30,7 @@ pub fn source_string_at_location_unchecked<'a>(
     location: &SourceLocation,
 ) -> &'a str {
     let start = location.start.unwrap_or(0);
-    let end = location.length.unwrap_or(source.len() - start);
+    let end = location.length.map(|l| start + l).unwrap_or(source.len() - 1);
     &source[start..end]
 }
 
@@ -69,5 +69,57 @@ pub fn slice_source_location(src: &SourceLocation, start: usize, length: usize) 
         start: src.start.map(|s| s + start).or(Some(start)),
         length: Some(length),
         index: src.index,
+    }
+}
+
+/// Convert the visibility to a string.
+///
+/// # Arguments
+///
+/// * `visibility` - The visibility
+///
+/// # Returns
+///
+/// The string representation of the visibility.
+///
+/// # Example
+///
+/// ```rust
+/// let visibility = Visibility::Public;
+/// let str = visibility_to_str(visibility);
+/// assert_eq!(str, "public");
+/// ```
+pub fn visibility_to_str(visibility: &Visibility) -> &'static str {
+    match visibility {
+        Visibility::Public => "public",
+        Visibility::Internal => "internal",
+        Visibility::Private => "private",
+        Visibility::External => "external",
+    }
+}
+
+/// Convert the mutability to a string.
+///
+/// # Arguments
+///
+/// * `mutability` - The mutability
+///
+/// # Returns
+///
+/// The string representation of the mutability.
+///
+/// # Example
+///
+/// ```rust
+/// let mutability = StateMutability::Pure;
+/// let str = mutability_to_str(mutability);
+/// assert_eq!(str, "pure");
+/// ```
+pub fn mutability_to_str(mutability: &StateMutability) -> &'static str {
+    match mutability {
+        StateMutability::Pure => "pure",
+        StateMutability::View => "view",
+        StateMutability::Payable => "payable",
+        StateMutability::Nonpayable => "nonpayable",
     }
 }

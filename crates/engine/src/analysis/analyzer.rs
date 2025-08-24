@@ -915,15 +915,15 @@ pub enum AnalysisError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use semver::Version;
 
     use crate::compile_contract_source_to_source_unit;
 
     use super::*;
 
-    const TEST_CONTRACT_SOURCE_PATH: &str = "test.sol";
-    const TEST_CONTRACT_SOURCE_ID: u32 = 0;
+    pub(crate) const TEST_CONTRACT_SOURCE_PATH: &str = "test.sol";
+    pub(crate) const TEST_CONTRACT_SOURCE_ID: u32 = 0;
 
     /// Utility function to compile Solidity source code and analyze it
     ///
@@ -937,7 +937,7 @@ mod tests {
     ///
     /// # Returns
     /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
-    fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
+    pub(crate) fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
         // Compile the source code to get the AST
         let version = Version::parse("0.8.19").unwrap();
         let result = compile_contract_source_to_source_unit(version, source, false);
