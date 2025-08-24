@@ -22,7 +22,7 @@ alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types = { workspace = true, features = ["eth"] }
 alloy-transport-http = { workspace = true, features = ["reqwest"] }
 alloy-json-abi = { workspace = true }
-alloy-dyn-abi = { workspace = true }
+alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 
 # foundry
 foundry-block-explorers = { workspace = true, features = ["foundry-compilers"] }

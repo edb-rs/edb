@@ -21,15 +21,15 @@
 use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
-use crate::ui::status::{BreakpointStatus, FileStatus, StatusBar};
-use crate::ui::syntax::{SyntaxHighlighter, SyntaxType, TokenStyle};
+use crate::ui::status::{FileStatus, StatusBar};
+use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use crate::ColorScheme;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem},
     Frame,
 };
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -281,7 +281,7 @@ impl CodePanel {
             // Add the highlighted token
             let token_text = &line[token.start..token.end];
             let token_style =
-                self.get_token_style(self.syntax_highlighter.get_token_style(token.token_type));
+                self.syntax_highlighter.get_token_style(token.token_type, &self.color_scheme);
             spans.push(Span::styled(token_text, token_style));
 
             last_end = token.end;
@@ -296,29 +296,6 @@ impl CodePanel {
         }
 
         Line::from(spans)
-    }
-
-    /// Convert TokenStyle to ratatui Style using theme colors
-    fn get_token_style(&self, token_style: TokenStyle) -> Style {
-        let color = match token_style {
-            TokenStyle::Keyword => self.color_scheme.syntax_keyword_color,
-            TokenStyle::Type => self.color_scheme.syntax_type_color,
-            TokenStyle::String => self.color_scheme.syntax_string_color,
-            TokenStyle::Number => self.color_scheme.syntax_number_color,
-            TokenStyle::Comment => self.color_scheme.syntax_comment_color,
-            TokenStyle::Identifier => self.color_scheme.syntax_identifier_color,
-            TokenStyle::Operator => self.color_scheme.syntax_operator_color,
-            TokenStyle::Punctuation => self.color_scheme.syntax_punctuation_color,
-            TokenStyle::Address => self.color_scheme.syntax_address_color,
-            TokenStyle::Pragma => self.color_scheme.syntax_pragma_color,
-            TokenStyle::Opcode
-            | TokenStyle::OpcodeNumber
-            | TokenStyle::OpcodeAddress
-            | TokenStyle::OpcodeData => self.color_scheme.syntax_opcode_color,
-            TokenStyle::Default => Color::Reset,
-        };
-
-        Style::default().fg(color)
     }
 
     /// Toggle file selector visibility

@@ -34,4 +34,4 @@ pub use status::{
     BreakpointStatus, ConnectionStatus, ExecutionStatus, FileStatus, PanelStatus, RpcStatus,
     StatusBar,
 };
-pub use syntax::{SyntaxHighlighter, SyntaxToken, SyntaxType, TokenStyle, TokenType};
+pub use syntax::{SyntaxHighlighter, SyntaxToken, SyntaxType, TokenType};

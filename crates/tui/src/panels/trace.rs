@@ -21,15 +21,15 @@
 use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
 use crate::ui::borders::BorderPresets;
-use crate::ui::icons::Icons;
 use crate::ui::status::StatusBar;
-use crate::ui::syntax::{SyntaxHighlighter, SyntaxType, TokenStyle};
+use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use crate::ColorScheme;
 use alloy_dyn_abi::{DynSolValue, EventExt, FunctionExt, JsonAbiExt};
-use alloy_json_abi::Function;
+use alloy_json_abi::{Function, JsonAbi};
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
+use edb_common::SolValueFormatter;
 use eyre::Result;
 use ratatui::{
     layout::Rect,
@@ -169,7 +169,7 @@ impl TracePanel {
                 };
 
                 // Find the entry and only handle children collapse (details always shown)
-                if let Some(_entry) = trace.iter().find(|e| e.id == entry_id) {
+                if trace.iter().find(|e| e.id == entry_id).is_some() {
                     // Check if this entry has children that can be collapsed
                     let has_children = trace.iter().any(|e| e.parent_id == Some(entry_id));
 
@@ -188,27 +188,6 @@ impl TracePanel {
                 }
             }
         }
-    }
-
-    /// Check if an entry is a descendant of the given parent_id
-    fn is_descendant_of(&self, entry: &TraceEntry, parent_id: usize) -> bool {
-        let mut current_parent = entry.parent_id;
-        while let Some(pid) = current_parent {
-            if pid == parent_id {
-                return true;
-            }
-            // Find the next parent up the chain
-            if let Some(trace) = &self.trace_data {
-                if let Some(parent_entry) = trace.iter().find(|e| e.id == pid) {
-                    current_parent = parent_entry.parent_id;
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-        false
     }
 
     /// Adjust selection to stay on the main call line after expansion/collapse
@@ -230,206 +209,6 @@ impl TracePanel {
                     self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
                 }
             }
-        }
-    }
-
-    /// Format a trace entry into a display string with smart labeling and decoding
-    fn format_trace_entry<'a>(&'a self, entry: &'a TraceEntry, depth: usize) -> Line<'a> {
-        // Build structural indentation with UTF-8 tree characters
-        let mut indent_chars = Vec::new();
-
-        // Add tree structure for depth levels
-        for i in 0..depth {
-            if i == depth - 1 {
-                // Last level - use branch character
-                indent_chars.push(Icons::TREE_BRANCH);
-            } else {
-                // Intermediate levels - use vertical line and spacing
-                indent_chars.push(Icons::TREE_VERTICAL);
-                indent_chars.push(" ");
-            }
-        }
-
-        let indent = indent_chars.join("");
-
-        // Determine call type and color using color scheme
-        let (call_type_str, call_color) = match &entry.call_type {
-            CallType::Call(CallScheme::Call) => ("CALL", self.color_scheme.call_color),
-            CallType::Call(CallScheme::CallCode) => ("CALLCODE", self.color_scheme.call_color),
-            CallType::Call(CallScheme::DelegateCall) => {
-                ("DELEGATECALL", self.color_scheme.call_color)
-            }
-            CallType::Call(CallScheme::StaticCall) => ("STATICCALL", self.color_scheme.call_color),
-            CallType::Create(CreateScheme::Create) => ("CREATE", self.color_scheme.create_color),
-            CallType::Create(CreateScheme::Create2 { .. }) => {
-                ("CREATE2", self.color_scheme.create_color)
-            }
-            CallType::Create(CreateScheme::Custom { .. }) => {
-                ("CREATE_CUSTOM", self.color_scheme.create_color)
-            }
-        };
-
-        // Format target address with label if available
-        let target_str = if let Some(label) = &entry.target_label {
-            format!("{} ({})", label, self.format_address_short(entry.target))
-        } else {
-            // For addresses without labels, show a more readable shortened format
-            self.format_address_readable(entry.target)
-        };
-
-        // Determine if this entry has children and add collapse/expand icon
-        let has_children = self.entry_has_children(entry);
-        let collapse_icon = if has_children {
-            if self.collapsed_entries.contains(&entry.id) {
-                Icons::COLLAPSED
-            } else {
-                Icons::EXPANDED
-            }
-        } else {
-            " "
-        };
-
-        // Build the line with spans (removed caller since it's redundant in call trace)
-        let mut spans = vec![
-            Span::raw(indent),
-            Span::styled(collapse_icon, Style::default().fg(self.color_scheme.accent_color)),
-            Span::raw(" "),
-            Span::styled(format!("{:<12}", call_type_str), Style::default().fg(call_color)),
-            Span::raw(" "),
-            Span::styled(
-                target_str,
-                Style::default().fg(self.color_scheme.syntax_identifier_color),
-            ),
-        ];
-
-        // Add function call with syntax-highlighted parameters
-        if matches!(entry.call_type, CallType::Create(_)) {
-            // Handle contract creation
-            if let Some(constructor_call) = self.format_constructor_call(entry) {
-                spans.push(Span::raw(" "));
-                spans.extend(self.highlight_solidity_code_owned(constructor_call));
-            } else if !entry.input.is_empty() {
-                spans.push(Span::raw(" "));
-                spans.push(Span::styled(
-                    format!("bytecode ({} bytes)", entry.input.len()),
-                    Style::default().fg(self.color_scheme.syntax_string_color),
-                ));
-            }
-        } else {
-            // Handle regular function calls
-            let selector = if entry.input.len() >= 4 {
-                Some(Selector::from_slice(&entry.input[..4]))
-            } else {
-                None
-            };
-            if let Some(function_abi) = entry
-                .abi
-                .as_ref()
-                .zip(selector)
-                .and_then(|(abi, sel)| abi.function_by_selector(sel))
-            {
-                spans.push(Span::raw(" "));
-                spans.extend(
-                    self.format_function_call_with_highlighting(function_abi, &entry.input),
-                );
-            } else if !entry.input.is_empty() {
-                spans.push(Span::raw(" "));
-                // Try to show function selector and data size instead of raw hex
-                if entry.input.len() >= 4 {
-                    let selector = hex::encode(&entry.input[..4]);
-                    let data_size = entry.input.len() - 4;
-                    if data_size > 0 {
-                        spans.push(Span::styled(
-                            format!("0x{}({} bytes)", selector, data_size),
-                            Style::default().fg(self.color_scheme.syntax_string_color),
-                        ));
-                    } else {
-                        spans.push(Span::styled(
-                            format!("0x{}()", selector),
-                            Style::default().fg(self.color_scheme.syntax_string_color),
-                        ));
-                    }
-                } else {
-                    spans.push(Span::styled(
-                        format!("0x{}", hex::encode(&entry.input)),
-                        Style::default().fg(self.color_scheme.syntax_string_color),
-                    ));
-                }
-            }
-        }
-
-        // Format value if present
-        if entry.value > U256::ZERO {
-            spans.push(Span::styled(
-                format!(" value: {} ETH", self.format_ether(entry.value)),
-                Style::default().fg(self.color_scheme.warning_color),
-            ));
-        }
-
-        // Add self-destruct indicator if present
-        if let Some((beneficiary, value)) = &entry.self_destruct {
-            spans.push(Span::styled(
-                " [SELFDESTRUCT]",
-                Style::default().fg(self.color_scheme.error_color),
-            ));
-            spans.push(Span::styled(
-                format!(
-                    " → {} ({} ETH)",
-                    self.format_address_readable(*beneficiary),
-                    self.format_ether(*value)
-                ),
-                Style::default().fg(self.color_scheme.warning_color),
-            ));
-        }
-
-        // Add events indicator if present
-        if !entry.events.is_empty() {
-            spans.push(Span::styled(
-                format!(
-                    " 📝 {} event{}",
-                    entry.events.len(),
-                    if entry.events.len() == 1 { "" } else { "s" }
-                ),
-                Style::default().fg(self.color_scheme.accent_color),
-            ));
-        }
-
-        // Result indicator
-        let (result_char, result_color) = match &entry.result {
-            Some(CallResult::Success { .. }) => ("✓", self.color_scheme.success_color),
-            Some(CallResult::Revert { .. }) => ("✗", self.color_scheme.error_color),
-            Some(CallResult::Error { .. }) => ("⚠", self.color_scheme.error_color),
-            None => (" ", self.color_scheme.comment_color),
-        };
-
-        // Add return data if available
-        if let Some(return_spans) = self.format_return_data(entry) {
-            spans.push(Span::raw(" "));
-            spans.extend(return_spans);
-        }
-
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(result_char, Style::default().fg(result_color)));
-
-        Line::from(spans)
-    }
-
-    /// Check if a trace entry has children (callees)
-    fn entry_has_children(&self, entry: &TraceEntry) -> bool {
-        if let Some(trace) = &self.trace_data {
-            // Look for any entry with this entry as parent
-            trace.iter().any(|e| e.parent_id == Some(entry.id))
-        } else {
-            false
-        }
-    }
-
-    /// Toggle collapse state for a trace entry
-    fn toggle_collapse(&mut self, entry_id: usize) {
-        if self.collapsed_entries.contains(&entry_id) {
-            self.collapsed_entries.remove(&entry_id);
-        } else {
-            self.collapsed_entries.insert(entry_id);
         }
     }
 
@@ -715,7 +494,7 @@ impl TracePanel {
                     ),
                 ])
             }
-            Some(CallResult::Revert { output, result }) => {
+            Some(CallResult::Revert { output, .. }) => {
                 let revert_text = self.decode_revert_reason(output);
                 Line::from(vec![
                     Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
@@ -766,12 +545,13 @@ impl TracePanel {
 
                             if let Some(name) = param_name {
                                 return_parts.push(format!(
-                                    "{}: {}",
+                                    "{} {}: {}",
+                                    value.format_type(),
                                     name,
-                                    self.format_solidity_value(value)
+                                    value.format_value(false)
                                 ));
                             } else {
-                                return_parts.push(self.format_solidity_value(value));
+                                return_parts.push(value.format_value(true));
                             }
                         }
 
@@ -818,7 +598,7 @@ impl TracePanel {
         if output.len() >= 4 && output.starts_with(&[0x08, 0xc3, 0x79, 0xa0]) {
             // Try to decode the string from Error(string) signature
             if let Ok(decoded) = alloy_dyn_abi::DynSolType::String.abi_decode(&output[4..]) {
-                if let alloy_dyn_abi::DynSolValue::String(reason) = decoded {
+                if let DynSolValue::String(reason) = decoded {
                     return format!("\"{}\"", reason);
                 }
             }
@@ -827,7 +607,7 @@ impl TracePanel {
         // Check if it's a Panic(uint256) revert (0x4e487b71)
         if output.len() >= 4 && output.starts_with(&[0x4e, 0x48, 0x7b, 0x71]) {
             if let Ok(decoded) = alloy_dyn_abi::DynSolType::Uint(256).abi_decode(&output[4..]) {
-                if let alloy_dyn_abi::DynSolValue::Uint(panic_code, _) = decoded {
+                if let DynSolValue::Uint(panic_code, _) = decoded {
                     let panic_reason = match panic_code.to_string().as_str() {
                         "1" => "assertion failed",
                         "17" => "arithmetic overflow/underflow",
@@ -890,21 +670,6 @@ impl TracePanel {
         }
     }
 
-    /// Format address to short form for labels (6...4 format)
-    #[allow(dead_code)]
-    fn format_address_short(&self, address: Address) -> String {
-        if address == Address::ZERO {
-            "0x0".to_string()
-        } else {
-            let addr_str = format!("{:?}", address);
-            if addr_str.len() > 10 {
-                format!("{}...{}", &addr_str[..6], &addr_str[addr_str.len() - 4..])
-            } else {
-                addr_str
-            }
-        }
-    }
-
     /// Format address in a more readable way for unlabeled addresses (8...6 format)
     fn format_address_readable(&self, address: Address) -> String {
         if address == Address::ZERO {
@@ -926,7 +691,7 @@ impl TracePanel {
         match function_abi.abi_decode_input(&input_data[4..]) {
             Ok(decoded) => {
                 let params: Vec<String> =
-                    decoded.iter().map(|param| self.format_solidity_value(param)).collect();
+                    decoded.iter().map(|param| param.format_value(true)).collect();
 
                 format!("{}({})", function_abi.name, params.join(", "))
             }
@@ -951,48 +716,7 @@ impl TracePanel {
         let call_string = self.format_function_call(function_abi, input_data);
 
         // Use the syntax highlighter to tokenize and highlight the string
-        self.highlight_solidity_code_owned(call_string)
-    }
-
-    /// Format a Solidity value for display
-    fn format_solidity_value(&self, value: &DynSolValue) -> String {
-        match value {
-            DynSolValue::Address(addr) => format!("0x{:x}", addr),
-            DynSolValue::Uint(n, _) => n.to_string(),
-            DynSolValue::Int(n, _) => n.to_string(),
-            DynSolValue::Bool(b) => b.to_string(),
-            DynSolValue::Bytes(b) => format!("0x{}", hex::encode(&b[..b.len().min(8)])),
-            DynSolValue::FixedBytes(b, _) => format!("0x{}", hex::encode(b)),
-            DynSolValue::String(s) => format!("\"{}\"", s),
-            DynSolValue::Array(arr) => {
-                if arr.len() <= 3 {
-                    let items: Vec<String> =
-                        arr.iter().map(|v| self.format_solidity_value(v)).collect();
-                    format!("[{}]", items.join(", "))
-                } else {
-                    format!("[...{} items]", arr.len())
-                }
-            }
-            DynSolValue::FixedArray(arr) => {
-                if arr.len() <= 3 {
-                    let items: Vec<String> =
-                        arr.iter().map(|v| self.format_solidity_value(v)).collect();
-                    format!("[{}]", items.join(", "))
-                } else {
-                    format!("[...{} items]", arr.len())
-                }
-            }
-            DynSolValue::Tuple(tuple) => {
-                if tuple.len() <= 2 {
-                    let items: Vec<String> =
-                        tuple.iter().map(|v| self.format_solidity_value(v)).collect();
-                    format!("({})", items.join(", "))
-                } else {
-                    format!("(...{} fields)", tuple.len())
-                }
-            }
-            DynSolValue::Function(_) => "<function>".to_string(),
-        }
+        self.highlight_solidity_code(call_string)
     }
 
     /// Format Wei value to ETH
@@ -1020,123 +744,8 @@ impl TracePanel {
         }
     }
 
-    /// Format return data for successful function calls with syntax highlighting
-    fn format_return_data(&self, entry: &TraceEntry) -> Option<Vec<Span<'static>>> {
-        // Only show return data for successful calls
-        if let Some(CallResult::Success { output, .. }) = &entry.result {
-            if !output.is_empty() {
-                // If we have function ABI, try to decode the return data
-                if entry.input.len() >= 4 {
-                    let selector = Selector::from_slice(&entry.input[..4]);
-                    if let Some(function_abi) =
-                        entry.abi.as_ref().and_then(|abi| abi.function_by_selector(selector))
-                    {
-                        if let Ok(decoded) = function_abi.abi_decode_output(output) {
-                            let mut spans = vec![Span::styled(
-                                "→ ",
-                                Style::default().fg(self.color_scheme.comment_color),
-                            )];
-
-                            // Format decoded return values with syntax highlighting
-                            let return_values: Vec<String> =
-                                decoded.iter().map(|v| self.format_solidity_value(v)).collect();
-                            let return_str = return_values.join(", ");
-                            spans.extend(self.highlight_solidity_code_owned(return_str));
-
-                            return Some(spans);
-                        }
-                    }
-                }
-
-                // Fallback: show return data size and preview
-                if output.len() <= 32 {
-                    return Some(vec![
-                        Span::styled("→ ", Style::default().fg(self.color_scheme.comment_color)),
-                        Span::styled(
-                            format!("0x{}", hex::encode(output)),
-                            Style::default().fg(self.color_scheme.syntax_number_color),
-                        ),
-                    ]);
-                } else {
-                    return Some(vec![
-                        Span::styled("→ ", Style::default().fg(self.color_scheme.comment_color)),
-                        Span::styled(
-                            format!("0x{}...({} bytes)", hex::encode(&output[..8]), output.len()),
-                            Style::default().fg(self.color_scheme.syntax_number_color),
-                        ),
-                    ]);
-                }
-            }
-        } else if let Some(CallResult::Revert { output, .. }) = &entry.result {
-            // Show revert reason if available
-            if !output.is_empty() {
-                // Try to decode revert reason from output
-                let reason = if output.len() >= 4 {
-                    // Check if it's a standard Error(string) revert
-                    if output.starts_with(&[0x08, 0xc3, 0x79, 0xa0]) {
-                        // Decode the string from Error(string) signature
-                        if let Ok(decoded) =
-                            alloy_dyn_abi::DynSolType::String.abi_decode(&output[4..])
-                        {
-                            if let alloy_dyn_abi::DynSolValue::String(s) = decoded {
-                                Some(s)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                return Some(vec![
-                    Span::styled("→ ", Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("revert: ", Style::default().fg(self.color_scheme.error_color)),
-                    Span::styled(
-                        if let Some(reason) = reason {
-                            format!("\"{}\"", reason)
-                        } else {
-                            format!("0x{}", hex::encode(output))
-                        },
-                        Style::default().fg(self.color_scheme.syntax_string_color),
-                    ),
-                ]);
-            }
-        } else if let Some(CallResult::Error { output, .. }) = &entry.result {
-            // Show error details
-            if !output.is_empty() {
-                return Some(vec![
-                    Span::styled("→ ", Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("error: ", Style::default().fg(self.color_scheme.error_color)),
-                    Span::styled(
-                        if output.len() <= 32 {
-                            format!("0x{}", hex::encode(output))
-                        } else {
-                            format!("0x{}...({} bytes)", hex::encode(&output[..8]), output.len())
-                        },
-                        Style::default().fg(self.color_scheme.syntax_string_color),
-                    ),
-                ]);
-            } else {
-                return Some(vec![
-                    Span::styled("→ ", Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled(
-                        "execution error",
-                        Style::default().fg(self.color_scheme.error_color),
-                    ),
-                ]);
-            }
-        }
-
-        None
-    }
-
     /// Format event data using ABI if available
-    fn format_event(&self, event: &LogData, abi: Option<&alloy_json_abi::JsonAbi>) -> String {
+    fn format_event(&self, event: &LogData, abi: Option<&JsonAbi>) -> String {
         if event.topics().is_empty() {
             return format!("Anonymous event ({} bytes data)", event.data.len());
         }
@@ -1153,9 +762,10 @@ impl TracePanel {
                         let mut params = Vec::new();
                         for (param, value) in event_abi.inputs.iter().zip(decoded.body.iter()) {
                             params.push(format!(
-                                "{}: {}",
+                                "{} {}: {}",
+                                value.format_type(),
                                 param.name,
-                                self.format_solidity_value(value)
+                                value.format_value(false)
                             ));
                         }
 
@@ -1233,7 +843,7 @@ impl TracePanel {
                                 .iter()
                                 .zip(constructor.inputs.iter())
                                 .map(|(value, input)| {
-                                    format!("{}: {}", input.name, self.format_solidity_value(value))
+                                    format!("{} {}: {}", value.format_type(), input.name, value.format_value(false))
                                 })
                                 .collect();
 
@@ -1250,30 +860,8 @@ impl TracePanel {
         None
     }
 
-    /// Convert TokenStyle to ratatui Style using theme colors
-    fn get_token_style(&self, token_style: TokenStyle) -> Style {
-        let color = match token_style {
-            TokenStyle::Keyword => self.color_scheme.syntax_keyword_color,
-            TokenStyle::Type => self.color_scheme.syntax_type_color,
-            TokenStyle::String => self.color_scheme.syntax_string_color,
-            TokenStyle::Number => self.color_scheme.syntax_number_color,
-            TokenStyle::Comment => self.color_scheme.syntax_comment_color,
-            TokenStyle::Identifier => self.color_scheme.syntax_identifier_color,
-            TokenStyle::Operator => self.color_scheme.syntax_operator_color,
-            TokenStyle::Punctuation => self.color_scheme.syntax_punctuation_color,
-            TokenStyle::Address => self.color_scheme.syntax_address_color,
-            TokenStyle::Pragma => self.color_scheme.syntax_pragma_color,
-            TokenStyle::Opcode
-            | TokenStyle::OpcodeNumber
-            | TokenStyle::OpcodeAddress
-            | TokenStyle::OpcodeData => self.color_scheme.syntax_opcode_color,
-            TokenStyle::Default => self.color_scheme.comment_color,
-        };
-        Style::default().fg(color)
-    }
-
     /// Apply syntax highlighting to Solidity code using the existing syntax highlighter (for owned strings)
-    fn highlight_solidity_code_owned(&self, code: String) -> Vec<Span<'static>> {
+    fn highlight_solidity_code(&self, code: String) -> Vec<Span<'static>> {
         let tokens = self.syntax_highlighter.tokenize(&code, SyntaxType::Solidity);
 
         let mut spans = Vec::new();
@@ -1292,7 +880,7 @@ impl TracePanel {
             // Add the highlighted token
             let token_text = code[token.start..token.end].to_owned();
             let token_style =
-                self.get_token_style(self.syntax_highlighter.get_token_style(token.token_type));
+                self.syntax_highlighter.get_token_style(token.token_type, &self.color_scheme);
             spans.push(Span::styled(token_text, token_style));
 
             last_end = token.end;
@@ -1478,16 +1066,6 @@ impl PanelTr for TracePanel {
                 debug!("Refreshing trace data");
                 self.trace_data = None;
 
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char(' ') => {
-                // Toggle collapse/expand on spacebar
-                if let Some(entry) = self.selected_entry() {
-                    if self.entry_has_children(entry) {
-                        debug!("Toggling collapse for trace entry ID: {}", entry.id);
-                        self.toggle_collapse(entry.id);
-                    }
-                }
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

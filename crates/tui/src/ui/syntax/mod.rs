@@ -19,10 +19,12 @@
 //! This module provides syntax highlighting for different programming languages
 //! and assembly formats used in the debugger.
 
+use ratatui::style::Style;
+
+use crate::ColorScheme;
+
 pub mod opcodes;
 pub mod solidity;
-
-use ratatui::style::Style;
 
 /// Syntax highlighting types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,26 +68,6 @@ pub struct SyntaxToken {
     pub token_type: TokenType,
 }
 
-/// Token style categories (will be themed)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokenStyle {
-    Keyword,
-    Type,
-    String,
-    Number,
-    Comment,
-    Identifier,
-    Operator,
-    Punctuation,
-    Address,
-    Pragma,
-    Opcode,
-    OpcodeNumber,
-    OpcodeAddress,
-    OpcodeData,
-    Default,
-}
-
 /// Main syntax highlighter that delegates to specific language highlighters
 #[derive(Debug)]
 pub struct SyntaxHighlighter {
@@ -110,25 +92,26 @@ impl SyntaxHighlighter {
         }
     }
 
-    /// Get style for a token type (theme will be applied later)
-    pub fn get_token_style(&self, token_type: TokenType) -> TokenStyle {
-        match token_type {
-            TokenType::Keyword => TokenStyle::Keyword,
-            TokenType::Type => TokenStyle::Type,
-            TokenType::String => TokenStyle::String,
-            TokenType::Number => TokenStyle::Number,
-            TokenType::Comment => TokenStyle::Comment,
-            TokenType::Identifier => TokenStyle::Identifier,
-            TokenType::Operator => TokenStyle::Operator,
-            TokenType::Punctuation => TokenStyle::Punctuation,
-            TokenType::Address => TokenStyle::Address,
-            TokenType::Pragma => TokenStyle::Pragma,
-            TokenType::Opcode => TokenStyle::Opcode,
-            TokenType::OpcodeNumber => TokenStyle::OpcodeNumber,
-            TokenType::OpcodeAddress => TokenStyle::OpcodeAddress,
-            TokenType::OpcodeData => TokenStyle::OpcodeData,
-            TokenType::Default => TokenStyle::Default,
-        }
+    /// Convert TokenStyle to ratatui Style using theme colors
+    pub fn get_token_style(&self, token_type: TokenType, color_scheme: &ColorScheme) -> Style {
+        let color = match token_type {
+            TokenType::Keyword => color_scheme.syntax_keyword_color,
+            TokenType::Type => color_scheme.syntax_type_color,
+            TokenType::String => color_scheme.syntax_string_color,
+            TokenType::Number => color_scheme.syntax_number_color,
+            TokenType::Comment => color_scheme.syntax_comment_color,
+            TokenType::Identifier => color_scheme.syntax_identifier_color,
+            TokenType::Operator => color_scheme.syntax_operator_color,
+            TokenType::Punctuation => color_scheme.syntax_punctuation_color,
+            TokenType::Address => color_scheme.syntax_address_color,
+            TokenType::Pragma => color_scheme.syntax_pragma_color,
+            TokenType::Opcode
+            | TokenType::OpcodeNumber
+            | TokenType::OpcodeAddress
+            | TokenType::OpcodeData => color_scheme.syntax_opcode_color,
+            TokenType::Default => color_scheme.comment_color,
+        };
+        Style::default().fg(color)
     }
 }
 

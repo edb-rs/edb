@@ -78,7 +78,6 @@ where
     fn finalize_trace(&mut self) {
         for entry in &mut self.trace {
             let trace_id = entry.id;
-            let calldata = entry.input.as_ref();
 
             // We first update the snapshot id
             for (snapshot_id, (frame_id, _)) in self.snapshots.iter().enumerate() {
@@ -90,7 +89,6 @@ where
 
             // We then try to update the function abi
             let address = entry.code_address;
-
             entry.abi = self
                 .artifacts
                 .get(&address)
