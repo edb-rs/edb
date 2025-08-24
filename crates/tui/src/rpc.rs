@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! RPC client for communicating with the debug server
 //!
 //! This module provides a client for making JSON-RPC calls to the debug server.

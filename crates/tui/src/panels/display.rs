@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Display panel for variables, stack, memory, and other debugging information
 //!
 //! This panel can switch between different display modes based on context.

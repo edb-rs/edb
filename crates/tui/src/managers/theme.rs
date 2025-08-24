@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Theme management system for EDB TUI
 //!
 //! Provides centralized theme management across all panels with real-time switching.

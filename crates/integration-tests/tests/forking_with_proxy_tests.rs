@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Integration tests for forking functionality with RPC proxy caching
 //!
 //! These tests demonstrate how the RPC proxy can be used to cache

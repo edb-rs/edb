@@ -14,9 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 use alloy_json_abi::{Function, JsonAbi};
-use alloy_primitives::{hex, Address, Bytes, U256};
+use alloy_primitives::{hex, Address, Bytes, Log, LogData, U256};
 use revm::{
     context::{ContextTr, CreateScheme},
     interpreter::{CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, Interpreter},
@@ -48,6 +47,11 @@ pub enum CallResult {
     },
     /// Call reverted
     Revert {
+        /// Output data from the call
+        output: Bytes,
+    },
+    /// Self-destruct
+    Error {
         /// Output data from the call
         output: Bytes,
     },
@@ -159,6 +163,10 @@ pub struct TraceEntry {
     pub bytecode: Option<Bytes>,
     /// Label of the target contract
     pub target_label: Option<String>,
+    /// Self-destruct information
+    pub self_destruct: Option<(Address, U256)>,
+    /// Events
+    pub events: Vec<LogData>,
     /// Function abi
     pub function_abi: Option<Function>,
     /// The first snapshot id that belongs to this entry
@@ -253,6 +261,9 @@ impl Trace {
                 }
             }
             Some(CallResult::Revert { .. }) => ("✗", "\x1b[31m"),
+            Some(CallResult::Error { .. }) => {
+                ("☠", "\x1b[31m") // TODO (change icon)
+            }
             None => ("", ""),
         };
 
@@ -301,13 +312,48 @@ impl Trace {
             print!("{}", value_str);
         }
 
+        // Add self-destruct indicator if present
+        if let Some((beneficiary, value)) = &entry.self_destruct {
+            print!(
+                " \x1b[91m SELFDESTRUCT → {} ({} ETH)\x1b[0m",
+                format_address_short(*beneficiary),
+                format_ether(*value)
+            );
+        }
+
         println!();
 
         // Print input data with better formatting if significant
         if entry.input.len() > 4 {
             let data_preview = format_data_preview(&entry.input);
             let padding = "    ".repeat(indent_level + 1);
-            println!("{}\x1b[90m└ data: {}\x1b[0m", padding, data_preview);
+            println!("{}\x1b[90m└ Calldata: {}\x1b[0m", padding, data_preview);
+        }
+
+        // Print events if any
+        if !entry.events.is_empty() {
+            let padding = "    ".repeat(indent_level + 1);
+            for (i, event) in entry.events.iter().enumerate() {
+                let event_str = format_event(event);
+                if i == 0 {
+                    println!("{}\x1b[96m└ Events:\x1b[0m", padding);
+                }
+                println!("{}    \x1b[96m• {}\x1b[0m", padding, event_str);
+            }
+        }
+
+        // Print error details if result is Error
+        if let Some(CallResult::Error { output }) = &entry.result {
+            let padding = "    ".repeat(indent_level + 1);
+            let error_msg = if output.is_empty() {
+                "Execution error (no output)".to_string()
+            } else if output.len() >= 4 {
+                // Try to decode as a revert message
+                format!("Error: {}", format_data_preview(output))
+            } else {
+                format!("Error output: 0x{}", hex::encode(output))
+            };
+            println!("{}\x1b[91m└ ⚠️  {}\x1b[0m", padding, error_msg);
         }
 
         // Get children and recursively print them
@@ -337,14 +383,30 @@ impl Trace {
             .iter()
             .filter(|e| matches!(e.result, Some(CallResult::Revert { .. })))
             .count();
+        let errors = self
+            .inner
+            .iter()
+            .filter(|e| matches!(e.result, Some(CallResult::Error { .. })))
+            .count();
+        let self_destructs = self.inner.iter().filter(|e| e.self_destruct.is_some()).count();
+        let with_events = self.inner.iter().filter(|e| !e.events.is_empty()).count();
+        let total_events: usize = self.inner.iter().map(|e| e.events.len()).sum();
         let creates =
             self.inner.iter().filter(|e| matches!(e.call_type, CallType::Create(_))).count();
         let calls = self.inner.iter().filter(|e| matches!(e.call_type, CallType::Call(_))).count();
         let max_depth = self.inner.iter().map(|e| e.depth).max().unwrap_or(0);
 
         println!("\x1b[36mSummary:\x1b[0m");
-        println!("  Total: {} | \x1b[32mSuccess: {}\x1b[0m | \x1b[31mReverts: {}\x1b[0m | \x1b[94mCalls: {}\x1b[0m | \x1b[93mCreates: {}\x1b[0m | Depth: {}",
-                 total, successful, reverted, calls, creates, max_depth);
+        println!("  Total: {} | \x1b[32mSuccess: {}\x1b[0m | \x1b[31mReverts: {}\x1b[0m | \x1b[91mErrors: {}\x1b[0m | \x1b[94mCalls: {}\x1b[0m | \x1b[93mCreates: {}\x1b[0m | Depth: {}",
+                 total, successful, reverted, errors, calls, creates, max_depth);
+
+        if self_destructs > 0 {
+            println!("  \x1b[91m💀 Self-destructs: {}\x1b[0m", self_destructs);
+        }
+
+        if total_events > 0 {
+            println!("  \x1b[96m📝 Events: {} (in {} calls)\x1b[0m", total_events, with_events);
+        }
     }
 
     /// Get the parent trace entry for a given trace entry ID
@@ -404,6 +466,32 @@ fn format_ether(value: U256) -> String {
             whole.to_string()
         } else {
             format!("{}.{}", whole, decimal_trimmed)
+        }
+    }
+}
+
+/// Format event/log data for display
+fn format_event(event: &LogData) -> String {
+    if event.topics().is_empty() {
+        // Anonymous event or no topics
+        format!("Anonymous event with {} bytes data", event.data.len())
+    } else {
+        // First topic is usually the event signature hash
+        let sig_hash = &event.topics()[0];
+        let additional_topics = event.topics().len() - 1;
+        let data_len = event.data.len();
+
+        // Format the signature hash (first 8 chars)
+        let sig_preview = format!("0x{}...", hex::encode(&sig_hash.as_slice()[..4]));
+
+        if additional_topics > 0 && data_len > 0 {
+            format!("{} ({} indexed, {} bytes data)", sig_preview, additional_topics, data_len)
+        } else if additional_topics > 0 {
+            format!("{} ({} indexed params)", sig_preview, additional_topics)
+        } else if data_len > 0 {
+            format!("{} ({} bytes data)", sig_preview, data_len)
+        } else {
+            sig_preview
         }
     }
 }

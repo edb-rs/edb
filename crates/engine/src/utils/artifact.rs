@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 use alloy_primitives::Bytes;
 use foundry_block_explorers::contract::Metadata;
 use foundry_compilers::artifacts::{CompilerOutput, Contract, SolcInput};

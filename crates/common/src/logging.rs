@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Fancy logging configuration for EDB components
 //!
 //! Provides centralized logging setup with:

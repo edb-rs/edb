@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! RPC server implementation with standard multi-threaded pattern
 //!
 //! This module implements the main JSON-RPC server that handles debugging requests

@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Common analysis types and functionality for the Ethereum Debug Bridge (EDB) engine.
 //!
 //! This module provides the core data structures and analysis logic for processing Solidity source code

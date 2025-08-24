@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Chain forking and transaction replay utilities
 //!
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()

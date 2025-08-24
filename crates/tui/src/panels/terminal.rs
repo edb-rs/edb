@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Terminal panel for command input and output
 //!
 //! This panel provides a command-line interface for debugging commands.

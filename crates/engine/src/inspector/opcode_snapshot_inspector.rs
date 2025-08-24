@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Opcode snapshot inspector for recording detailed VM state at each instruction
 //!
 //! This inspector captures instruction-level execution details including:

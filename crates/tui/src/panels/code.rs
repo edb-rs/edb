@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Code panel for displaying source code or opcodes
 //!
 //! This panel shows source code with syntax highlighting and current line indication.

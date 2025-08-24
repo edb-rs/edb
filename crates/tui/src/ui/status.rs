@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Enhanced status icon system for the TUI
 //!
 //! Provides comprehensive status indicators with contextual icons and animations

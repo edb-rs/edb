@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! JSON-RPC server for debugging control
 //!
 //! This module provides a JSON-RPC interface for front-ends to control

@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Trace panel for displaying execution trace
 //!
 //! This panel shows the call trace and allows navigation through trace entries.
@@ -253,6 +252,7 @@ impl TracePanel {
         let (result_char, result_color) = match &entry.result {
             Some(CallResult::Success { .. }) => ("✓", self.color_scheme.success_color),
             Some(CallResult::Revert { .. }) => ("✗", self.color_scheme.error_color),
+            Some(CallResult::Error { .. }) => ("☠", self.color_scheme.error_color), // TODO (change icon)
             None => (" ", self.color_scheme.comment_color),
         };
 
@@ -764,7 +764,7 @@ impl PanelTr for TracePanel {
                         height: 1,
                     };
                     let help_text =
-                        "↑/↓: Navigate • Space: Collapse/Expand • Enter: Jump to snapshot • r: Refresh • Tab: Next panel";
+                        "↑/↓: Navigate • Space: Collapse/Expand • Enter: Jump to snapshot";
                     let help_paragraph = Paragraph::new(help_text)
                         .style(Style::default().fg(self.color_scheme.help_text_color));
                     frame.render_widget(help_paragraph, help_area);

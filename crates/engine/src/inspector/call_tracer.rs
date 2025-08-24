@@ -14,14 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Call tracer for collecting complete execution trace during transaction replay
 //!
 //! This inspector captures the complete call trace including call stack, creation events,
 //! and execution flow. The trace can be replayed later to determine execution paths
 //! without needing to re-examine transaction inputs/outputs.
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, Log, U256};
 use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
 use revm::{
     context::{ContextTr, CreateScheme},
@@ -106,8 +105,13 @@ impl CallTracer {
     fn result_from_create_outcome(outcome: &CreateOutcome) -> CallResult {
         if outcome.result.is_ok() {
             CallResult::Success { output: outcome.result.output.clone() }
-        } else {
+        } else if outcome.result.is_revert() {
             CallResult::Revert { output: outcome.result.output.clone() }
+        } else if outcome.result.is_error() {
+            CallResult::Error { output: outcome.result.output.clone() }
+        } else {
+            error!("Unexpected create outcome, we use CallResult::Error");
+            CallResult::Error { output: outcome.result.output.clone() }
         }
     }
 }
@@ -153,7 +157,9 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             code_address,
             input: inputs.input.bytes(context).clone(),
             value: inputs.transfer_value().unwrap_or(U256::ZERO),
-            result: None, // Will be filled in call_end
+            result: None,        // Will be filled in call_end
+            events: vec![],      // Will be filled in log
+            self_destruct: None, // Will be filled in self_destruct
             created_contract: false,
             create_scheme: None,
             bytecode: None,          // Will be set in step
@@ -217,6 +223,8 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             input: inputs.init_code.clone(),
             value: inputs.value,
             result: None,            // Will be filled in create_end
+            events: vec![],          // Will be filled in log
+            self_destruct: None,     // Will be filled in self_destruct
             created_contract: false, // Will be updated in create_end
             create_scheme: Some(inputs.scheme),
             bytecode: None,          // Will be set in step
@@ -278,12 +286,29 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
         self.mark_address_visited(created_address_for_marking, true);
     }
 
-    fn selfdestruct(&mut self, contract: Address, target: Address, _value: U256) {
+    fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
         // Mark both addresses as visited
         self.mark_address_visited(contract, false);
         self.mark_address_visited(target, false);
 
-        // Note: We could add a special trace entry for selfdestruct if needed
-        // For now, we just track the addresses
+        let Some(entry) = self.trace.last_mut() else {
+            error!("Trace is empty, cannot step");
+            return;
+        };
+
+        if entry.target != contract {
+            error!("Self-destruct entry mismatch");
+            return;
+        }
+        entry.self_destruct = Some((target, value));
+    }
+
+    fn log(&mut self, _interp: &mut Interpreter, _context: &mut CTX, log: Log) {
+        let Some(entry) = self.trace.last_mut() else {
+            error!("Trace is empty, cannot log");
+            return;
+        };
+
+        entry.events.push(log.deref().clone());
     }
 }

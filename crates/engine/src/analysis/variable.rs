@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Variable analysis and representation for Ethereum smart contract analysis.
 //!
 //! This module provides the core data structures and utilities for representing

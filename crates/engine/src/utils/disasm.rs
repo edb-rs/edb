@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! EVM bytecode disassembly utilities
 //!
 //! This module provides functionality to disassemble EVM bytecode into a structured

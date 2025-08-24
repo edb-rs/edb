@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Ethereum opcode syntax highlighting
 //!
 //! This module provides syntax highlighting for Ethereum Virtual Machine (EVM)
