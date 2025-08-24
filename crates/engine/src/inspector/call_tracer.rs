@@ -95,23 +95,52 @@ impl CallTracer {
     /// Convert call outcome to result
     fn result_from_outcome(outcome: &CallOutcome) -> CallResult {
         if outcome.result.is_ok() {
-            CallResult::Success { output: outcome.result.output.clone() }
+            CallResult::Success {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
+        } else if outcome.result.is_revert() {
+            CallResult::Revert {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
+        } else if outcome.result.is_error() {
+            CallResult::Error {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
         } else {
-            CallResult::Revert { output: outcome.result.output.clone() }
+            error!("Unexpected call outcome, we use CallResult::Error");
+            CallResult::Error {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
         }
     }
 
     /// Convert create outcome to result
     fn result_from_create_outcome(outcome: &CreateOutcome) -> CallResult {
         if outcome.result.is_ok() {
-            CallResult::Success { output: outcome.result.output.clone() }
+            CallResult::Success {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
         } else if outcome.result.is_revert() {
-            CallResult::Revert { output: outcome.result.output.clone() }
+            CallResult::Revert {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
         } else if outcome.result.is_error() {
-            CallResult::Error { output: outcome.result.output.clone() }
+            CallResult::Error {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
         } else {
             error!("Unexpected create outcome, we use CallResult::Error");
-            CallResult::Error { output: outcome.result.output.clone() }
+            CallResult::Error {
+                output: outcome.result.output.clone(),
+                result: outcome.result.result.clone(),
+            }
         }
     }
 }
@@ -164,7 +193,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             create_scheme: None,
             bytecode: None,          // Will be set in step
             target_label: None,      // Will be set in post-analysis
-            function_abi: None,      // Will be set in post-analysis
+            abi: None,               // Will be set in post-analysis
             first_snapshot_id: None, // Will be set in post-analysis
         };
 
@@ -229,7 +258,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             create_scheme: Some(inputs.scheme),
             bytecode: None,          // Will be set in step
             target_label: None,      // Will be set in post-analysis
-            function_abi: None,      // Will be set in post-analysis
+            abi: None,               // Will be set in post-analysis
             first_snapshot_id: None, // Will be set in post-analysis
         };
 

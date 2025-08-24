@@ -20,7 +20,7 @@
 
 use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EdbContext, EdbDB};
 use alloy_network::Network;
-use alloy_primitives::{TxHash, TxKind, B256, U256};
+use alloy_primitives::{address, Address, TxHash, TxKind, B256, U256};
 use alloy_provider::{
     fillers::{FillProvider, TxFiller},
     layers::{CacheProvider, SharedCache},
@@ -33,7 +33,8 @@ use revm::{
     context::{ContextTr, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
     database::{AlloyDB, CacheDB, StateBuilder},
-    Context, Database, DatabaseCommit, DatabaseRef, ExecuteCommitEvm, MainBuilder, MainContext,
+    Context, Database, DatabaseCommit, DatabaseRef, ExecuteCommitEvm, ExecuteEvm, MainBuilder,
+    MainContext,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -45,6 +46,16 @@ use revm::{
     database_interface::WrapDatabaseAsync,
     primitives::hardfork::SpecId,
 };
+
+/// Arbitrum L1 sender address of the first transaction in every block.
+/// `0x00000000000000000000000000000000000a4b05`
+pub const ARBITRUM_SENDER: Address = address!("0x00000000000000000000000000000000000a4b05");
+
+/// The system address, the sender of the first transaction in every block:
+/// `0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001`
+///
+/// See also <https://github.com/ethereum-optimism/optimism/blob/65ec61dde94ffa93342728d324fecf474d228e1f/specs/deposits.md#l1-attributes-deposited-transaction>
+pub const OPTIMISM_SYSTEM_ADDRESS: Address = address!("0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001");
 
 /// Fork configuration details
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +128,14 @@ pub async fn fork_and_prepare(
         .await?
         .ok_or_else(|| eyre::eyre!("Target transaction not found: {:?}", target_tx_hash))?;
 
+    // check if the tx is a system transaction
+    if is_known_system_sender(target_tx.inner.signer()) {
+        return Err(eyre::eyre!(
+            "{:?} is a system transaction.\nReplaying system transactions is currently not supported.",
+            target_tx.inner.tx_hash()
+        ));
+    }
+
     let target_block_number = target_tx
         .block_number
         .ok_or_else(|| eyre::eyre!("Target transaction not mined: {:?}", target_tx_hash))?;
@@ -144,6 +163,7 @@ pub async fn fork_and_prepare(
 
     // Get the spec ID for the block using our mainnet mapping
     let spec_id = get_mainnet_spec_id(target_block_number);
+    info!("Block {} is under {:?} hardfork", target_block_number, spec_id);
 
     // Create fork info
     let fork_info = ForkInfo {
@@ -172,14 +192,19 @@ pub async fn fork_and_prepare(
             // Note: blob_excess_gas_and_price might not be available in older blocks
             b.blob_excess_gas_and_price = block.header.excess_blob_gas.map(|g| {
                 BlobExcessGasAndPrice::new(g, get_blob_base_fee_update_fraction_by_spec_id(spec_id))
-            })
+            });
+            b.beneficiary = block.header.beneficiary;
         })
         .modify_cfg_chained(|c| {
             c.chain_id = chain_id;
             c.spec = spec_id;
+
+            // XXX (ZZ): let's temporarily disable nonce check due to EIP-7702 (;P)
+            // c.disable_nonce_check = true;
         });
 
     let mut evm = ctx.build_mainnet();
+    info!("The evm verision is {}", evm.cfg().spec);
 
     // Skip replaying preceding transactions if quick mode is enabled
     if quick {
@@ -200,6 +225,14 @@ pub async fn fork_and_prepare(
         );
 
         for (i, tx) in preceding_txs.iter().enumerate() {
+            // System transactions such as on L2s don't contain any pricing info so
+            // we skip them otherwise this would cause
+            // reverts
+            if is_known_system_sender(tx.inner.signer()) {
+                console_bar.inc(1);
+                continue;
+            }
+
             let short_hash = &tx.inner.hash().to_string()[2..10]; // Skip 0x, take 8 chars
             console_bar.set_message(format!("tx {}: 0x{}...", i + 1, short_hash));
 
@@ -210,10 +243,10 @@ pub async fn fork_and_prepare(
                 tx.inner.hash()
             );
 
-            let tx = get_tx_env_from_tx(tx, chain_id)?;
+            let tx_env = get_tx_env_from_tx(tx, chain_id)?;
 
             // Actually execute the transaction with commit
-            match evm.transact_commit(tx) {
+            match evm.transact_commit(tx_env.clone()) {
                 Ok(result) => match result {
                     ExecutionResult::Success { gas_used, .. } => {
                         console_bar
@@ -246,8 +279,9 @@ pub async fn fork_and_prepare(
                 Err(e) => {
                     error!("Failed to execute transaction {}: {:?}", i + 1, e);
                     return Err(eyre::eyre!(
-                        "Transaction execution failed at index {}: {:?}",
+                        "Transaction execution failed at index {} ({}): {:?}",
                         i,
+                        tx.inner.hash(),
                         e
                     ));
                 }
@@ -267,6 +301,7 @@ pub async fn fork_and_prepare(
     let target_tx_env = get_tx_env_from_tx(&target_tx, chain_id)?;
 
     // Extract the context from the EVM
+    evm.finalize();
     let context = evm.ctx;
 
     Ok(ForkResult { fork_info, context, target_tx_env, target_tx_hash })
@@ -274,7 +309,7 @@ pub async fn fork_and_prepare(
 
 /// Get the transaction environment from the transaction.
 pub fn get_tx_env_from_tx(tx: &Transaction, chain_id: u64) -> Result<TxEnv> {
-    TxEnv::builder()
+    let mut b = TxEnv::builder()
         .caller(tx.inner.signer())
         .gas_limit(tx.gas_limit())
         .gas_price(tx.gas_price().unwrap_or(tx.inner.max_fee_per_gas()))
@@ -287,7 +322,31 @@ pub fn get_tx_env_from_tx(tx: &Transaction, chain_id: u64) -> Result<TxEnv> {
         .kind(match tx.to() {
             Some(to) => TxKind::Call(to),
             None => TxKind::Create,
-        })
-        .build()
-        .map_err(|e| eyre::eyre!("Failed to build transaction environment: {:?}", e))
+        });
+
+    // Fees
+    if let Some(gp) = tx.gas_price() {
+        b = b.gas_price(gp);
+    } else {
+        b = b.gas_price(tx.inner.max_fee_per_gas()).gas_priority_fee(tx.max_priority_fee_per_gas());
+    }
+
+    // EIP-4844
+    if let Some(mfb) = tx.max_fee_per_blob_gas() {
+        b = b.max_fee_per_blob_gas(mfb);
+    }
+    if let Some(hashes) = tx.blob_versioned_hashes() {
+        b = b.blob_hashes(hashes.to_vec());
+    }
+
+    // EIP-7702 (post-Pectra)
+    if let Some(authz) = tx.authorization_list() {
+        b = b.authorization_list_signed(authz.to_vec());
+    }
+
+    b.build().map_err(|e| eyre::eyre!("TxEnv build failed: {:?}", e))
+}
+
+fn is_known_system_sender(sender: Address) -> bool {
+    [ARBITRUM_SENDER, OPTIMISM_SYSTEM_ADDRESS, Address::ZERO].contains(&sender)
 }

@@ -89,20 +89,14 @@ where
             }
 
             // We then try to update the function abi
-            if entry.created_contract {
-                // TODO
-            } else if calldata.len() >= 4 {
-                let address = entry.code_address;
-                let selector = Selector::from_slice(&calldata[..4]);
+            let address = entry.code_address;
 
-                entry.function_abi = self
-                    .artifacts
-                    .get(&address)
-                    .and_then(|artifact| artifact.contract())
-                    .and_then(|contract| contract.abi.as_ref())
-                    .and_then(|abi| abi.function_by_selector(selector))
-                    .cloned();
-            }
+            entry.abi = self
+                .artifacts
+                .get(&address)
+                .and_then(|artifact| artifact.contract())
+                .and_then(|contract| contract.abi.as_ref())
+                .cloned();
         }
     }
 }

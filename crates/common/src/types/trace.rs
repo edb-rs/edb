@@ -18,7 +18,10 @@ use alloy_json_abi::{Function, JsonAbi};
 use alloy_primitives::{hex, Address, Bytes, Log, LogData, U256};
 use revm::{
     context::{ContextTr, CreateScheme},
-    interpreter::{CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, Interpreter},
+    interpreter::{
+        CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, InstructionResult,
+        Interpreter,
+    },
     Inspector,
 };
 use serde::{Deserialize, Serialize};
@@ -44,16 +47,22 @@ pub enum CallResult {
     Success {
         /// Output data from the call
         output: Bytes,
+        /// Result
+        result: InstructionResult,
     },
     /// Call reverted
     Revert {
         /// Output data from the call
         output: Bytes,
+        /// Result
+        result: InstructionResult,
     },
     /// Self-destruct
     Error {
         /// Output data from the call
         output: Bytes,
+        /// Result
+        result: InstructionResult,
     },
 }
 
@@ -167,8 +176,8 @@ pub struct TraceEntry {
     pub self_destruct: Option<(Address, U256)>,
     /// Events
     pub events: Vec<LogData>,
-    /// Function abi
-    pub function_abi: Option<Function>,
+    /// Json ABI of the contract at the code address
+    pub abi: Option<JsonAbi>,
     /// The first snapshot id that belongs to this entry
     pub first_snapshot_id: Option<usize>,
 }
@@ -253,7 +262,7 @@ impl Trace {
 
         // Format the result indicator
         let (result_indicator, result_color) = match &entry.result {
-            Some(CallResult::Success { output }) => {
+            Some(CallResult::Success { output, .. }) => {
                 if output.is_empty() {
                     ("✓", "\x1b[32m")
                 } else {
@@ -343,7 +352,7 @@ impl Trace {
         }
 
         // Print error details if result is Error
-        if let Some(CallResult::Error { output }) = &entry.result {
+        if let Some(CallResult::Error { output, .. }) = &entry.result {
             let padding = "    ".repeat(indent_level + 1);
             let error_msg = if output.is_empty() {
                 "Execution error (no output)".to_string()

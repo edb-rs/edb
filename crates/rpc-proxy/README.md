@@ -29,6 +29,22 @@ curl -X POST http://localhost:8546 \
   -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
 
+**Common Issues**
+
+If you are using **Foundry** (e.g., `cast`) and `ebd-rpc-proxy` together, where `ebd-rpc-proxy` is running on a loopback address (e.g., `127.0.0.1`), you may encounter connection issues. This is because **Foundry's HTTP client (reqwest/hyper) honors `*_PROXY` environment variables and may route `http://127.0.0.1:...` through your local proxy**, which often drops loopback-to-loopback forwarding. On **macOS**, `localhost` may resolve to `::1` (IPv6) first; if your RPC server isn't bound to IPv6, `localhost` won’t work even though `127.0.0.1` does.
+
+To bypass these issues, run the CLI with proxy bypasses for **both IPv4 and IPv6 loopback**, and use an explicit loopback that your server actually binds to:
+
+```bash
+# Ensure loopback addresses bypass any proxy and clear proxy vars
+NO_PROXY=localhost,127.0.0.1,::1 \
+no_proxy=localhost,127.0.0.1,::1 \
+HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= \
+http_proxy= https_proxy= all_proxy= \
+cast tx 0xda0df2b215534a6cea2304f55ffa307bcb0f4e4b55e3a1158fc9bcde1fd76ae0 \
+  --rpc-url http://127.0.0.1:54321
+```
+
 ## ❓ Why Use EDB RPC Proxy?
 
 **If you've ever faced these problems:**

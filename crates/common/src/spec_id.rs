@@ -46,6 +46,8 @@ static MAINNET_HARDFORKS: LazyLock<BTreeMap<u64, SpecId>> = LazyLock::new(|| {
         (15_537_394, SpecId::MERGE),
         (17_034_870, SpecId::SHANGHAI),
         (19_426_589, SpecId::CANCUN),
+        // Pectra (Prague on EL) mainnet activation
+        (22_431_084, SpecId::PRAGUE),
     ]
     .into_iter()
     .collect()
@@ -84,6 +86,7 @@ pub fn get_hardfork_info(spec_id: SpecId) -> (&'static str, u64) {
         SpecId::MERGE => ("The Merge", 15_537_394),
         SpecId::SHANGHAI => ("Shanghai", 17_034_870),
         SpecId::CANCUN => ("Cancun", 19_426_589),
+        SpecId::PRAGUE => ("Prague (Pectra EL)", 22_431_084),
         _ => ("Unknown", 0),
     }
 }
