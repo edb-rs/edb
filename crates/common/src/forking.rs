@@ -26,11 +26,11 @@ use alloy_provider::{
     layers::{CacheProvider, SharedCache},
     Provider, ProviderBuilder,
 };
-use alloy_rpc_types::{BlockNumberOrTag, Transaction, TransactionTrait};
+use alloy_rpc_types::{BlockId, BlockNumberOrTag, Transaction, TransactionTrait};
 use eyre::Result;
 use indicatif::ProgressBar;
 use revm::{
-    context::{ContextTr, TxEnv},
+    context::{ContextTr, JournalTr, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
     database::{AlloyDB, CacheDB, StateBuilder},
     Context, Database, DatabaseCommit, DatabaseRef, ExecuteCommitEvm, ExecuteEvm, MainBuilder,
@@ -38,7 +38,7 @@ use revm::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, error, field::debug, info, warn};
+use tracing::{debug, error, field::debug, info, warn, Instrument};
 
 use revm::{
     // Use re-exported primitives from revm
@@ -175,8 +175,9 @@ pub async fn fork_and_prepare(
     };
 
     // Create revm database: we start with AlloyDB.
-    let state_db = WrapDatabaseAsync::new(AlloyDB::new(provider, (target_block_number - 1).into()))
-        .ok_or(eyre::eyre!("Failed to create AlloyDB"))?;
+    let alloy_db = AlloyDB::new(provider, (target_block_number - 1).into());
+    let state_db =
+        WrapDatabaseAsync::new(alloy_db).ok_or(eyre::eyre!("Failed to create AlloyDB"))?;
     let debug_db = EdbDB::new(CacheDB::new(Arc::new(state_db)));
     let cache_db: CacheDB<_> = CacheDB::new(debug_db);
 
@@ -198,9 +199,6 @@ pub async fn fork_and_prepare(
         .modify_cfg_chained(|c| {
             c.chain_id = chain_id;
             c.spec = spec_id;
-
-            // XXX (ZZ): let's temporarily disable nonce check due to EIP-7702 (;P)
-            // c.disable_nonce_check = true;
         });
 
     let mut evm = ctx.build_mainnet();
