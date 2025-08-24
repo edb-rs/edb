@@ -123,3 +123,48 @@ pub fn mutability_to_str(mutability: &StateMutability) -> &'static str {
         StateMutability::Nonpayable => "nonpayable",
     }
 }
+
+/// Get the next index of the source location.
+///
+/// # Arguments
+///
+/// * `src` - The source location
+///
+/// # Returns
+pub fn next_index_of_source_location(src: &SourceLocation) -> Option<usize> {
+    if let Some(start) = src.start {
+        if let Some(length) = src.length {
+            return Some(start + length);
+        }
+    }
+    None
+}
+
+/// Find the next semicolon after the source location.
+///
+/// # Arguments
+///
+/// * `source` - The source string
+/// * `src` - The source location
+///
+/// # Returns
+///
+/// The index of the next semicolon after the source location.
+///
+/// # Example
+///
+/// ```rust
+/// let source = "1;2;3;4;5";
+/// let src = SourceLocation { start: Some(0), length: Some(1), index: Some(0) };
+/// let next_semicolon = find_next_semicolon_after_source_location(source, &src);
+/// assert_eq!(next_semicolon, Some(2));
+/// ```
+pub fn find_next_semicolon_after_source_location(
+    source: &str,
+    src: &SourceLocation,
+) -> Option<usize> {
+    let start = src.start.unwrap_or(0);
+    let end = src.length.map(|l| start + l).unwrap_or(start);
+    let substr = &source[end..];
+    substr.find(";").map(|i| i + end)
+}

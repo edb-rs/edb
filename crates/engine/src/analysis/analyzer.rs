@@ -224,8 +224,9 @@ impl SourceAnalysis {
             StepVariant::Statement(stmt) => self.statement_name(stmt),
             StepVariant::Statements(_) => "Multiple Statements".to_string(),
             StepVariant::IfCondition(_) => "If Condition".to_string(),
-            StepVariant::ForLoop { .. } => "For Loop".to_string(),
+            StepVariant::ForLoop(_) => "For Loop".to_string(),
             StepVariant::WhileLoop(_) => "While Loop".to_string(),
+            StepVariant::DoWhileLoop(_) => "Do-While Loop".to_string(),
             StepVariant::Try(_) => "Try Statement".to_string(),
         }
     }
@@ -518,14 +519,13 @@ impl Analyzer {
         macro_rules! step {
             ($variant:ident, $stmt:expr, $loc:expr) => {{
                 self.current_step = Some(
-                    Step::new(StepVariant::$variant($stmt.clone()), $loc, current_scope.clone())
-                        .into(),
+                    Step::new(StepVariant::$variant($stmt), $loc, current_scope.clone()).into(),
                 );
             }};
         }
         macro_rules! simple_stmt_to_step {
             ($stmt:expr) => {
-                step!(Statement, statement, $stmt.src)
+                step!(Statement, statement.clone(), $stmt.src)
             };
         }
         match statement {
@@ -535,22 +535,14 @@ impl Analyzer {
             Statement::DoWhileStatement(do_while_statement) => {
                 // the step is the `while(...)`
                 let loc = sloc_rdiff(do_while_statement.src, do_while_statement.body.src);
-                step!(WhileLoop, do_while_statement.condition.clone(), loc);
+                step!(DoWhileLoop, *do_while_statement.clone(), loc);
             }
             Statement::EmitStatement(emit_statement) => simple_stmt_to_step!(emit_statement),
             Statement::ExpressionStatement(expr_stmt) => simple_stmt_to_step!(expr_stmt),
             Statement::ForStatement(for_statement) => {
                 // the step is the `for(...)`
                 let loc = sloc_ldiff(for_statement.src, block_or_stmt_src(&for_statement.body));
-                step!(
-                    ForLoop,
-                    (
-                        for_statement.initialization_expression.clone(),
-                        for_statement.condition.clone(),
-                        for_statement.loop_expression.clone(),
-                    ),
-                    loc
-                );
+                step!(ForLoop, *for_statement.clone(), loc);
 
                 // we take over the walk of the sub ast tree in the for statement step.
                 let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -574,7 +566,7 @@ impl Analyzer {
             Statement::IfStatement(if_statement) => {
                 // the step is the `if(...)`
                 let loc = sloc_ldiff(if_statement.src, block_or_stmt_src(&if_statement.true_body));
-                step!(IfCondition, if_statement.condition.clone(), loc);
+                step!(IfCondition, *if_statement.clone(), loc);
 
                 // we take over the walk of the sub ast tree in the if statement step.
                 let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -598,7 +590,7 @@ impl Analyzer {
                 // the step is the `try`
                 let first_clause = &try_statement.clauses[0];
                 let loc = sloc_ldiff(try_statement.src, first_clause.block.src);
-                step!(Try, try_statement.external_call.clone(), loc);
+                step!(Try, *try_statement.clone(), loc);
 
                 // we take over the walk of the sub ast tree in the try statement step.
                 let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -620,7 +612,7 @@ impl Analyzer {
             Statement::WhileStatement(while_statement) => {
                 // the step is the `while(...)`
                 let loc = sloc_rdiff(while_statement.src, block_or_stmt_src(&while_statement.body));
-                step!(WhileLoop, while_statement.condition.clone(), loc);
+                step!(WhileLoop, *while_statement.clone(), loc);
 
                 // we take over the walk of the sub ast tree in the while statement step.
                 let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -721,7 +713,9 @@ impl Analyzer {
         &mut self,
         definition: &FunctionDefinition,
     ) -> eyre::Result<()> {
-        if definition.visibility != Visibility::Public {
+        if definition.visibility != Visibility::Public
+            && definition.visibility != Visibility::External
+        {
             self.private_functions.push(definition.clone());
         }
 

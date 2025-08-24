@@ -26,13 +26,18 @@ use delegate::delegate;
 use foundry_compilers::artifacts::{
     ast::SourceLocation,
     BlockOrStatement,
+    DoWhileStatement,
     Expression,
     ExpressionOrVariableDeclarationStatement,
     ExpressionStatement,
+    ForStatement,
     FunctionCall,
     FunctionDefinition,
+    IfStatement,
     Statement,
-    VariableDeclaration, // SourceUnit,
+    TryStatement,
+    VariableDeclaration,
+    WhileStatement, // SourceUnit,
 };
 use lazy_static::lazy_static;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -152,7 +157,6 @@ impl StepRef {
 impl StepRef {
     delegate! {
         to self.inner.read() {
-
         }
     }
 }
@@ -268,22 +272,15 @@ pub enum StepVariant {
     /// A consecutive list of statements that are executed in a single debug step.
     Statements(Vec<Statement>),
     /// The condition of an if statement that is executed in a single debug step.
-    IfCondition(Expression),
+    IfCondition(IfStatement),
     /// The header of a for loop that is executed in a single debug step.
-    ForLoop(
-        (
-            // The initialization expression of the for loop (optional)
-            Option<ExpressionOrVariableDeclarationStatement>,
-            // The condition expression of the for loop (optional)
-            Option<Expression>,
-            // The loop expression that executes at the end of each iteration (optional)
-            Option<ExpressionStatement>,
-        ),
-    ),
+    ForLoop(ForStatement),
     /// The condition of a while loop that is executed in a single debug step.
-    WhileLoop(Expression),
+    WhileLoop(WhileStatement),
+    /// The header of a do-while loop that is executed in a single debug step.
+    DoWhileLoop(DoWhileStatement),
     /// The try external call
-    Try(FunctionCall),
+    Try(TryStatement),
 }
 
 /// Computes the left difference of `a` and `b` (`a \ b`).

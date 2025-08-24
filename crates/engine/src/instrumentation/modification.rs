@@ -1,11 +1,19 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    analysis::SourceAnalysis, mutability_to_str, slice_source_location, source_string_at_location,
-    visibility_to_str, AnalysisResult, USID, UVID,
+    analysis::{stmt_src, SourceAnalysis},
+    find_next_semicolon_after_source_location, mutability_to_str, next_index_of_source_location,
+    slice_source_location, source_string_at_location, visibility_to_str, AnalysisResult, USID,
+    UVID,
 };
 use eyre::Result;
-use foundry_compilers::artifacts::{ast::SourceLocation, StateMutability, Visibility};
+use foundry_compilers::artifacts::{
+    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, Visibility,
+};
+
+const NORMAL_PRIORITY: u8 = 127;
+const LOWEST_PRIORITY: u8 = 0;
+const HIGHEST_PRIORITY: u8 = 255;
 
 /// The collections of modifications on a source file.
 pub struct SourceModifications {
@@ -31,23 +39,51 @@ impl SourceModifications {
         let loc = modification.loc();
         // Check if the modification overlaps with the previous modification
         if let Some((immediate_prev_loc, immediate_prev)) =
-            self.modifications.range(..loc).next_back()
+            self.modifications.range_mut(..loc).next_back()
         {
             assert!(
-                immediate_prev_loc + immediate_prev.len() <= loc,
+                immediate_prev_loc + immediate_prev.modified_length() <= loc,
                 "modification location overlaps with previous modification"
             );
         }
         // Check if the modification overlaps with the next modification
-        if let Some((immediate_next_loc, _immediate_next)) = self.modifications.range(loc..).next()
+        if let Some((immediate_next_loc, immediate_next)) =
+            self.modifications.range_mut(loc..).next()
         {
             assert!(
-                loc + modification.len() <= *immediate_next_loc,
+                loc + modification.modified_length() <= *immediate_next_loc,
                 "modification location overlaps with next modification"
             );
+            // if both of them are instrument actions and instrument at the same location, merge them. The later comming modification will be appended after the earlier one.
+            if immediate_next.is_instrument()
+                && modification.is_instrument()
+                && *immediate_next_loc == loc
+            {
+                immediate_next.modify_instrument_action(|act| {
+                    if act.priority >= modification.as_instrument_action().priority {
+                        act.content = InstrumentContent::Plain(format!(
+                            "{} {}",
+                            act.content.as_str(),
+                            modification.as_instrument_action().content.as_str(),
+                        ))
+                    } else {
+                        act.content = InstrumentContent::Plain(format!(
+                            "{} {}",
+                            modification.as_instrument_action().content.as_str(),
+                            act.content.as_str(),
+                        ))
+                    }
+                });
+            }
         }
         // Insert the modification
         self.modifications.insert(loc, modification);
+    }
+
+    pub fn extend_modifications(&mut self, modifications: Vec<Modification>) {
+        for modification in modifications {
+            self.add_modification(modification);
+        }
     }
 
     /// Modifies the source code with the modifications.
@@ -79,7 +115,7 @@ impl Modification {
     /// Gets the source ID of the modification.
     pub fn source_id(&self) -> u32 {
         match self {
-            Self::Instrument(instrument_action) => instrument_action.file_id,
+            Self::Instrument(instrument_action) => instrument_action.source_id,
             Self::Remove(remove_action) => {
                 remove_action.src.index.expect("remove action index not found") as u32
             }
@@ -95,8 +131,7 @@ impl Modification {
     }
 
     /// Gets the length of the original code that is modified.
-    #[allow(clippy::len_without_is_empty)]
-    pub const fn len(&self) -> usize {
+    pub const fn modified_length(&self) -> usize {
         match self {
             Self::Instrument(_) => 0,
             Self::Remove(remove_action) => {
@@ -104,16 +139,64 @@ impl Modification {
             }
         }
     }
+
+    /// Checks if the modification is an instrument action.
+    pub const fn is_instrument(&self) -> bool {
+        matches!(self, Self::Instrument(_))
+    }
+
+    /// Checks if the modification is a remove action.
+    pub const fn is_remove(&self) -> bool {
+        matches!(self, Self::Remove(_))
+    }
+
+    /// Gets the instrument action if it is an instrument action.
+    pub fn as_instrument_action(&self) -> &InstrumentAction {
+        match self {
+            Self::Instrument(instrument_action) => instrument_action,
+            Self::Remove(_) => panic!("cannot get instrument action from remove action"),
+        }
+    }
+
+    /// Gets the remove action if it is a remove action.
+    pub fn as_remove_action(&self) -> &RemoveAction {
+        match self {
+            Self::Instrument(_) => panic!("cannot get remove action from instrument action"),
+            Self::Remove(remove_action) => remove_action,
+        }
+    }
+
+    /// Modifies the remove action if it is a remove action.
+    pub fn modify_remove_action(&mut self, f: impl FnOnce(&mut RemoveAction)) {
+        match self {
+            Self::Instrument(_) => {}
+            Self::Remove(remove_action) => {
+                f(remove_action);
+            }
+        }
+    }
+
+    /// Modifies the instrument action if it is an instrument action.
+    pub fn modify_instrument_action(&mut self, f: impl FnOnce(&mut InstrumentAction)) {
+        match self {
+            Self::Instrument(instrument_action) => {
+                f(instrument_action);
+            }
+            Self::Remove(_) => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct InstrumentAction {
-    /// The file ID of the source file to instrument
-    pub file_id: u32,
+    /// The source ID of the source file to instrument
+    pub source_id: u32,
     /// The location of the code to instrument. This is the offset of the code at which the instrumented code should be inserted.
     pub loc: usize,
     /// The code to instrument
     pub content: InstrumentContent,
+    /// The priority of the instrument action. If two `InstrumentAction`s have the same `loc`, the one with higher priority will be applied first.
+    pub priority: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -156,19 +239,20 @@ impl InstrumentContent {
 }
 
 impl SourceModifications {
-    /// Collect the modifications on the source code given the analysis result.
+    /// Collects the modifications on the source code given the analysis result.
     pub fn collect_modifications(&mut self, source: &str, analysis: &SourceAnalysis) -> Result<()> {
         // Collect the modifications on the visibility and mutability of state variables and functions
         self.collect_visibility_and_mutability_modifications(source, analysis)?;
 
-        // TODO: collect modifications to patch single-statement if/for/while/try/catch/etc.
+        // Collect the modifications to patch single-statement if/for/while/try/catch/etc.
+        self.collect_statement_to_block_modifications(source, analysis)?;
 
         // TODO: collect more modifications for each step.
 
         Ok(())
     }
 
-    /// Collect the modifications on the visibility of state variables and functions given the source analysis result.
+    /// Collects the modifications on the visibility of state variables and functions given the source analysis result.
     fn collect_visibility_and_mutability_modifications(
         &mut self,
         source: &str,
@@ -192,9 +276,10 @@ impl SourceModifications {
                 let new_visibility_str = format!(" {add} ");
 
                 InstrumentAction {
-                    file_id: source_id,
+                    source_id,
                     loc: src.start.unwrap_or(0) + at_index,
                     content: InstrumentContent::Plain(new_visibility_str),
+                    priority: NORMAL_PRIORITY,
                 }
             };
 
@@ -264,6 +349,80 @@ impl SourceModifications {
 
         Ok(())
     }
+
+    /// Collects the modifications to convert a statement to a block. Some control flow structures, such as if/for/while/try/catch/etc., may have their body as a single statement. We need to convert them to a block.
+    fn collect_statement_to_block_modifications(
+        &mut self,
+        source: &str,
+        analysis: &SourceAnalysis,
+    ) -> Result<()> {
+        let source_id = self.source_id;
+
+        let left_bracket = |loc: usize| -> InstrumentAction {
+            InstrumentAction {
+                source_id,
+                loc,
+                content: InstrumentContent::Plain("{".to_string()),
+                priority: HIGHEST_PRIORITY,
+            }
+        };
+        let right_bracket = |loc: usize| -> InstrumentAction {
+            InstrumentAction {
+                source_id,
+                loc,
+                content: InstrumentContent::Plain("}".to_string()),
+                priority: LOWEST_PRIORITY,
+            }
+        };
+        let wrap_statement_as_block = |stmt_src: &SourceLocation| -> Vec<Modification> {
+            // The left bracket is inserted just before the statement.
+            let left_bracket =
+                left_bracket(stmt_src.start.expect("statement start location not found"));
+
+            // The right bracket is inserted just after the end of the statement. However, the `;` of the statement is not included in the source location, so we search the source code for the next `;` after the statement and insert the right bracket after it.
+            let right_bracket = right_bracket(
+                find_next_semicolon_after_source_location(source, stmt_src)
+                    .expect("statement end not found")
+                    + 1,
+            );
+
+            vec![left_bracket.into(), right_bracket.into()]
+        };
+
+        for step in &analysis.steps {
+            match &step.read().variant {
+                crate::analysis::StepVariant::IfCondition(if_stmt) => {
+                    // modify the true body if needed
+                    if let BlockOrStatement::Statement(stmt) = &if_stmt.true_body {
+                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        self.extend_modifications(modifications);
+                    }
+
+                    // modify the false body if needed
+                    if let Some(BlockOrStatement::Statement(stmt)) = &if_stmt.false_body {
+                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        self.extend_modifications(modifications);
+                    }
+                }
+                crate::analysis::StepVariant::ForLoop(for_stmt) => {
+                    // modify the body if needed
+                    if let BlockOrStatement::Statement(stmt) = &for_stmt.body {
+                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        self.extend_modifications(modifications);
+                    }
+                }
+                crate::analysis::StepVariant::WhileLoop(while_stmt) => {
+                    // modify the body if needed
+                    if let BlockOrStatement::Statement(stmt) = &while_stmt.body {
+                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        self.extend_modifications(modifications);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -282,12 +441,90 @@ mod tests {
         }
         "#;
         let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
-        analysis.pretty_display(&_sources);
 
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
         modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
-        modifications.modify_source(source);
+        assert_eq!(modifications.modifications.len(), 4);
+        let modified_source = modifications.modify_source(source);
 
-        println!("{}", modifications.modify_source(source));
+        // Check there should be no private state variables after modification
+        let (_, analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+        assert_eq!(analysis2.private_state_variables.len(), 0);
+    }
+
+    #[test]
+    fn test_collect_function_visibility_modifications() {
+        let source = r#"
+        contract C {
+            function a() public returns (uint256) {}
+            function b() external {}
+            function c() internal virtual returns (uint256) {}
+        }
+        "#;
+        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 2);
+        let modified_source = modifications.modify_source(source);
+
+        // Check there should be no private functions after modification
+        let (_, analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+        assert_eq!(analysis2.private_functions.len(), 0);
+    }
+
+    #[test]
+    fn test_collect_function_mutability_modifications() {
+        let source = r#"
+        contract C {
+            function a() public pure returns (uint256) {}
+            function b() public view returns (uint256) {}
+            function c() public payable returns (uint256) {}
+        }
+        "#;
+
+        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 2);
+        let modified_source = modifications.modify_source(source);
+
+        // Check there should be no immutable functions after modification
+        let (_, analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+        assert_eq!(analysis2.immutable_functions.len(), 0);
+    }
+
+    #[test]
+    fn test_collect_statement_to_block_modifications() {
+        let source = r#"
+        contract C {
+            function a() public returns (uint256) {
+                if (false )return 0;
+
+                if (true)return 0;
+                else    return 1 ;
+            }
+
+            function b() public returns (uint256 x) {
+                for (uint256 i = 0; i < 10; i++)x += i
+                ;
+            }
+
+            function c() public returns (uint256) {
+                while (true) return 0;
+            }
+        }
+        "#;
+
+        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 10);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
     }
 }
