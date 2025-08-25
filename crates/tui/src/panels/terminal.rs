@@ -19,7 +19,10 @@
 //! This panel provides a command-line interface for debugging commands.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
+use crate::managers::execution::ExecutionManager;
+use crate::managers::info::InfoManager;
+use crate::managers::theme::ThemeManager;
+use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::colors::ColorScheme;
 use crate::ui::icons::Icons;
@@ -108,26 +111,18 @@ pub struct TerminalPanel {
     /// VIM mode cursor absolute line number in terminal history (1-based, like code panel)
     vim_cursor_line: usize,
 
-    // ========== Data ==========
-    /// Color Scheme:
-    color_scheme: ColorScheme,
-
     // ========== Managers ==========
     /// Shared execution state manager
-    execution_manager: Arc<RwLock<ExecutionManager>>,
-    /// Shared resource manager
-    resource_manager: Arc<RwLock<ResourceManager>>,
-    /// Theme manager for centralized theme management
-    theme_manager: Arc<RwLock<ThemeManager>>,
+    exec_mgr: ExecutionManager,
+    /// Shared information manager
+    info_mgr: InfoManager,
+    /// Shared theme manager for styling
+    theme_mgr: ThemeManager,
 }
 
 impl TerminalPanel {
     /// Create a new terminal panel
-    pub fn new(
-        execution_manager: Arc<RwLock<ExecutionManager>>,
-        resource_manager: Arc<RwLock<ResourceManager>>,
-        theme_manager: Arc<RwLock<ThemeManager>>,
-    ) -> Self {
+    pub fn new(exec_mgr: ExecutionManager, info_mgr: InfoManager, theme_mgr: ThemeManager) -> Self {
         let mut panel = Self {
             lines: Vec::new(),
             mode: TerminalMode::Insert,
@@ -138,15 +133,14 @@ impl TerminalPanel {
             scroll_offset: 0,
             content_height: 0,
             focused: false,
-            color_scheme: ColorScheme::default(),
             connected: true,
             snapshot_info: Some((127, 348)),
             last_ctrl_c: None,
             vim_number_prefix: String::new(),
             vim_cursor_line: 1, // Start at first line (1-based like code panel)
-            execution_manager,
-            resource_manager,
-            theme_manager,
+            exec_mgr,
+            info_mgr,
+            theme_mgr,
         };
 
         // Add welcome message with fancy styling
@@ -205,7 +199,10 @@ impl TerminalPanel {
 
         // Handle built-in commands
         match command.trim() {
-            "" => {}
+            "" => {
+                self.add_output("Empty command");
+                self.add_output("Type 'help' for available commands");
+            }
             "quit" | "q" | "exit" => {
                 self.add_system("🚪 Exiting debugger...");
                 return Ok(EventResponse::Exit);
@@ -253,10 +250,11 @@ impl TerminalPanel {
         match parts[0] {
             "next" | "n" => {
                 self.add_system("Stepping to next snapshot...");
-                let current = self.exec_mgr_mut().current_snapshot();
-                let total = self.exec_mgr_mut().total_snapshots();
+                let current = self.exec_mgr.current_snapshot;
+                let total = self.exec_mgr.total_snapshots;
                 if current < total.saturating_sub(1) {
-                    self.exec_mgr_mut().update_state(current + 1, total, Some(current + 10), None);
+                    // TODO
+                    // self.exec_mgr.update_state(current + 1, total, Some(current + 10), None);
                     self.add_output(&format!("✅ Stepped to snapshot {}/{}", current + 1, total));
                 } else {
                     self.add_output("⚠️ Already at last snapshot");
@@ -264,10 +262,11 @@ impl TerminalPanel {
             }
             "prev" | "p" => {
                 self.add_system("Stepping to previous snapshot...");
-                let current = self.exec_mgr_mut().current_snapshot();
-                let total = self.exec_mgr_mut().total_snapshots();
+                let current = self.exec_mgr.current_snapshot;
+                let total = self.exec_mgr.total_snapshots;
                 if current > 0 {
-                    self.exec_mgr_mut().update_state(current - 1, total, Some(current + 8), None);
+                    // TODO
+                    // self.exec_mgr.update_state(current - 1, total, Some(current + 8), None);
                     self.add_output(&format!("✅ Stepped to snapshot {}/{}", current - 1, total));
                 } else {
                     self.add_output("⚠️ Already at first snapshot");
@@ -277,10 +276,11 @@ impl TerminalPanel {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.add_output(&format!("Stepping {} snapshots...", count));
-                let current = self.exec_mgr_mut().current_snapshot();
-                let total = self.exec_mgr_mut().total_snapshots();
+                let current = self.exec_mgr.current_snapshot;
+                let total = self.exec_mgr.total_snapshots;
                 let new_pos = (current + count).min(total.saturating_sub(1));
-                self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
+                // TODO
+                // self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
                 self.add_output(&format!(
                     "✅ Stepped {} snapshots to {}/{}",
                     count, new_pos, total
@@ -290,10 +290,11 @@ impl TerminalPanel {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.add_output(&format!("Reverse stepping {} snapshots...", count));
-                let current = self.exec_mgr_mut().current_snapshot();
-                let total = self.exec_mgr_mut().total_snapshots();
+                let current = self.exec_mgr.current_snapshot;
+                let total = self.exec_mgr.total_snapshots;
                 let new_pos = current.saturating_sub(count);
-                self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
+                // TODO
+                // self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
                 self.add_output(&format!(
                     "✅ Reverse stepped {} snapshots to {}/{}",
                     count, new_pos, total
@@ -301,11 +302,12 @@ impl TerminalPanel {
             }
             "call" | "c" => {
                 self.add_system("Stepping to next function call...");
-                let current = self.exec_mgr_mut().current_snapshot();
-                let total = self.exec_mgr_mut().total_snapshots();
+                let current = self.exec_mgr.current_snapshot;
+                let total = self.exec_mgr.total_snapshots;
                 // Simulate jumping to next significant call (larger step)
                 let new_pos = (current + 10).min(total.saturating_sub(1));
-                self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
+                // TODO
+                // self.exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
                 self.add_output(&format!(
                     "✅ Stepped to next call at snapshot {}/{}",
                     new_pos, total
@@ -313,11 +315,12 @@ impl TerminalPanel {
             }
             "rcall" | "rc" => {
                 self.add_system("Stepping back from function call...");
-                let current = self.exec_mgr_mut().current_snapshot();
-                let total = self.exec_mgr_mut().total_snapshots();
+                let current = self.exec_mgr.current_snapshot;
+                let total = self.exec_mgr.total_snapshots;
                 // Simulate jumping back to previous significant call
                 let new_pos = current.saturating_sub(10);
-                self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
+                // TODO
+                // self.exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
                 self.add_output(&format!(
                     "✅ Stepped back to previous call at snapshot {}/{}",
                     new_pos, total
@@ -327,9 +330,10 @@ impl TerminalPanel {
                 if parts.len() > 1 {
                     if let Ok(index) = parts[1].parse::<usize>() {
                         self.add_output(&format!("Jumping to snapshot {}...", index));
-                        let total = self.exec_mgr_mut().total_snapshots();
+                        let total = self.exec_mgr.total_snapshots;
                         if index < total {
-                            self.exec_mgr_mut().update_state(index, total, Some(index + 9), None);
+                            // TODO
+                            // self.exec_mgr.update_state(index, total, Some(index + 9), None);
                             self.add_output(&format!("✅ Jumped to snapshot {}/{}", index, total));
                         } else {
                             self.add_output(&format!(
@@ -445,8 +449,8 @@ impl TerminalPanel {
 
     /// Show available themes
     fn show_themes(&mut self) {
-        let themes = self.theme_mgr().list_themes();
-        let active_theme = self.theme_mgr().get_active_theme_name();
+        let themes = self.theme_mgr.read().unwrap().list_themes();
+        let active_theme = self.theme_mgr.read().unwrap().get_active_theme_name();
 
         self.add_output("Available themes:");
         for (name, _display_name, description) in themes {
@@ -469,7 +473,7 @@ impl TerminalPanel {
             return;
         }
 
-        let theme = self.theme_mgr_mut().switch_theme(theme_name);
+        let theme = self.theme_mgr.write().unwrap().switch_theme(theme_name);
         match theme {
             Ok(_) => {
                 self.add_system(&format!(
@@ -481,7 +485,7 @@ impl TerminalPanel {
             Err(e) => {
                 self.add_error(&format!("Failed to switch theme: {}", e));
                 self.add_output("Available themes:");
-                let themes = self.theme_mgr().list_themes();
+                let themes = self.theme_mgr.read().unwrap().list_themes();
                 for (_name, display_name, description) in themes {
                     self.add_output(&format!("  {} - {}", display_name, description));
                 }
@@ -584,12 +588,12 @@ impl TerminalPanel {
 
         let status_paragraph = Paragraph::new(Line::from(vec![Span::styled(
             status_text,
-            Style::default().fg(self.color_scheme.info_color),
+            Style::default().fg(self.theme_mgr.color_scheme.info_color),
         )]))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(self.color_scheme.unfocused_border)),
+                .border_style(Style::default().fg(self.theme_mgr.color_scheme.unfocused_border)),
         );
 
         frame.render_widget(status_paragraph, area);
@@ -793,12 +797,7 @@ impl TerminalPanel {
             "{} edb{} {}",
             if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
             Icons::ARROW_RIGHT,
-            if self.focused && self.mode == TerminalMode::Insert {
-                // Don't modify the text here - we'll handle cursor overlay in rendering
-                self.input_buffer.clone()
-            } else {
-                self.input_buffer.clone()
-            }
+            self.input_buffer
         );
         all_content.push(TerminalLine { content: prompt, line_type: LineType::Command });
 
@@ -832,10 +831,14 @@ impl TerminalPanel {
             .enumerate()
             .map(|(display_row, terminal_line)| {
                 let base_style = match terminal_line.line_type {
-                    LineType::Command => Style::default().fg(self.color_scheme.info_color),
+                    LineType::Command => {
+                        Style::default().fg(self.theme_mgr.color_scheme.info_color)
+                    }
                     LineType::Output => Style::default(),
-                    LineType::Error => Style::default().fg(self.color_scheme.error_color),
-                    LineType::System => Style::default().fg(self.color_scheme.success_color),
+                    LineType::Error => Style::default().fg(self.theme_mgr.color_scheme.error_color),
+                    LineType::System => {
+                        Style::default().fg(self.theme_mgr.color_scheme.success_color)
+                    }
                 };
 
                 // Create the line content with base style, handling block cursor highlighting
@@ -869,8 +872,8 @@ impl TerminalPanel {
                             spans.push(Span::styled(
                                 ch.to_string(),
                                 Style::default()
-                                    .bg(self.color_scheme.cursor_color)
-                                    .fg(self.color_scheme.panel_bg), // Invert colors for block cursor
+                                    .bg(self.theme_mgr.color_scheme.cursor_color)
+                                    .fg(self.theme_mgr.color_scheme.panel_bg), // Invert colors for block cursor
                             ));
                         } else if i == chars.len() - 1 && cursor_pos_in_line >= chars.len() {
                             // Cursor at end of line - add the character normally then add block
@@ -878,23 +881,13 @@ impl TerminalPanel {
                             spans.push(Span::styled(
                                 " ", // Block cursor on empty space at end
                                 Style::default()
-                                    .bg(self.color_scheme.cursor_color)
-                                    .fg(self.color_scheme.panel_bg),
+                                    .bg(self.theme_mgr.color_scheme.cursor_color)
+                                    .fg(self.theme_mgr.color_scheme.panel_bg),
                             ));
                         } else {
                             // Normal character
                             spans.push(Span::styled(ch.to_string(), base_style));
                         }
-                    }
-
-                    // If the input is empty but we're at the cursor position, show block cursor
-                    if chars.len() == prefix_len && self.cursor_position == 0 {
-                        spans.push(Span::styled(
-                            " ", // Block cursor on empty input
-                            Style::default()
-                                .bg(self.color_scheme.cursor_color)
-                                .fg(self.color_scheme.panel_bg),
-                        ));
                     }
 
                     Line::from(spans)
@@ -927,8 +920,8 @@ impl TerminalPanel {
                     // Apply highlighting to entire ListItem (full width like code panel)
                     list_item.style(
                         Style::default()
-                            .bg(self.color_scheme.highlight_bg)
-                            .fg(self.color_scheme.highlight_fg),
+                            .bg(self.theme_mgr.color_scheme.highlight_bg)
+                            .fg(self.theme_mgr.color_scheme.highlight_fg),
                     )
                 } else {
                     list_item
@@ -958,8 +951,8 @@ impl TerminalPanel {
         let terminal_block = BorderPresets::terminal(
             self.focused,
             terminal_title,
-            self.color_scheme.focused_border,
-            self.color_scheme.unfocused_border,
+            self.theme_mgr.color_scheme.focused_border,
+            self.theme_mgr.color_scheme.unfocused_border,
         );
 
         // Use the full area since status/help are handled separately
@@ -984,7 +977,7 @@ impl TerminalPanel {
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.color_scheme.accent_color));
+                .style(Style::default().fg(self.theme_mgr.color_scheme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             // Help text
@@ -1001,7 +994,7 @@ impl TerminalPanel {
             };
 
             let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.color_scheme.help_text_color));
+                .style(Style::default().fg(self.theme_mgr.color_scheme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -1029,9 +1022,9 @@ impl PanelTr for TerminalPanel {
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
         let border_color = if self.focused {
-            self.color_scheme.focused_border
+            self.theme_mgr.color_scheme.focused_border
         } else {
-            self.color_scheme.unfocused_border
+            self.theme_mgr.color_scheme.unfocused_border
         };
 
         // Add status line if there's enough space
@@ -1134,39 +1127,10 @@ impl PanelTr for TerminalPanel {
         self
     }
 
-    /// Get execution manager read-only reference
-    fn exec_mgr(&self) -> RwLockReadGuard<'_, ExecutionManager> {
-        self.execution_manager.read().expect("ExecutionManager lock poisoned")
-    }
-
-    /// Get execution manager reference
-    fn exec_mgr_mut(&self) -> RwLockWriteGuard<'_, ExecutionManager> {
-        self.execution_manager.write().expect("ExecutionManager lock poisoned")
-    }
-
-    /// Get resource manager read-only reference
-    fn res_mgr(&self) -> RwLockReadGuard<'_, ResourceManager> {
-        self.resource_manager.read().expect("ResourceManager lock poisoned")
-    }
-
-    /// Get resource manager reference
-    fn res_mgr_mut(&self) -> RwLockWriteGuard<'_, ResourceManager> {
-        self.resource_manager.write().expect("ResourceManager lock poisoned")
-    }
-
-    /// Get theme manager reference
-    fn theme_mgr(&self) -> RwLockReadGuard<'_, ThemeManager> {
-        self.theme_manager.read().expect("ThemeManager lock poisoned")
-    }
-
-    /// Get theme manager reference
-    fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
-        self.theme_manager.write().expect("ThemeManager lock poisoned")
-    }
-
     async fn fetch_data(&mut self) -> Result<()> {
-        let color_scheme = self.theme_mgr().get_current_colors();
-        self.color_scheme = color_scheme;
+        self.exec_mgr.fetch_data().await?;
+        self.info_mgr.fetch_data().await?;
+        self.theme_mgr.fetch_data().await?;
         Ok(())
     }
 }

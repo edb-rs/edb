@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 /// Animated spinner with configurable frames and speed
 #[derive(Debug)]
-pub struct Spinner {
+pub struct SpinnerAnimation {
     /// Current frame index
     current_frame: usize,
     /// Spinner animation frames
@@ -35,12 +35,12 @@ pub struct Spinner {
     active: bool,
 }
 
-impl Spinner {
+impl SpinnerAnimation {
     /// Create a new spinner with default braille pattern
     pub fn new() -> Self {
         Self {
             current_frame: 0,
-            frames: &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+            frames: SpinnerStyles::BRAILLE,
             frame_duration: Duration::from_millis(100),
             last_update: Instant::now(),
             active: false,
@@ -48,14 +48,9 @@ impl Spinner {
     }
 
     /// Create a spinner with custom frames
-    pub fn with_frames(frames: &'static [&'static str]) -> Self {
-        Self {
-            current_frame: 0,
-            frames,
-            frame_duration: Duration::from_millis(100),
-            last_update: Instant::now(),
-            active: false,
-        }
+    pub fn with_frames(mut self, frames: &'static [&'static str]) -> Self {
+        self.frames = frames;
+        self
     }
 
     /// Create a spinner with custom speed
@@ -104,7 +99,7 @@ impl Spinner {
     }
 }
 
-impl Default for Spinner {
+impl Default for SpinnerAnimation {
     fn default() -> Self {
         Self::new()
     }
@@ -146,19 +141,25 @@ impl SpinnerStyles {
 
 /// RPC loading state with spinner
 #[derive(Debug)]
-pub struct RpcSpinner {
+pub struct Spinner {
     /// The underlying spinner
-    spinner: Spinner,
+    spinner: SpinnerAnimation,
     /// Current operation description
     operation: Option<String>,
     /// Whether we're waiting for RPC response
     waiting: bool,
 }
 
-impl RpcSpinner {
-    /// Create a new RPC spinner
-    pub fn new() -> Self {
-        Self { spinner: Spinner::new(), operation: None, waiting: false }
+impl Spinner {
+    /// Create a new spinner
+    pub fn new(frames: Option<&'static [&'static str]>, frame_duration: Option<Duration>) -> Self {
+        Self {
+            spinner: SpinnerAnimation::new()
+                .with_frames(frames.unwrap_or(SpinnerStyles::BRAILLE))
+                .with_speed(frame_duration.unwrap_or(Duration::from_millis(100))),
+            operation: None,
+            waiting: false,
+        }
     }
 
     /// Start loading with operation description
@@ -199,8 +200,8 @@ impl RpcSpinner {
     }
 }
 
-impl Default for RpcSpinner {
+impl Default for Spinner {
     fn default() -> Self {
-        Self::new()
+        Self::new(None, None)
     }
 }

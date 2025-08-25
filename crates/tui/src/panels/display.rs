@@ -19,7 +19,10 @@
 //! This panel can switch between different display modes based on context.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
+use crate::managers::execution::ExecutionManager;
+use crate::managers::info::InfoManager;
+use crate::managers::theme::ThemeManager;
+use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crate::ColorScheme;
@@ -114,24 +117,19 @@ pub struct DisplayPanel {
     variables: Vec<String>,
     stack: Vec<String>,
     memory: Vec<String>,
-    color_scheme: ColorScheme,
 
     // ========== Managers ==========
     /// Shared execution state manager
-    execution_manager: Arc<RwLock<ExecutionManager>>,
-    /// Shared resource manager
-    resource_manager: Arc<RwLock<ResourceManager>>,
-    /// Theme manager for styling
-    theme_manager: Arc<RwLock<ThemeManager>>,
+    exec_mgr: ExecutionManager,
+    /// Shared information manager
+    info_mgr: InfoManager,
+    /// Shared theme manager for styling
+    theme_mgr: ThemeManager,
 }
 
 impl DisplayPanel {
     /// Create a new display panel
-    pub fn new(
-        execution_manager: Arc<RwLock<ExecutionManager>>,
-        resource_manager: Arc<RwLock<ResourceManager>>,
-        theme_manager: Arc<RwLock<ThemeManager>>,
-    ) -> Self {
+    pub fn new(exec_mgr: ExecutionManager, info_mgr: InfoManager, theme_mgr: ThemeManager) -> Self {
         Self {
             mode: DisplayMode::Variables,
             selected_index: 0,
@@ -162,10 +160,9 @@ impl DisplayPanel {
                 "0x60: 0xa9059cbb000000000000000000000000456...def000000000000000003e8".to_string(),
             ],
             focused: false,
-            execution_manager,
-            resource_manager,
-            theme_manager,
-            color_scheme: ColorScheme::default(),
+            exec_mgr,
+            info_mgr,
+            theme_mgr,
         }
     }
 
@@ -241,9 +238,9 @@ impl PanelTr for DisplayPanel {
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
         let border_color = if self.focused {
-            self.color_scheme.focused_border
+            self.theme_mgr.color_scheme.focused_border
         } else {
-            self.color_scheme.unfocused_border
+            self.theme_mgr.color_scheme.unfocused_border
         };
 
         // Calculate context height for viewport calculations
@@ -261,8 +258,8 @@ impl PanelTr for DisplayPanel {
                     .block(BorderPresets::display(
                         self.focused,
                         self.title(),
-                        self.color_scheme.focused_border,
-                        self.color_scheme.unfocused_border,
+                        self.theme_mgr.color_scheme.focused_border,
+                        self.theme_mgr.color_scheme.unfocused_border,
                     ));
             frame.render_widget(paragraph, area);
             return;
@@ -277,10 +274,10 @@ impl PanelTr for DisplayPanel {
             .map(|(i, item)| {
                 let style = if i == self.selected_index && self.focused {
                     Style::default()
-                        .bg(self.color_scheme.selection_bg)
-                        .fg(self.color_scheme.selection_fg)
+                        .bg(self.theme_mgr.color_scheme.selection_bg)
+                        .fg(self.theme_mgr.color_scheme.selection_fg)
                 } else if i == self.selected_index {
-                    Style::default().bg(self.color_scheme.highlight_bg)
+                    Style::default().bg(self.theme_mgr.color_scheme.highlight_bg)
                 } else {
                     Style::default()
                 };
@@ -292,10 +289,10 @@ impl PanelTr for DisplayPanel {
             .block(BorderPresets::display(
                 self.focused,
                 self.title(),
-                self.color_scheme.focused_border,
-                self.color_scheme.unfocused_border,
+                self.theme_mgr.color_scheme.focused_border,
+                self.theme_mgr.color_scheme.unfocused_border,
             ))
-            .highlight_style(Style::default().bg(self.color_scheme.selection_bg));
+            .highlight_style(Style::default().bg(self.theme_mgr.color_scheme.selection_bg));
 
         frame.render_widget(list, area);
 
@@ -316,7 +313,7 @@ impl PanelTr for DisplayPanel {
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.color_scheme.accent_color));
+                .style(Style::default().fg(self.theme_mgr.color_scheme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             let help_area = Rect {
@@ -327,7 +324,7 @@ impl PanelTr for DisplayPanel {
             };
             let help_text = "←/→: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
             let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.color_scheme.help_text_color));
+                .style(Style::default().fg(self.theme_mgr.color_scheme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -401,39 +398,10 @@ impl PanelTr for DisplayPanel {
         self
     }
 
-    /// Get execution manager read-only reference
-    fn exec_mgr(&self) -> RwLockReadGuard<'_, ExecutionManager> {
-        self.execution_manager.read().expect("ExecutionManager lock poisoned")
-    }
-
-    /// Get execution manager reference
-    fn exec_mgr_mut(&self) -> RwLockWriteGuard<'_, ExecutionManager> {
-        self.execution_manager.write().expect("ExecutionManager lock poisoned")
-    }
-
-    /// Get resource manager read-only reference
-    fn res_mgr(&self) -> RwLockReadGuard<'_, ResourceManager> {
-        self.resource_manager.read().expect("ResourceManager lock poisoned")
-    }
-
-    /// Get resource manager reference
-    fn res_mgr_mut(&self) -> RwLockWriteGuard<'_, ResourceManager> {
-        self.resource_manager.write().expect("ResourceManager lock poisoned")
-    }
-
-    /// Get theme manager reference
-    fn theme_mgr(&self) -> RwLockReadGuard<'_, ThemeManager> {
-        self.theme_manager.read().expect("ThemeManager lock poisoned")
-    }
-
-    /// Get theme manager reference
-    fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
-        self.theme_manager.write().expect("ThemeManager lock poisoned")
-    }
-
     async fn fetch_data(&mut self) -> Result<()> {
-        let color_scheme = self.theme_mgr().get_current_colors();
-        self.color_scheme = color_scheme;
+        self.theme_mgr.fetch_data().await?;
+        self.exec_mgr.fetch_data().await?;
+        self.info_mgr.fetch_data().await?;
         Ok(())
     }
 }

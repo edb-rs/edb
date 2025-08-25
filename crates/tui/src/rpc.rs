@@ -18,7 +18,7 @@
 //!
 //! This module provides a client for making JSON-RPC calls to the debug server.
 
-use crate::ui::spinner::RpcSpinner;
+use crate::ui::spinner::Spinner;
 use eyre::Result;
 use jsonrpsee::{
     core::client::ClientT,
@@ -37,7 +37,7 @@ pub struct RpcClient {
     client: HttpClient,
     server_url: String,
     /// Shared spinner state for loading indication
-    spinner: Arc<RwLock<RpcSpinner>>,
+    spinner: Arc<RwLock<Spinner>>,
 }
 
 impl RpcClient {
@@ -51,7 +51,7 @@ impl RpcClient {
         Ok(Self {
             client,
             server_url: server_url.to_string(),
-            spinner: Arc::new(RwLock::new(RpcSpinner::new())),
+            spinner: Arc::new(RwLock::new(Spinner::new(None, None))),
         })
     }
 
@@ -163,7 +163,7 @@ impl RpcClient {
     }
 
     /// Get shared reference to spinner for UI updates
-    pub fn spinner(&self) -> Arc<RwLock<RpcSpinner>> {
+    pub fn spinner(&self) -> Arc<RwLock<Spinner>> {
         Arc::clone(&self.spinner)
     }
 

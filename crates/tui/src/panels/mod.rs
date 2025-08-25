@@ -19,7 +19,7 @@
 //! This module contains the panel trait and all panel implementations.
 
 use crate::{
-    managers::{ExecutionManager, ResourceManager, ThemeManager},
+    managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore},
     ColorScheme,
 };
 use crossterm::event::{Event, KeyEvent};
@@ -89,24 +89,6 @@ pub trait PanelTr: Debug + Send {
 
     /// Allow downcasting to concrete types
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-
-    /// Get execution manager read-only reference
-    fn exec_mgr(&self) -> RwLockReadGuard<'_, ExecutionManager>;
-
-    /// Get execution manager reference
-    fn exec_mgr_mut(&self) -> RwLockWriteGuard<'_, ExecutionManager>;
-
-    /// Get resource manager read-only reference
-    fn res_mgr(&self) -> RwLockReadGuard<'_, ResourceManager>;
-
-    /// Get resource manager reference
-    fn res_mgr_mut(&self) -> RwLockWriteGuard<'_, ResourceManager>;
-
-    /// Get theme manager reference
-    fn theme_mgr(&self) -> RwLockReadGuard<'_, ThemeManager>;
-
-    /// Get theme manager reference
-    fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager>;
 
     /// Fetch data from manager
     async fn fetch_data(&mut self) -> Result<()> {
@@ -203,60 +185,6 @@ impl PanelTr for Panel {
             Panel::Display(panel) => panel.as_any_mut(),
             Panel::Terminal(panel) => panel.as_any_mut(),
             Panel::Trace(panel) => panel.as_any_mut(),
-        }
-    }
-
-    fn exec_mgr(&self) -> RwLockReadGuard<'_, ExecutionManager> {
-        match self {
-            Panel::Code(panel) => panel.exec_mgr(),
-            Panel::Display(panel) => panel.exec_mgr(),
-            Panel::Terminal(panel) => panel.exec_mgr(),
-            Panel::Trace(panel) => panel.exec_mgr(),
-        }
-    }
-
-    fn exec_mgr_mut(&self) -> RwLockWriteGuard<'_, ExecutionManager> {
-        match self {
-            Panel::Code(panel) => panel.exec_mgr_mut(),
-            Panel::Display(panel) => panel.exec_mgr_mut(),
-            Panel::Terminal(panel) => panel.exec_mgr_mut(),
-            Panel::Trace(panel) => panel.exec_mgr_mut(),
-        }
-    }
-
-    fn res_mgr(&self) -> RwLockReadGuard<'_, ResourceManager> {
-        match self {
-            Panel::Code(panel) => panel.res_mgr(),
-            Panel::Display(panel) => panel.res_mgr(),
-            Panel::Terminal(panel) => panel.res_mgr(),
-            Panel::Trace(panel) => panel.res_mgr(),
-        }
-    }
-
-    fn res_mgr_mut(&self) -> RwLockWriteGuard<'_, ResourceManager> {
-        match self {
-            Panel::Code(panel) => panel.res_mgr_mut(),
-            Panel::Display(panel) => panel.res_mgr_mut(),
-            Panel::Terminal(panel) => panel.res_mgr_mut(),
-            Panel::Trace(panel) => panel.res_mgr_mut(),
-        }
-    }
-
-    fn theme_mgr(&self) -> RwLockReadGuard<'_, ThemeManager> {
-        match self {
-            Panel::Code(panel) => panel.theme_mgr(),
-            Panel::Display(panel) => panel.theme_mgr(),
-            Panel::Terminal(panel) => panel.theme_mgr(),
-            Panel::Trace(panel) => panel.theme_mgr(),
-        }
-    }
-
-    fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
-        match self {
-            Panel::Code(panel) => panel.theme_mgr_mut(),
-            Panel::Display(panel) => panel.theme_mgr_mut(),
-            Panel::Terminal(panel) => panel.theme_mgr_mut(),
-            Panel::Trace(panel) => panel.theme_mgr_mut(),
         }
     }
 

@@ -29,7 +29,7 @@ pub mod syntax;
 pub use borders::{BorderPresets, EnhancedBorder, EnhancedBorderStyle};
 pub use colors::{ColorScheme, Theme};
 pub use icons::Icons;
-pub use spinner::{RpcSpinner, Spinner, SpinnerStyles};
+pub use spinner::{Spinner, SpinnerAnimation, SpinnerStyles};
 pub use status::{
     BreakpointStatus, ConnectionStatus, ExecutionStatus, FileStatus, PanelStatus, RpcStatus,
     StatusBar,

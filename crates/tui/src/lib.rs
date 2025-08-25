@@ -31,13 +31,13 @@ mod ui;
 pub use app::App;
 pub use config::Config;
 pub use layout::{LayoutConfig, LayoutManager, LayoutType};
-pub use managers::ThemeManager;
+pub use managers::ThemeManagerCore;
 pub use panels::EventResponse;
 pub use rpc::RpcClient;
 pub use ui::{
     BorderPresets, BreakpointStatus, ColorScheme, ConnectionStatus, EnhancedBorder,
-    ExecutionStatus, FileStatus, Icons, PanelStatus, RpcSpinner, RpcStatus, Spinner, SpinnerStyles,
-    StatusBar, Theme,
+    ExecutionStatus, FileStatus, Icons, PanelStatus, RpcStatus, Spinner, SpinnerAnimation,
+    SpinnerStyles, StatusBar, Theme,
 };
 
 use crossterm::{

@@ -16,9 +16,18 @@
 
 //! Execution state management for TUI panels
 
-/// Current execution state information
+use eyre::Result;
+use std::{
+    ops::{Deref, DerefMut},
+    sync::{Arc, RwLock},
+};
+
+use edb_common::types::Trace;
+
+use crate::RpcClient;
+
 #[derive(Debug, Clone)]
-pub struct ExecutionState {
+pub struct ExecutionManager {
     /// Current snapshot index
     pub current_snapshot: usize,
     /// Total number of snapshots
@@ -29,80 +38,103 @@ pub struct ExecutionState {
     pub current_file: Option<String>,
     /// Whether execution is paused/stopped
     pub is_paused: bool,
+
+    /// Trace data
+    pub trace_data: Option<Trace>,
+
+    core: Arc<RwLock<ExecutionManagerCore>>,
 }
 
-impl ExecutionState {
+impl ExecutionManager {
     /// Create new execution state
-    pub fn new() -> Self {
+    pub fn new(core: Arc<RwLock<ExecutionManagerCore>>) -> Self {
         Self {
             current_snapshot: 0,
             total_snapshots: 0,
             current_line: None,
             current_file: None,
             is_paused: true,
+            trace_data: None,
+            core,
         }
+    }
+
+    /// Fetch data
+    pub async fn fetch_data(&mut self) -> eyre::Result<()> {
+        let mut core = self.core.write().unwrap();
+        core.fetch_data().await?;
+
+        if self.trace_data.is_none() {
+            self.trace_data = core.get_trace().cloned();
+        }
+
+        Ok(())
+    }
+}
+
+impl Deref for ExecutionManager {
+    type Target = Arc<RwLock<ExecutionManagerCore>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.core
+    }
+}
+
+impl DerefMut for ExecutionManager {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.core
     }
 }
 
 /// Shared execution manager for communication between panels
 #[derive(Debug)]
-pub struct ExecutionManager {
-    /// Current execution state
-    state: ExecutionState,
+pub struct ExecutionManagerCore {
+    /// RPC client for server communication
+    rpc_client: Arc<RpcClient>,
+    /// Cached trace data (None = not loaded, Some = loaded)
+    trace_data: Option<Trace>,
 }
 
-impl ExecutionManager {
+impl ExecutionManagerCore {
     /// Create a new execution manager
-    pub fn new() -> Self {
-        Self { state: ExecutionState::new() }
+    pub fn new(rpc_client: Arc<RpcClient>) -> Self {
+        Self { rpc_client, trace_data: None }
     }
 
-    /// Get current snapshot index
-    pub fn current_snapshot(&self) -> usize {
-        self.state.current_snapshot
+    /// Fetch data
+    pub async fn fetch_data(&mut self) -> Result<()> {
+        self.fetch_trace().await?;
+
+        Ok(())
     }
 
-    /// Get total snapshot count
-    pub fn total_snapshots(&self) -> usize {
-        self.state.total_snapshots
+    /// Get trace data
+    pub fn get_trace(&self) -> Option<&Trace> {
+        self.trace_data.as_ref()
     }
 
-    /// Get current execution line
-    pub fn current_line(&self) -> Option<usize> {
-        self.state.current_line
-    }
+    /// Fetch trace data
+    async fn fetch_trace(&mut self) -> Result<()> {
+        if self.trace_data.is_some() {
+            // We already have trace data, no need to fetch
+            return Ok(());
+        }
 
-    /// Get current file
-    pub fn current_file(&self) -> Option<String> {
-        self.state.current_file.clone()
-    }
-
-    /// Check if execution is paused
-    pub fn is_paused(&self) -> bool {
-        self.state.is_paused
-    }
-
-    /// Update execution state from RPC response
-    pub fn update_state(
-        &mut self,
-        snapshot: usize,
-        total: usize,
-        line: Option<usize>,
-        file: Option<String>,
-    ) {
-        self.state.current_snapshot = snapshot;
-        self.state.total_snapshots = total;
-        self.state.current_line = line;
-        self.state.current_file = file;
-    }
-
-    /// Set pause state
-    pub fn set_paused(&mut self, paused: bool) {
-        self.state.is_paused = paused;
-    }
-
-    /// Get a copy of the full execution state
-    pub fn get_state(&self) -> ExecutionState {
-        self.state.clone()
+        match self.rpc_client.get_trace().await {
+            Ok(trace_value) => match serde_json::from_value::<Trace>(trace_value) {
+                Ok(trace) => {
+                    self.trace_data = Some(trace);
+                    Ok(())
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to deserialize trace: {}", e);
+                    Err(e.into())
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Failed to fetch trace: {}", e);
+                Err(e)
+            }
+        }
     }
 }

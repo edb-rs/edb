@@ -19,7 +19,10 @@
 //! This panel shows the call trace and allows navigation through trace entries.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::{ExecutionManager, ResourceManager, ThemeManager};
+use crate::managers::execution::ExecutionManager;
+use crate::managers::info::InfoManager;
+use crate::managers::theme::ThemeManager;
+use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
@@ -69,12 +72,6 @@ pub struct TracePanel {
     context_height: usize,
     /// Whether this panel is focused
     focused: bool,
-
-    // ========== Data ==========
-    /// Trace
-    trace_data: Option<Trace>,
-    /// Color Scheme:
-    color_scheme: ColorScheme,
     /// Syntax highlighter for Solidity values
     syntax_highlighter: SyntaxHighlighter,
     /// Set of collapsed trace entry IDs (when collapsed, we hide children)
@@ -82,32 +79,26 @@ pub struct TracePanel {
 
     // ========== Managers ==========
     /// Shared execution state manager
-    execution_manager: Arc<RwLock<ExecutionManager>>,
-    /// Shared resource manager
-    resource_manager: Arc<RwLock<ResourceManager>>,
-    /// Theme manager for styling
-    theme_manager: Arc<RwLock<ThemeManager>>,
+    exec_mgr: ExecutionManager,
+    /// Shared information manager
+    info_mgr: InfoManager,
+    /// Shared theme manager for styling
+    theme_mgr: ThemeManager,
 }
 
 impl TracePanel {
     /// Create a new trace panel
-    pub fn new(
-        execution_manager: Arc<RwLock<ExecutionManager>>,
-        resource_manager: Arc<RwLock<ResourceManager>>,
-        theme_manager: Arc<RwLock<ThemeManager>>,
-    ) -> Self {
+    pub fn new(exec_mgr: ExecutionManager, info_mgr: InfoManager, theme_mgr: ThemeManager) -> Self {
         Self {
             selected_index: 0,
             focused: false,
             scroll_offset: 0,
             context_height: 0,
-            trace_data: None,
-            color_scheme: ColorScheme::default(),
             syntax_highlighter: SyntaxHighlighter::new(),
             collapsed_entries: HashSet::new(),
-            execution_manager,
-            resource_manager,
-            theme_manager,
+            exec_mgr,
+            info_mgr,
+            theme_mgr,
         }
     }
 
@@ -124,7 +115,7 @@ impl TracePanel {
 
     /// Move selection down
     fn move_down(&mut self) {
-        if let Some(trace) = &self.trace_data {
+        if let Some(trace) = &self.exec_mgr.trace_data {
             let display_lines = self.generate_display_lines(trace);
             let max_lines = display_lines.len();
             if self.selected_index < max_lines.saturating_sub(1) {
@@ -140,7 +131,7 @@ impl TracePanel {
 
     /// Get currently selected trace entry
     pub fn selected_entry(&self) -> Option<&TraceEntry> {
-        if let Some(trace) = &self.trace_data {
+        if let Some(trace) = &self.exec_mgr.trace_data {
             let display_lines = self.generate_display_lines(trace);
             if let Some(line_type) = display_lines.get(self.selected_index) {
                 let entry_id = match line_type {
@@ -159,7 +150,7 @@ impl TracePanel {
 
     /// Toggle expansion/collapse for current selected entry
     pub fn toggle_expansion(&mut self) {
-        if let Some(trace) = &self.trace_data {
+        if let Some(trace) = &self.exec_mgr.trace_data {
             let display_lines = self.generate_display_lines(trace);
             if let Some(line_type) = display_lines.get(self.selected_index) {
                 let entry_id = match line_type {
@@ -192,7 +183,7 @@ impl TracePanel {
 
     /// Adjust selection to stay on the main call line after expansion/collapse
     fn adjust_selection_after_expansion(&mut self, entry_id: usize) {
-        if let Some(trace) = &self.trace_data {
+        if let Some(trace) = &self.exec_mgr.trace_data {
             let display_lines = self.generate_display_lines(trace);
             // Find the call line for this entry
             if let Some(call_line_index) = display_lines
@@ -222,7 +213,7 @@ impl TracePanel {
                     return false;
                 }
                 // Find the parent entry to check its parent
-                if let Some(trace) = &self.trace_data {
+                if let Some(trace) = &self.exec_mgr.trace_data {
                     if let Some(parent_entry) = trace.iter().find(|e| e.id == pid) {
                         current_parent_id = parent_entry.parent_id;
                     } else {
@@ -303,7 +294,7 @@ impl TracePanel {
     /// Check if this entry is the last child of its parent
     fn is_last_child(&self, entry: &TraceEntry) -> bool {
         if let Some(parent_id) = entry.parent_id {
-            if let Some(trace) = &self.trace_data {
+            if let Some(trace) = &self.exec_mgr.trace_data {
                 // Find all visible siblings (same parent)
                 let visible_siblings: Vec<_> = trace
                     .iter()
@@ -322,7 +313,7 @@ impl TracePanel {
     /// Check if there are more visible children after this entry at the same level
     fn has_more_children_after(&self, entry: &TraceEntry) -> bool {
         if let Some(parent_id) = entry.parent_id {
-            if let Some(trace) = &self.trace_data {
+            if let Some(trace) = &self.exec_mgr.trace_data {
                 // Find if there are any visible siblings after this entry
                 let mut found_current = false;
                 for e in trace.iter() {
@@ -357,7 +348,7 @@ impl TracePanel {
             }
 
             if let Some(parent_id) = e.parent_id {
-                if let Some(trace) = &self.trace_data {
+                if let Some(trace) = &self.exec_mgr.trace_data {
                     current = trace.iter().find(|p| p.id == parent_id);
                     current_depth = current_depth.saturating_sub(1);
                 } else {
@@ -416,7 +407,7 @@ impl TracePanel {
     /// Format a compact trace entry (main call line without events/returns)
     fn format_trace_entry_compact(&self, entry: &TraceEntry, depth: usize) -> Line<'static> {
         // Check if this entry has children
-        let has_children = if let Some(trace) = &self.trace_data {
+        let has_children = if let Some(trace) = &self.exec_mgr.trace_data {
             trace.iter().any(|e| e.parent_id == Some(entry.id))
         } else {
             false
@@ -457,29 +448,38 @@ impl TracePanel {
         };
 
         let (call_type_str, call_color) = match &entry.call_type {
-            CallType::Call(CallScheme::Call) => ("CALL", self.color_scheme.call_color),
-            CallType::Call(CallScheme::CallCode) => ("CALLCODE", self.color_scheme.call_color),
-            CallType::Call(CallScheme::DelegateCall) => {
-                ("DELEGATECALL", self.color_scheme.call_color)
+            CallType::Call(CallScheme::Call) => ("CALL", self.theme_mgr.color_scheme.call_color),
+            CallType::Call(CallScheme::CallCode) => {
+                ("CALLCODE", self.theme_mgr.color_scheme.call_color)
             }
-            CallType::Call(CallScheme::StaticCall) => ("STATICCALL", self.color_scheme.call_color),
-            CallType::Create(CreateScheme::Create) => ("CREATE", self.color_scheme.create_color),
+            CallType::Call(CallScheme::DelegateCall) => {
+                ("DELEGATECALL", self.theme_mgr.color_scheme.call_color)
+            }
+            CallType::Call(CallScheme::StaticCall) => {
+                ("STATICCALL", self.theme_mgr.color_scheme.call_color)
+            }
+            CallType::Create(CreateScheme::Create) => {
+                ("CREATE", self.theme_mgr.color_scheme.create_color)
+            }
             CallType::Create(CreateScheme::Create2 { .. }) => {
-                ("CREATE2", self.color_scheme.create_color)
+                ("CREATE2", self.theme_mgr.color_scheme.create_color)
             }
             CallType::Create(CreateScheme::Custom { .. }) => {
-                ("CUSTOM_CREATE", self.color_scheme.create_color)
+                ("CUSTOM_CREATE", self.theme_mgr.color_scheme.create_color)
             }
         };
 
         // Build spans with the new format
         let mut spans = vec![
-            Span::styled(line_prefix, Style::default().fg(self.color_scheme.comment_color)),
+            Span::styled(
+                line_prefix,
+                Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+            ),
             Span::styled(call_type_str, Style::default().fg(call_color)),
             Span::raw(" "),
             Span::styled(
                 self.format_address_readable(entry.code_address),
-                Style::default().fg(self.color_scheme.accent_color),
+                Style::default().fg(self.theme_mgr.color_scheme.accent_color),
             ),
         ];
 
@@ -489,7 +489,7 @@ impl TracePanel {
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(
                     constructor_call,
-                    Style::default().fg(self.color_scheme.keyword_color),
+                    Style::default().fg(self.theme_mgr.color_scheme.keyword_color),
                 ));
             }
         } else {
@@ -516,12 +516,12 @@ impl TracePanel {
                     if data_size > 0 {
                         spans.push(Span::styled(
                             format!("0x{}...({} bytes)", selector, data_size),
-                            Style::default().fg(self.color_scheme.syntax_string_color),
+                            Style::default().fg(self.theme_mgr.color_scheme.syntax_string_color),
                         ));
                     } else {
                         spans.push(Span::styled(
                             format!("0x{}", selector),
-                            Style::default().fg(self.color_scheme.syntax_string_color),
+                            Style::default().fg(self.theme_mgr.color_scheme.syntax_string_color),
                         ));
                     }
                 }
@@ -532,7 +532,7 @@ impl TracePanel {
         if let Some((beneficiary, value)) = &entry.self_destruct {
             spans.push(Span::styled(
                 " [SELFDESTRUCT]",
-                Style::default().fg(self.color_scheme.error_color),
+                Style::default().fg(self.theme_mgr.color_scheme.error_color),
             ));
             spans.push(Span::styled(
                 format!(
@@ -540,30 +540,32 @@ impl TracePanel {
                     self.format_address_readable(*beneficiary),
                     self.format_ether(*value)
                 ),
-                Style::default().fg(self.color_scheme.warning_color),
+                Style::default().fg(self.theme_mgr.color_scheme.warning_color),
             ));
         }
 
         // Result indicator with more specific symbols based on InstructionResult
         let (result_char, result_color) = match &entry.result {
             Some(CallResult::Success { result, .. }) => match result {
-                InstructionResult::Return => ("✓", self.color_scheme.success_color),
-                InstructionResult::Stop => ("•", self.color_scheme.success_color),
-                InstructionResult::SelfDestruct => ("†", self.color_scheme.warning_color),
-                _ => ("✓", self.color_scheme.success_color),
+                InstructionResult::Return => ("✓", self.theme_mgr.color_scheme.success_color),
+                InstructionResult::Stop => ("•", self.theme_mgr.color_scheme.success_color),
+                InstructionResult::SelfDestruct => ("†", self.theme_mgr.color_scheme.warning_color),
+                _ => ("✓", self.theme_mgr.color_scheme.success_color),
             },
             Some(CallResult::Revert { result, .. }) => match result {
-                InstructionResult::Revert => ("↩", self.color_scheme.error_color),
-                _ => ("✗", self.color_scheme.error_color),
+                InstructionResult::Revert => ("↩", self.theme_mgr.color_scheme.error_color),
+                _ => ("✗", self.theme_mgr.color_scheme.error_color),
             },
             Some(CallResult::Error { result, .. }) => match result {
-                InstructionResult::OutOfGas => ("G", self.color_scheme.warning_color),
-                InstructionResult::StackOverflow => ("S", self.color_scheme.warning_color),
-                InstructionResult::OpcodeNotFound => ("X", self.color_scheme.error_color),
-                InstructionResult::OutOfFunds => ("F", self.color_scheme.warning_color),
-                _ => ("E", self.color_scheme.warning_color),
+                InstructionResult::OutOfGas => ("G", self.theme_mgr.color_scheme.warning_color),
+                InstructionResult::StackOverflow => {
+                    ("S", self.theme_mgr.color_scheme.warning_color)
+                }
+                InstructionResult::OpcodeNotFound => ("X", self.theme_mgr.color_scheme.error_color),
+                InstructionResult::OutOfFunds => ("F", self.theme_mgr.color_scheme.warning_color),
+                _ => ("E", self.theme_mgr.color_scheme.warning_color),
             },
-            None => ("?", self.color_scheme.comment_color),
+            None => ("?", self.theme_mgr.color_scheme.comment_color),
         };
 
         spans.push(Span::raw(" "));
@@ -595,10 +597,19 @@ impl TracePanel {
             let event_text = self.format_event(event, entry.abi.as_ref());
 
             Line::from(vec![
-                Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
-                Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
-                Span::styled("[EVENT] ", Style::default().fg(self.color_scheme.comment_color)),
-                Span::styled(event_text, Style::default().fg(self.color_scheme.accent_color)),
+                Span::styled(
+                    full_indent,
+                    Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                ),
+                Span::styled("· ", Style::default().fg(self.theme_mgr.color_scheme.comment_color)),
+                Span::styled(
+                    "[EVENT] ",
+                    Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                ),
+                Span::styled(
+                    event_text,
+                    Style::default().fg(self.theme_mgr.color_scheme.accent_color),
+                ),
             ])
         } else {
             Line::from("Invalid event")
@@ -635,34 +646,64 @@ impl TracePanel {
                 };
 
                 Line::from(vec![
-                    Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("[RETURN] ", Style::default().fg(self.color_scheme.comment_color)),
+                    Span::styled(
+                        full_indent,
+                        Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                    ),
+                    Span::styled(
+                        "· ",
+                        Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                    ),
+                    Span::styled(
+                        "[RETURN] ",
+                        Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                    ),
                     Span::styled(
                         return_text,
-                        Style::default().fg(self.color_scheme.syntax_string_color),
+                        Style::default().fg(self.theme_mgr.color_scheme.syntax_string_color),
                     ),
                 ])
             }
             Some(CallResult::Revert { output, .. }) => {
                 let revert_text = self.decode_revert_reason(output);
                 Line::from(vec![
-                    Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("[REVERT] ", Style::default().fg(self.color_scheme.error_color)),
+                    Span::styled(
+                        full_indent,
+                        Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                    ),
+                    Span::styled(
+                        "· ",
+                        Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                    ),
+                    Span::styled(
+                        "[REVERT] ",
+                        Style::default().fg(self.theme_mgr.color_scheme.error_color),
+                    ),
                     Span::styled(
                         revert_text,
-                        Style::default().fg(self.color_scheme.syntax_string_color),
+                        Style::default().fg(self.theme_mgr.color_scheme.syntax_string_color),
                     ),
                 ])
             }
             Some(CallResult::Error { output, result }) => {
                 let error_text = self.format_instruction_result(*result, output);
                 Line::from(vec![
-                    Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
-                    Span::styled("[ERROR] ", Style::default().fg(self.color_scheme.error_color)),
-                    Span::styled(error_text, Style::default().fg(self.color_scheme.error_color)),
+                    Span::styled(
+                        full_indent,
+                        Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                    ),
+                    Span::styled(
+                        "· ",
+                        Style::default().fg(self.theme_mgr.color_scheme.comment_color),
+                    ),
+                    Span::styled(
+                        "[ERROR] ",
+                        Style::default().fg(self.theme_mgr.color_scheme.error_color),
+                    ),
+                    Span::styled(
+                        error_text,
+                        Style::default().fg(self.theme_mgr.color_scheme.error_color),
+                    ),
                 ])
             }
             None => Line::from("Unknown result"),
@@ -1036,8 +1077,9 @@ impl TracePanel {
 
             // Add the highlighted token
             let token_text = code[token.start..token.end].to_owned();
-            let token_style =
-                self.syntax_highlighter.get_token_style(token.token_type, &self.color_scheme);
+            let token_style = self
+                .syntax_highlighter
+                .get_token_style(token.token_type, &self.theme_mgr.color_scheme);
             spans.push(Span::styled(token_text, token_style));
 
             last_end = token.end;
@@ -1061,7 +1103,7 @@ impl PanelTr for TracePanel {
     }
 
     fn title(&self) -> String {
-        if let Some(trace) = &self.trace_data {
+        if let Some(trace) = &self.exec_mgr.trace_data {
             let display_lines = self.generate_display_lines(trace);
             let visible_entries = trace.iter().filter(|entry| self.is_entry_visible(entry)).count();
             format!("Trace ({} lines, {} entries)", display_lines.len(), visible_entries)
@@ -1080,18 +1122,21 @@ impl PanelTr for TracePanel {
         } as usize;
 
         // Handle different display states
-        match self.trace_data {
+        match self.exec_mgr.trace_data {
             // No data: show spinner
             None => {
                 let paragraph = Paragraph::new(Line::from(vec![
                     Span::raw("Fetching execution trace "),
-                    Span::styled("⠋", Style::default().fg(self.color_scheme.accent_color)),
+                    Span::styled(
+                        "⠋",
+                        Style::default().fg(self.theme_mgr.color_scheme.accent_color),
+                    ),
                 ]))
                 .block(BorderPresets::trace(
                     self.focused,
                     self.title(),
-                    self.color_scheme.focused_border,
-                    self.color_scheme.unfocused_border,
+                    self.theme_mgr.color_scheme.focused_border,
+                    self.theme_mgr.color_scheme.unfocused_border,
                 ));
                 frame.render_widget(paragraph, area);
                 return;
@@ -1102,8 +1147,8 @@ impl PanelTr for TracePanel {
                     let paragraph = Paragraph::new("Trace is empty").block(BorderPresets::trace(
                         self.focused,
                         self.title(),
-                        self.color_scheme.focused_border,
-                        self.color_scheme.unfocused_border,
+                        self.theme_mgr.color_scheme.focused_border,
+                        self.theme_mgr.color_scheme.unfocused_border,
                     ));
                     frame.render_widget(paragraph, area);
                     return;
@@ -1123,10 +1168,10 @@ impl PanelTr for TracePanel {
 
                         let style = if global_index == self.selected_index && self.focused {
                             Style::default()
-                                .bg(self.color_scheme.selection_bg)
-                                .fg(self.color_scheme.selection_fg)
+                                .bg(self.theme_mgr.color_scheme.selection_bg)
+                                .fg(self.theme_mgr.color_scheme.selection_fg)
                         } else if global_index == self.selected_index {
-                            Style::default().bg(self.color_scheme.highlight_bg)
+                            Style::default().bg(self.theme_mgr.color_scheme.highlight_bg)
                         } else {
                             Style::default()
                         };
@@ -1139,10 +1184,10 @@ impl PanelTr for TracePanel {
                     .block(BorderPresets::trace(
                         self.focused,
                         self.title(),
-                        self.color_scheme.focused_border,
-                        self.color_scheme.unfocused_border,
+                        self.theme_mgr.color_scheme.focused_border,
+                        self.theme_mgr.color_scheme.unfocused_border,
                     ))
-                    .highlight_style(Style::default().bg(self.color_scheme.selection_bg));
+                    .highlight_style(Style::default().bg(self.theme_mgr.color_scheme.selection_bg));
 
                 frame.render_widget(list, area);
 
@@ -1163,12 +1208,12 @@ impl PanelTr for TracePanel {
                             "Line: {}/{} | Trace: ???/{}",
                             self.selected_index + 1,
                             display_lines.len(),
-                            self.trace_data.as_ref().map(|d| d.len()).unwrap_or(0)
+                            self.exec_mgr.trace_data.as_ref().map(|d| d.len()).unwrap_or(0)
                         )); // TODO
 
                     let status_text = status_bar.build();
                     let status_paragraph = Paragraph::new(status_text)
-                        .style(Style::default().fg(self.color_scheme.accent_color));
+                        .style(Style::default().fg(self.theme_mgr.color_scheme.accent_color));
                     frame.render_widget(status_paragraph, status_area);
 
                     let help_area = Rect {
@@ -1180,7 +1225,7 @@ impl PanelTr for TracePanel {
                     let help_text =
                         "↑/↓: Navigate • Space: Toggle expand/collapse • Enter: Jump to snapshot";
                     let help_paragraph = Paragraph::new(help_text)
-                        .style(Style::default().fg(self.color_scheme.help_text_color));
+                        .style(Style::default().fg(self.theme_mgr.color_scheme.help_text_color));
                     frame.render_widget(help_paragraph, help_area);
                 }
             }
@@ -1218,13 +1263,6 @@ impl PanelTr for TracePanel {
                 }
                 Ok(EventResponse::Handled)
             }
-            KeyCode::Char('r') | KeyCode::Char('R') => {
-                // Refresh trace data
-                debug!("Refreshing trace data");
-                self.trace_data = None;
-
-                Ok(EventResponse::Handled)
-            }
             _ => Ok(EventResponse::NotHandled),
         }
     }
@@ -1243,43 +1281,11 @@ impl PanelTr for TracePanel {
         self
     }
 
-    /// Get execution manager read-only reference
-    fn exec_mgr(&self) -> RwLockReadGuard<'_, ExecutionManager> {
-        self.execution_manager.read().expect("ExecutionManager lock poisoned")
-    }
-
-    /// Get execution manager reference
-    fn exec_mgr_mut(&self) -> RwLockWriteGuard<'_, ExecutionManager> {
-        self.execution_manager.write().expect("ExecutionManager lock poisoned")
-    }
-
-    /// Get resource manager read-only reference
-    fn res_mgr(&self) -> RwLockReadGuard<'_, ResourceManager> {
-        self.resource_manager.read().expect("ResourceManager lock poisoned")
-    }
-
-    /// Get resource manager reference
-    fn res_mgr_mut(&self) -> RwLockWriteGuard<'_, ResourceManager> {
-        self.resource_manager.write().expect("ResourceManager lock poisoned")
-    }
-
-    /// Get theme manager reference
-    fn theme_mgr(&self) -> RwLockReadGuard<'_, ThemeManager> {
-        self.theme_manager.read().expect("ThemeManager lock poisoned")
-    }
-
-    /// Get theme manager reference
-    fn theme_mgr_mut(&self) -> RwLockWriteGuard<'_, ThemeManager> {
-        self.theme_manager.write().expect("ThemeManager lock poisoned")
-    }
-
     async fn fetch_data(&mut self) -> Result<()> {
-        self.res_mgr_mut().fetch_trace().await?;
-        let trace_data = self.res_mgr().get_trace().await.cloned();
-        self.trace_data = trace_data;
+        self.exec_mgr.fetch_data().await?;
+        self.info_mgr.fetch_data().await?;
+        self.theme_mgr.fetch_data().await?;
 
-        let color_scheme = self.theme_mgr().get_current_colors();
-        self.color_scheme = color_scheme;
         Ok(())
     }
 }

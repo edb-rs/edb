@@ -25,7 +25,7 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
-use crate::{ColorScheme, Theme};
+use crate::Theme;
 
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
