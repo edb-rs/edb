@@ -18,6 +18,8 @@
 //!
 //! This module contains all the RPC method implementations for the debug server.
 
+mod code;
+mod snapshot;
 mod trace;
 
 use super::types::RpcError;
@@ -57,6 +59,8 @@ where
 
         match method {
             "edb_getTrace" => trace::get_trace(&self.context),
+            "edb_getCode" => code::get_code(&self.context, params),
+            "edb_getSnapshotInfo" => snapshot::get_snapshot_info(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: -32601,
