@@ -300,6 +300,119 @@ impl TracePanel {
         }
     }
 
+    /// Check if this entry is the last child of its parent
+    fn is_last_child(&self, entry: &TraceEntry) -> bool {
+        if let Some(parent_id) = entry.parent_id {
+            if let Some(trace) = &self.trace_data {
+                // Find all visible siblings (same parent)
+                let visible_siblings: Vec<_> = trace
+                    .iter()
+                    .filter(|e| e.parent_id == Some(parent_id) && self.is_entry_visible(e))
+                    .collect();
+
+                // Check if this is the last visible sibling
+                if let Some(last) = visible_siblings.last() {
+                    return last.id == entry.id;
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if there are more visible children after this entry at the same level
+    fn has_more_children_after(&self, entry: &TraceEntry) -> bool {
+        if let Some(parent_id) = entry.parent_id {
+            if let Some(trace) = &self.trace_data {
+                // Find if there are any visible siblings after this entry
+                let mut found_current = false;
+                for e in trace.iter() {
+                    if e.parent_id == Some(parent_id) && self.is_entry_visible(e) {
+                        if found_current {
+                            // Found a visible sibling after the current entry
+                            return true;
+                        }
+                        if e.id == entry.id {
+                            found_current = true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if an ancestor at a given depth is the last child
+    fn is_ancestor_last_child(&self, entry: &TraceEntry, ancestor_depth: usize) -> bool {
+        if ancestor_depth >= entry.depth {
+            return false;
+        }
+
+        // Walk up the parent chain to find the ancestor at the target depth
+        let mut current = Some(entry);
+        let mut current_depth = entry.depth;
+
+        while let Some(e) = current {
+            if current_depth == ancestor_depth {
+                return self.is_last_child(e);
+            }
+
+            if let Some(parent_id) = e.parent_id {
+                if let Some(trace) = &self.trace_data {
+                    current = trace.iter().find(|p| p.id == parent_id);
+                    current_depth = current_depth.saturating_sub(1);
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        false
+    }
+
+    /// Build tree indentation string based on depth and ancestry
+    fn build_tree_indent(&self, entry: &TraceEntry, _is_call_line: bool) -> String {
+        if entry.depth == 0 {
+            return String::new();
+        }
+
+        let mut indent_parts = Vec::new();
+
+        // For each ancestor level, determine if we need a vertical line
+        for ancestor_depth in 0..entry.depth.saturating_sub(1) {
+            // Check if the ancestor at this depth is the last child
+            // If it is, we use spaces; otherwise, we use a vertical line
+            if self.is_ancestor_last_child(entry, ancestor_depth + 1) {
+                indent_parts.push("  "); // No vertical line for completed branches
+            } else {
+                indent_parts.push("│ "); // Vertical line for continuing branches
+            }
+        }
+
+        indent_parts.join("")
+    }
+
+    /// Build clean tree indentation for the new design
+    fn build_tree_indent_clean(&self, entry: &TraceEntry) -> String {
+        if entry.depth == 0 {
+            return String::new();
+        }
+
+        let mut indent_parts = Vec::new();
+
+        // For each ancestor level, determine if we need a vertical line
+        for ancestor_depth in 0..entry.depth.saturating_sub(1) {
+            if self.is_ancestor_last_child(entry, ancestor_depth + 1) {
+                indent_parts.push("  "); // Spaces for completed branches
+            } else {
+                indent_parts.push("│ "); // Vertical line for continuing branches
+            }
+        }
+
+        indent_parts.join("")
+    }
+
     /// Format a compact trace entry (main call line without events/returns)
     fn format_trace_entry_compact(&self, entry: &TraceEntry, depth: usize) -> Line<'static> {
         // Check if this entry has children
@@ -309,27 +422,39 @@ impl TracePanel {
             false
         };
 
-        // Collapse indicator at the beginning of the line
-        let collapse_char = if has_children {
-            if self.collapsed_entries.contains(&entry.id) {
-                "▶ " // children collapsed
+        // Build the line prefix as a single string
+        let line_prefix = if depth == 0 {
+            // Root level: collapse indicator at start, then tree structure if has siblings
+            let collapse_char = if has_children {
+                if self.collapsed_entries.contains(&entry.id) {
+                    "▶ "
+                } else {
+                    "▼ "
+                }
             } else {
-                "▼ " // children expanded
+                "  " // spaces for alignment when no children
+            };
+
+            // For root level, check if this is the last root entry
+            if self.is_last_child(entry) {
+                format!("{}", collapse_char)
+            } else {
+                format!("{}", collapse_char)
             }
         } else {
-            "  " // no children - just spaces for alignment
-        };
+            // Child level: tree structure with proper spacing
+            let tree_indent = self.build_tree_indent_clean(entry);
+            let connector = if self.is_last_child(entry) { "└─" } else { "├─" };
 
-        // Build indentation for the tree structure
-        let mut indent_chars = Vec::new();
-        for i in 0..depth {
-            if i == depth - 1 {
-                indent_chars.push("├─");
+            // Add collapse indicator if has children, otherwise just a space
+            if has_children {
+                let collapse_char =
+                    if self.collapsed_entries.contains(&entry.id) { "▶ " } else { "▼ " };
+                format!("  {}{}{}", tree_indent, connector, collapse_char)
             } else {
-                indent_chars.push(" ");
+                format!("  {}{}  ", tree_indent, connector)
             }
-        }
-        let indent = indent_chars.join("");
+        };
 
         let (call_type_str, call_color) = match &entry.call_type {
             CallType::Call(CallScheme::Call) => ("CALL", self.color_scheme.call_color),
@@ -347,9 +472,9 @@ impl TracePanel {
             }
         };
 
+        // Build spans with the new format
         let mut spans = vec![
-            Span::styled(collapse_char, Style::default().fg(self.color_scheme.comment_color)),
-            Span::raw(indent),
+            Span::styled(line_prefix, Style::default().fg(self.color_scheme.comment_color)),
             Span::styled(call_type_str, Style::default().fg(call_color)),
             Span::raw(" "),
             Span::styled(
@@ -450,16 +575,28 @@ impl TracePanel {
     /// Format an event line
     fn format_event_line(&self, entry: &TraceEntry, event_idx: usize) -> Line<'static> {
         if let Some(event) = entry.events.get(event_idx) {
-            // Tree structure: spaces for alignment + tree branch + [EVENT] label
-            let base_indent = "  ".to_string(); // Align with collapse indicator
-            let tree_indent = " ".repeat(entry.depth * 2);
-            let tree_branch = "├─ ";
-            let full_indent = format!("{}{}{}", base_indent, tree_indent, tree_branch);
-
+            // Detail line: vertical connector + spaces + dot
+            let full_indent = if entry.depth == 0 {
+                // Root level details - check if this root entry has more siblings
+                if self.is_last_child(entry) {
+                    "      ".to_string() // Last root entry, no vertical line
+                } else {
+                    "  │   ".to_string() // More root entries follow, show vertical line
+                }
+            } else {
+                // Child level details - always start with 2 spaces, then tree indent, then connector
+                let tree_indent = self.build_tree_indent_clean(entry);
+                if self.is_last_child(entry) {
+                    format!("  {}      ", tree_indent) // Parent is last child, no vertical line
+                } else {
+                    format!("  {}│     ", tree_indent) // Parent has more siblings, continue vertical line
+                }
+            };
             let event_text = self.format_event(event, entry.abi.as_ref());
 
             Line::from(vec![
                 Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
+                Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
                 Span::styled("[EVENT] ", Style::default().fg(self.color_scheme.comment_color)),
                 Span::styled(event_text, Style::default().fg(self.color_scheme.accent_color)),
             ])
@@ -470,11 +607,23 @@ impl TracePanel {
 
     /// Format a return value line  
     fn format_return_line(&self, entry: &TraceEntry) -> Line<'static> {
-        // Tree structure: use └─ for return (always last)
-        let base_indent = "  ".to_string(); // Align with collapse indicator
-        let tree_indent = " ".repeat(entry.depth * 2);
-        let tree_branch = "└─ ";
-        let full_indent = format!("{}{}{}", base_indent, tree_indent, tree_branch);
+        // Detail line: vertical connector + spaces + dot
+        let full_indent = if entry.depth == 0 {
+            // Root level details - check if this root entry has more siblings
+            if self.is_last_child(entry) {
+                "      ".to_string() // Last root entry, no vertical line
+            } else {
+                "  │   ".to_string() // More root entries follow, show vertical line
+            }
+        } else {
+            // Child level details - always start with 2 spaces, then tree indent, then connector
+            let tree_indent = self.build_tree_indent_clean(entry);
+            if self.is_last_child(entry) {
+                format!("  {}      ", tree_indent) // Parent is last child, no vertical line
+            } else {
+                format!("  {}│     ", tree_indent) // Parent has more siblings, continue vertical line
+            }
+        };
 
         match &entry.result {
             Some(CallResult::Success { output, .. }) => {
@@ -487,6 +636,7 @@ impl TracePanel {
 
                 Line::from(vec![
                     Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
+                    Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
                     Span::styled("[RETURN] ", Style::default().fg(self.color_scheme.comment_color)),
                     Span::styled(
                         return_text,
@@ -498,6 +648,7 @@ impl TracePanel {
                 let revert_text = self.decode_revert_reason(output);
                 Line::from(vec![
                     Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
+                    Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
                     Span::styled("[REVERT] ", Style::default().fg(self.color_scheme.error_color)),
                     Span::styled(
                         revert_text,
@@ -509,6 +660,7 @@ impl TracePanel {
                 let error_text = self.format_instruction_result(*result, output);
                 Line::from(vec![
                     Span::styled(full_indent, Style::default().fg(self.color_scheme.comment_color)),
+                    Span::styled("· ", Style::default().fg(self.color_scheme.comment_color)),
                     Span::styled("[ERROR] ", Style::default().fg(self.color_scheme.error_color)),
                     Span::styled(error_text, Style::default().fg(self.color_scheme.error_color)),
                 ])
@@ -843,7 +995,12 @@ impl TracePanel {
                                 .iter()
                                 .zip(constructor.inputs.iter())
                                 .map(|(value, input)| {
-                                    format!("{} {}: {}", value.format_type(), input.name, value.format_value(false))
+                                    format!(
+                                        "{} {}: {}",
+                                        value.format_type(),
+                                        input.name,
+                                        value.format_value(false)
+                                    )
                                 })
                                 .collect();
 

@@ -28,8 +28,8 @@ pub mod context;
 pub mod forking;
 pub mod logging;
 pub mod opcode;
-pub mod spec_id;
 pub mod sol_value;
+pub mod spec_id;
 pub mod types;
 
 pub use cache::*;
@@ -37,5 +37,5 @@ pub use context::*;
 pub use forking::*;
 pub use logging::*;
 pub use opcode::*;
-pub use spec_id::*;
 pub use sol_value::*;
+pub use spec_id::*;
