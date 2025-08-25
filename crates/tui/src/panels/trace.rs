@@ -22,11 +22,9 @@ use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::execution::ExecutionManager;
 use crate::managers::info::InfoManager;
 use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
-use crate::ColorScheme;
 use alloy_dyn_abi::{DynSolValue, EventExt, FunctionExt, JsonAbiExt};
 use alloy_json_abi::{Function, JsonAbi};
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
@@ -46,7 +44,6 @@ use revm::{
     interpreter::{CallScheme, InstructionResult},
 };
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
 /// Represents different types of trace lines for multi-line display
@@ -310,28 +307,6 @@ impl TracePanel {
         false
     }
 
-    /// Check if there are more visible children after this entry at the same level
-    fn has_more_children_after(&self, entry: &TraceEntry) -> bool {
-        if let Some(parent_id) = entry.parent_id {
-            if let Some(trace) = &self.exec_mgr.trace_data {
-                // Find if there are any visible siblings after this entry
-                let mut found_current = false;
-                for e in trace.iter() {
-                    if e.parent_id == Some(parent_id) && self.is_entry_visible(e) {
-                        if found_current {
-                            // Found a visible sibling after the current entry
-                            return true;
-                        }
-                        if e.id == entry.id {
-                            found_current = true;
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
     /// Check if an ancestor at a given depth is the last child
     fn is_ancestor_last_child(&self, entry: &TraceEntry, ancestor_depth: usize) -> bool {
         if ancestor_depth >= entry.depth {
@@ -360,28 +335,6 @@ impl TracePanel {
         }
 
         false
-    }
-
-    /// Build tree indentation string based on depth and ancestry
-    fn build_tree_indent(&self, entry: &TraceEntry, _is_call_line: bool) -> String {
-        if entry.depth == 0 {
-            return String::new();
-        }
-
-        let mut indent_parts = Vec::new();
-
-        // For each ancestor level, determine if we need a vertical line
-        for ancestor_depth in 0..entry.depth.saturating_sub(1) {
-            // Check if the ancestor at this depth is the last child
-            // If it is, we use spaces; otherwise, we use a vertical line
-            if self.is_ancestor_last_child(entry, ancestor_depth + 1) {
-                indent_parts.push("  "); // No vertical line for completed branches
-            } else {
-                indent_parts.push("│ "); // Vertical line for continuing branches
-            }
-        }
-
-        indent_parts.join("")
     }
 
     /// Build clean tree indentation for the new design
@@ -1125,19 +1078,14 @@ impl PanelTr for TracePanel {
         match self.exec_mgr.trace_data {
             // No data: show spinner
             None => {
-                let paragraph = Paragraph::new(Line::from(vec![
-                    Span::raw("Fetching execution trace "),
-                    Span::styled(
-                        "⠋",
-                        Style::default().fg(self.theme_mgr.color_scheme.accent_color),
-                    ),
-                ]))
-                .block(BorderPresets::trace(
-                    self.focused,
-                    self.title(),
-                    self.theme_mgr.color_scheme.focused_border,
-                    self.theme_mgr.color_scheme.unfocused_border,
-                ));
+                let paragraph =
+                    Paragraph::new(Line::from(vec![Span::raw("Fetching execution trace...")]))
+                        .block(BorderPresets::trace(
+                            self.focused,
+                            self.title(),
+                            self.theme_mgr.color_scheme.focused_border,
+                            self.theme_mgr.color_scheme.unfocused_border,
+                        ));
                 frame.render_widget(paragraph, area);
                 return;
             }
@@ -1162,8 +1110,7 @@ impl PanelTr for TracePanel {
                     .enumerate()
                     .skip(self.scroll_offset)
                     .take(self.context_height)
-                    .map(|(viewport_index, line_type)| {
-                        let global_index = viewport_index + self.scroll_offset;
+                    .map(|(global_index, line_type)| {
                         let formatted_line = self.format_display_line(line_type, trace);
 
                         let style = if global_index == self.selected_index && self.focused {
@@ -1202,12 +1149,14 @@ impl PanelTr for TracePanel {
                     };
 
                     let display_lines = self.generate_display_lines(trace);
+                    let selected_entry_id = self.selected_entry().map(|e| e.id).unwrap_or_default();
 
                     let status_bar =
                         StatusBar::new().current_panel("Trace".to_string()).message(format!(
-                            "Line: {}/{} | Trace: ???/{}",
+                            "Line: {}/{} | Trace: {}/{}",
                             self.selected_index + 1,
                             display_lines.len(),
+                            selected_entry_id,
                             self.exec_mgr.trace_data.as_ref().map(|d| d.len()).unwrap_or(0)
                         )); // TODO
 

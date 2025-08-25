@@ -623,8 +623,8 @@ impl App {
                 return Ok(EventResponse::Handled);
             }
 
-            KeyCode::Char(' ') => {
-                // Space key cycles main panel in compact mode (Trace → Code → Display → Trace)
+            KeyCode::Right => {
+                // Right arrow key cycles main panel in compact mode (Trace → Code → Display → Trace)
                 if matches!(self.layout_manager.layout_type(), LayoutType::Compact) {
                     self.compact_main_panel = match self.compact_main_panel {
                         PanelType::Trace => PanelType::Code,
@@ -633,6 +633,31 @@ impl App {
                         _ => PanelType::Trace, // Default fallback
                     };
                     debug!("Cycled compact main panel to: {:?}", self.compact_main_panel);
+                    if self.current_panel != PanelType::Terminal {
+                        self.current_panel = self.compact_main_panel;
+                    }
+                    return Ok(EventResponse::Handled);
+                }
+                // Otherwise, forward to current panel
+                if let Some(panel) = self.panels.get_mut(&self.current_panel) {
+                    return panel.handle_key_event(key);
+                }
+                return Ok(EventResponse::NotHandled);
+            }
+
+            KeyCode::Left => {
+                // Left arrow key cycles main panel in compact mode (Trace → Code → Display → Trace)
+                if matches!(self.layout_manager.layout_type(), LayoutType::Compact) {
+                    self.compact_main_panel = match self.compact_main_panel {
+                        PanelType::Trace => PanelType::Display,
+                        PanelType::Code => PanelType::Trace,
+                        PanelType::Display => PanelType::Code,
+                        _ => PanelType::Trace, // Default fallback
+                    };
+                    debug!("Cycled compact main panel to: {:?}", self.compact_main_panel);
+                    if self.current_panel != PanelType::Terminal {
+                        self.current_panel = self.compact_main_panel;
+                    }
                     return Ok(EventResponse::Handled);
                 }
                 // Otherwise, forward to current panel

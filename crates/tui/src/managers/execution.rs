@@ -110,7 +110,7 @@ impl ExecutionManager {
         if self.trace_data.is_none() {
             self.trace_data = core.get_trace().cloned();
         }
-        
+
         // TODO: Update other cached execution state fields
         // self.current_snapshot = core.get_current_snapshot();
         // self.total_snapshots = core.get_total_snapshots();

@@ -87,7 +87,7 @@ impl InfoManager {
     pub async fn fetch_data(&mut self) -> Result<()> {
         let mut core = self.core.write().unwrap();
         core.fetch_data().await?;
-        
+
         // TODO: Update local cached fields here
         // self.system_info = core.get_system_info();
         // self.network_status = core.get_network_status();
@@ -140,7 +140,7 @@ impl InfoManagerCore {
         // self.network_status = Some(self.rpc_client.get_network_status().await?);
         Ok(())
     }
-    
+
     // TODO: Add getter methods for cached data
     // pub fn get_system_info(&self) -> SystemInfo { ... }
     // pub fn get_network_status(&self) -> NetworkStatus { ... }
