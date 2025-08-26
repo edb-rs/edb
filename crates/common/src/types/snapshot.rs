@@ -26,6 +26,20 @@ impl SnapshotInfo {
             SnapshotInfo::Hook(info) => Some(&info.path),
         }
     }
+
+    pub fn offset(&self) -> Option<usize> {
+        match self {
+            SnapshotInfo::Opcode(_) => None,
+            SnapshotInfo::Hook(info) => Some(info.offset),
+        }
+    }
+
+    pub fn pc(&self) -> Option<usize> {
+        match self {
+            SnapshotInfo::Opcode(info) => Some(info.pc),
+            SnapshotInfo::Hook(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

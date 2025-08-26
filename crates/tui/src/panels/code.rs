@@ -25,6 +25,7 @@ use crate::managers::theme::ThemeManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
+use alloy_primitives::Address;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use edb_common::types::Code;
 use eyre::Result;
@@ -34,8 +35,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem},
     Frame,
 };
+use revm::bytecode;
 use std::collections::HashMap;
-use tracing::debug;
+use tracing::{debug, info};
 
 /// Code display mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,8 @@ pub struct FileInfo {
 /// Server-controlled display preferences
 #[derive(Debug, Clone)]
 pub struct CodeDisplayInfo {
+    /// Current displayed bytecode address
+    pub bytecode_address: Address,
     /// Whether source code is available from server
     pub has_source_code: bool,
     /// Server's preferred display mode
@@ -97,11 +101,15 @@ pub struct CodePanel {
     /// Syntax highlighter for code
     syntax_highlighter: SyntaxHighlighter,
 
-    // ========== Data ==========
-    /// Current snapshot id (flag)
-    current_snapshot_id: Option<usize>,
-    /// Current selected path (flag)
+    // ========== Data (Flag) ==========
+    /// Current execution snapshot
+    current_execution_snapshot: Option<usize>,
+    /// Current display snapshot id
+    current_display_snapshot: Option<usize>,
+    /// Current selected path
     current_selected_path_id: Option<usize>,
+
+    // ========== Data ==========
     /// Server-provided display information
     display_info: CodeDisplayInfo,
     /// Mock source code lines
@@ -110,6 +118,8 @@ pub struct CodePanel {
     opcode_lines: Vec<String>,
     /// Available source code
     sources: HashMap<String, String>,
+    /// Avaiable opcode
+    opcodes: Vec<(u64, String)>,
     /// Currently selected source path index
     selected_path_index: usize,
 
@@ -126,6 +136,7 @@ impl CodePanel {
     /// Create a new code panel
     pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
         let display_info = CodeDisplayInfo {
+            bytecode_address: Address::default(),
             has_source_code: true, // This address has source code
             mode: CodeMode::Source,
             available_files: vec![],
@@ -134,13 +145,15 @@ impl CodePanel {
 
         Self {
             display_info,
-            current_snapshot_id: None,
+            current_execution_snapshot: None,
+            current_display_snapshot: None,
             current_selected_path_id: None,
             source_lines: vec![],
             opcode_lines: vec![],
             sources: HashMap::new(),
+            opcodes: Vec::new(),
             selected_path_index: 0,
-            current_execution_line: Some(10), // TODO
+            current_execution_line: Some(1),
             user_cursor_line: Some(1),
             scroll_offset: 0,
             focused: false,
@@ -510,76 +523,139 @@ impl CodePanel {
         }
     }
 
+    fn move_to(&mut self, line: usize) {
+        let max_line = self.get_display_lines().len();
+        let viewport_height = self.context_height;
+
+        if line > self.scroll_offset + viewport_height {
+            self.scroll_offset = line - viewport_height;
+            self.user_cursor_line = Some(line);
+        } else if line > self.scroll_offset {
+            // We just need to do in-screen update
+            self.user_cursor_line = Some(line);
+        } else if line > 0 {
+            self.scroll_offset = line - 1;
+            self.user_cursor_line = Some(line);
+        } else if line > max_line {
+            // It is not valid
+            self.scroll_offset = max_line.saturating_sub(viewport_height);
+            self.user_cursor_line = Some(max_line);
+        } else {
+            // It is not valid since user_cursor_line is 1-based
+            self.scroll_offset = 0;
+            self.user_cursor_line = Some(1);
+        }
+    }
+
     fn update_display_info(&mut self) -> Option<()> {
         let id = self.exec_mgr.get_display_snapshot();
-        if self.current_snapshot_id == Some(id) {
+        if self.current_display_snapshot == Some(id) {
             return Some(()); // No change
         }
 
+        let exec_source_offset = self.exec_mgr.get_snapshot_info(id)?.offset();
+        let exec_opcode_pc = self.exec_mgr.get_snapshot_info(id)?.pc();
         let execution_path = self.exec_mgr.get_snapshot_info(id)?.path().cloned();
+
         let code = self.exec_mgr.get_code(id)?;
+        let bytecode_address = code.bytecode_address();
         match code {
             Code::Source(info) => {
-                self.display_info.has_source_code = true;
-                self.display_info.mode = CodeMode::Source;
-                self.display_info.available_files = info
-                    .sources
-                    .keys()
-                    .map(|p| p.as_os_str().to_string_lossy().to_string())
-                    .collect();
-                self.display_info.file_info = info
-                    .sources
-                    .iter()
-                    .map(|(p, s)| {
-                        let path = p.as_os_str().to_string_lossy().to_string();
-                        let line_count = s.lines().count();
-                        let has_execution = execution_path.as_ref() == Some(p);
-                        FileInfo { path, line_count, has_execution }
-                    })
-                    .collect();
+                if self.display_info.bytecode_address != bytecode_address {
+                    info!("Code address changed to {:?}", bytecode_address);
 
-                self.display_info.available_files.sort();
-                self.display_info.file_info.sort_by(|a, b| a.path.cmp(&b.path));
+                    self.display_info.has_source_code = true;
+                    self.display_info.mode = CodeMode::Source;
+                    self.display_info.available_files = info
+                        .sources
+                        .keys()
+                        .map(|p| p.as_os_str().to_string_lossy().to_string())
+                        .collect();
+                    self.display_info.file_info = info
+                        .sources
+                        .iter()
+                        .map(|(p, s)| {
+                            let path = p.as_os_str().to_string_lossy().to_string();
+                            let line_count = s.lines().count();
+                            let has_execution = execution_path.as_ref() == Some(p);
+                            FileInfo { path, line_count, has_execution }
+                        })
+                        .collect();
 
-                self.source_lines.clear(); // We will update this later
-                self.opcode_lines.clear();
+                    self.display_info.available_files.sort();
+                    self.display_info.file_info.sort_by(|a, b| a.path.cmp(&b.path));
 
-                self.sources = info
-                    .sources
-                    .iter()
-                    .map(|(p, s)| {
-                        let path = p.as_os_str().to_string_lossy().to_string();
-                        (path, s.clone())
-                    })
-                    .collect();
+                    self.display_info.bytecode_address = bytecode_address;
 
+                    self.source_lines.clear(); // We will update this later
+                    self.opcode_lines.clear();
+
+                    self.sources = info
+                        .sources
+                        .iter()
+                        .map(|(p, s)| {
+                            let path = p.as_os_str().to_string_lossy().to_string();
+                            (path, s.clone())
+                        })
+                        .collect();
+                    self.opcodes.clear();
+                }
+
+                // update selected path index
                 self.selected_path_index =
                     self.display_info.file_info.iter().position(|p| p.has_execution).unwrap_or(0);
+
+                // move user cursor
+                let execution_path = self
+                    .display_info
+                    .available_files
+                    .get(self.selected_path_index)
+                    .expect("this id must be valid");
+                let execution_line = self
+                    .sources
+                    .get(execution_path)
+                    .zip(exec_source_offset)
+                    .and_then(|(s, offset)| Some(s[..offset].lines().count()))
+                    .unwrap_or_default(); // 1-based
+                self.move_to(execution_line);
             }
             Code::Opcode(info) => {
-                self.display_info.has_source_code = false;
-                self.display_info.mode = CodeMode::Opcodes;
-                self.display_info.available_files.clear();
-                self.display_info.file_info.clear();
+                if self.display_info.bytecode_address != bytecode_address {
+                    info!("Code address changed to {:?}", bytecode_address);
+                    self.display_info.has_source_code = false;
+                    self.display_info.mode = CodeMode::Opcodes;
+                    self.display_info.available_files.clear();
+                    self.display_info.file_info.clear();
 
-                self.source_lines.clear();
-                self.selected_path_index = 0;
+                    self.display_info.bytecode_address = bytecode_address;
 
-                let mut opcodes: Vec<_> =
-                    info.codes.iter().map(|(pc, insn)| (*pc, insn.clone())).collect();
-                opcodes.sort_by_key(|(pc, _)| *pc);
+                    self.selected_path_index = 0;
 
-                // TODO: We need a better way to render opcodes
-                self.opcode_lines =
-                    opcodes.iter().map(|(pc, insn)| format!("{:03}: {}", pc, insn)).collect();
+                    self.opcodes =
+                        info.codes.iter().map(|(pc, insn)| (*pc, insn.clone())).collect();
+                    self.opcodes.sort_by_key(|(pc, _)| *pc);
+                    self.sources.clear();
+
+                    self.opcode_lines = self
+                        .opcodes
+                        .iter()
+                        .map(|(pc, insn)| format!("{:05}: {}", pc, insn))
+                        .collect();
+                    self.source_lines.clear();
+                }
+
+                // move user cursor
+                let execution_line = self
+                    .opcodes
+                    .iter()
+                    .position(|(pc, _)| Some(*pc as usize as usize) == exec_opcode_pc)
+                    .map(|idx| idx + 1) // 1-based
+                    .unwrap_or_default();
+                self.move_to(execution_line);
             }
         }
 
-        // Reset scroll and cursor
-        self.scroll_offset = 0;
-        self.user_cursor_line = Some(1);
-
-        self.current_snapshot_id = Some(id);
+        self.current_display_snapshot = Some(id);
         self.current_selected_path_id = None; // We always reset the selected path
         Some(())
     }
@@ -600,11 +676,23 @@ impl CodePanel {
             self.source_lines = source.lines().map(|l| l.to_string()).collect();
         }
 
-        // Reset scroll and cursor
-        self.scroll_offset = 0;
-        self.user_cursor_line = Some(1);
+        // Reset scroll and cursor if we changed the selected path but not the file
+        if self.current_selected_path_id.is_some() {
+            self.scroll_offset = 0;
+            self.user_cursor_line = Some(1);
+        }
 
         self.current_selected_path_id = Some(self.selected_path_index);
+    }
+
+    fn update_execution_info(&mut self) {
+        if self.current_execution_snapshot != Some(self.exec_mgr.get_current_snapshot()) {
+            // We have update the execution snapshot
+            self.current_execution_snapshot = Some(self.exec_mgr.get_current_snapshot());
+
+            // Simply sync the execution line with the user cursor
+            self.current_execution_line = self.user_cursor_line;
+        }
     }
 }
 
@@ -646,6 +734,7 @@ impl PanelTr for CodePanel {
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
         if self.update_display_info().is_some() {
             self.fresh_source_code();
+            self.update_execution_info();
         }
 
         // Split area if file selector is shown
@@ -771,30 +860,13 @@ impl PanelTr for CodePanel {
             }
             KeyCode::Char('s') => {
                 // Step: Move to next snapshot/instruction
-                // TODO: This will send a step command to the RPC server
                 debug!("Step (next instruction) requested from code panel");
-                // For now, simulate moving to next snapshot
-                // let current = self.exec_mgr.current_snapshot;
-                // let total = self.exec_mgr.snapshot_count;
-                // if current < total.saturating_sub(1) {
-                //     // TODO
-                //     // self.exec_mgr_mut().update_state(current + 1, total, Some(current + 10), None);
-                //     debug!("Stepped to snapshot {}", current + 1);
-                // }
+                self.exec_mgr.step()?;
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('r') => {
-                // Reverse step: Move to previous snapshot/instruction
-                // TODO: This will send a reverse step command to the RPC server
                 debug!("Reverse step (previous instruction) requested from code panel");
-                // For now, simulate moving to previous snapshot
-                // let current = self.exec_mgr.current_snapshot;
-                // let total = self.exec_mgr.snapshot_count;
-                // if current > 0 {
-                //     // TODO
-                //     // self.exec_mgr_mut().update_state(current - 1, total, Some(current + 8), None);
-                //     debug!("Reverse stepped to snapshot {}", current - 1);
-                // }
+                self.exec_mgr.reverse_step()?;
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('n') => {

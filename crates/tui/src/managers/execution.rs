@@ -171,6 +171,27 @@ impl ExecutionManager {
         }
     }
 
+    pub fn step(&mut self) -> Result<()> {
+        let next_id = if self.state.current_snapshot + 1 < self.state.snapshot_count {
+            self.state.current_snapshot + 1
+        } else {
+            self.state.current_snapshot
+        };
+        self.goto_snapshot(next_id)?;
+        self.display_snapshot(next_id)?;
+
+        Ok(())
+    }
+
+    pub fn reverse_step(&mut self) -> Result<()> {
+        let prev_id =
+            if self.state.current_snapshot > 0 { self.state.current_snapshot - 1 } else { 0 };
+        self.goto_snapshot(prev_id)?;
+        self.display_snapshot(prev_id)?;
+
+        Ok(())
+    }
+
     pub fn get_snapshot_info(&mut self, id: usize) -> Option<&SnapshotInfo> {
         if !self.state.snapshot_info.contains_key(&id) {
             debug!("Snapshot info not found in cache, fetching...");

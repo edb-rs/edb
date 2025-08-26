@@ -9,6 +9,22 @@ pub enum Code {
     Source(SourceInfo),
 }
 
+impl Code {
+    pub fn address(&self) -> Address {
+        match self {
+            Code::Opcode(info) => info.address,
+            Code::Source(info) => info.address,
+        }
+    }
+
+    pub fn bytecode_address(&self) -> Address {
+        match self {
+            Code::Opcode(info) => info.bytecode_address,
+            Code::Source(info) => info.bytecode_address,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpcodeInfo {
     pub address: Address,
