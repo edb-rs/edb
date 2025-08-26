@@ -22,22 +22,19 @@ use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::execution::ExecutionManager;
 use crate::managers::resolve::Resolver;
 use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
-use crate::ColorScheme;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use edb_common::types::Code;
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, Borders, List, ListItem},
     Frame,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
 /// Code display mode
@@ -113,8 +110,6 @@ pub struct CodePanel {
     opcode_lines: Vec<String>,
     /// Available source code
     sources: HashMap<String, String>,
-    /// Available source paths
-    source_paths: Vec<String>,
     /// Currently selected source path index
     selected_path_index: usize,
 
@@ -130,78 +125,11 @@ pub struct CodePanel {
 impl CodePanel {
     /// Create a new code panel
     pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
-        // Mock server response - for addresses WITH source code
-        // In reality, if has_source_code is true, we show source
-        // If has_source_code is false, we show opcodes
-        // Create mock file information with metadata
-        let file_info = vec![
-            FileInfo {
-                path: "contracts/SimpleToken.sol".to_string(),
-                line_count: 45,
-                has_execution: true, // This file contains current execution
-            },
-            FileInfo {
-                path: "contracts/interfaces/IERC20.sol".to_string(),
-                line_count: 28,
-                has_execution: false,
-            },
-            FileInfo {
-                path: "contracts/libraries/SafeMath.sol".to_string(),
-                line_count: 156,
-                has_execution: false,
-            },
-            FileInfo {
-                path: "contracts/utils/Context.sol".to_string(),
-                line_count: 12,
-                has_execution: false,
-            },
-        ];
-
         let display_info = CodeDisplayInfo {
             has_source_code: true, // This address has source code
             mode: CodeMode::Source,
-            available_files: file_info.iter().map(|f| f.path.clone()).collect(),
-            file_info,
-        };
-
-        // If we have source code, populate source_lines
-        // Otherwise, populate opcode_lines (but never both!)
-        let source_lines = if display_info.has_source_code {
-            vec![
-                "// SPDX-License-Identifier: MIT".to_string(),
-                "pragma solidity ^0.8.0;".to_string(),
-                "".to_string(),
-                "contract SimpleToken {".to_string(),
-                "    uint256 public totalSupply;".to_string(),
-                "    mapping(address => uint256) public balances;".to_string(),
-                "    ".to_string(),
-                "    function transfer(address to, uint256 amount) public {".to_string(),
-                "        require(balances[msg.sender] >= amount);  // ← Current".to_string(),
-                "        balances[msg.sender] -= amount;".to_string(),
-                "        balances[to] += amount;".to_string(),
-                "    }".to_string(),
-                "}".to_string(),
-            ]
-        } else {
-            vec![]
-        };
-
-        let opcode_lines = if !display_info.has_source_code {
-            vec![
-                "000: PUSH1 0x80".to_string(),
-                "002: PUSH1 0x40".to_string(),
-                "004: MSTORE".to_string(),
-                "005: CALLVALUE".to_string(),
-                "006: DUP1".to_string(),
-                "007: ISZERO".to_string(),
-                "008: PUSH2 0x0010".to_string(),
-                "011: JUMPI    ← Current".to_string(),
-                "012: PUSH1 0x00".to_string(),
-                "014: DUP1".to_string(),
-                "015: REVERT".to_string(),
-            ]
-        } else {
-            vec![]
+            available_files: vec![],
+            file_info: vec![],
         };
 
         Self {
@@ -210,7 +138,6 @@ impl CodePanel {
             current_selected_path_id: None,
             source_lines: vec![],
             opcode_lines: vec![],
-            source_paths: vec![],
             sources: HashMap::new(),
             selected_path_index: 0,
             current_execution_line: Some(10), // TODO
@@ -350,13 +277,6 @@ impl CodePanel {
 
             // Update source_paths index to match
             let selected_file = &self.display_info.file_info[self.file_selector_index];
-            let filename = selected_file.path.split('/').last().unwrap_or(&selected_file.path);
-
-            // Find matching index in source_paths
-            if let Some(index) = self.source_paths.iter().position(|p| p == filename) {
-                self.selected_path_index = index;
-            }
-
             debug!("Selected file: {}", selected_file.path);
         }
     }
@@ -384,13 +304,13 @@ impl CodePanel {
     }
 
     /// Render the file selector panel
-    fn render_file_selector(&mut self, frame: &mut Frame, area: Rect) {
+    fn render_file_selector(&mut self, frame: &mut Frame<'_>, area: Rect) {
         // Calculate file selector context height for viewport calculations
         self.file_selector_context_height = area.height.saturating_sub(2) as usize; // Account for borders
 
         let sorted_files = self.get_sorted_files();
 
-        let items: Vec<ListItem> = sorted_files
+        let items: Vec<ListItem<'_>> = sorted_files
             .iter()
             .enumerate()
             .skip(self.file_selector_scroll_offset) // Skip items before viewport
@@ -440,7 +360,7 @@ impl CodePanel {
     }
 
     /// Render the main code content with syntax highlighting
-    fn render_code_content(&mut self, frame: &mut Frame, area: Rect) {
+    fn render_code_content(&mut self, frame: &mut Frame<'_>, area: Rect) {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{List, ListItem, Paragraph};
 
@@ -471,7 +391,7 @@ impl CodePanel {
         let max_line_num = lines.len();
 
         // Create list items with syntax highlighting, line numbers, and indicators
-        let list_items: Vec<ListItem> = display_lines
+        let list_items: Vec<ListItem<'_>> = display_lines
             .iter()
             .map(|(line_idx, line)| {
                 let line_num = line_idx + 1;
@@ -621,7 +541,6 @@ impl CodePanel {
                 self.display_info.available_files.sort();
                 self.display_info.file_info.sort_by(|a, b| a.path.cmp(&b.path));
 
-                self.source_paths = self.display_info.available_files.clone();
                 self.source_lines.clear(); // We will update this later
                 self.opcode_lines.clear();
 
@@ -644,7 +563,6 @@ impl CodePanel {
                 self.display_info.file_info.clear();
 
                 self.source_lines.clear();
-                self.source_paths.clear();
                 self.selected_path_index = 0;
 
                 let mut opcodes: Vec<_> =
@@ -671,12 +589,12 @@ impl CodePanel {
             return; // No change
         }
 
-        if !self.display_info.has_source_code || self.source_paths.is_empty() {
+        if !self.display_info.has_source_code || self.display_info.available_files.is_empty() {
             self.source_lines.clear();
             return;
         }
 
-        let selected_file = &self.source_paths[self.selected_path_index];
+        let selected_file = &self.display_info.available_files[self.selected_path_index];
 
         if let Some(source) = self.sources.get(selected_file) {
             self.source_lines = source.lines().map(|l| l.to_string()).collect();
@@ -705,10 +623,10 @@ impl PanelTr for CodePanel {
         let availability =
             if self.display_info.has_source_code { "✓" } else { "✗ Opcodes Only" };
 
-        let path_str = if self.source_paths.is_empty() {
-            "No source".to_string()
+        let path_str = if self.display_info.available_files.is_empty() {
+            "No source"
         } else {
-            self.source_paths[self.selected_path_index].clone()
+            self.display_info.available_files[self.selected_path_index].as_str()
         };
 
         // Show file count if multiple files available
@@ -725,7 +643,7 @@ impl PanelTr for CodePanel {
         format!("{} {} - {}{}", mode_str, availability, path_str, file_count)
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
         if self.update_display_info().is_some() {
             self.fresh_source_code();
         }

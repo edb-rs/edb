@@ -25,12 +25,10 @@ use crate::managers::theme::ThemeManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
-use alloy_dyn_abi::{DynSolValue, EventExt, FunctionExt, JsonAbiExt};
-use alloy_json_abi::{Function, JsonAbi};
-use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
+use alloy_dyn_abi::DynSolValue;
+use alloy_primitives::{hex, Bytes};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
-use edb_common::SolValueFormatter;
 use eyre::Result;
 use ratatui::{
     layout::Rect,
@@ -44,6 +42,7 @@ use revm::{
     interpreter::{CallScheme, InstructionResult},
 };
 use std::collections::HashSet;
+use std::ops::{Deref, DerefMut};
 use tracing::{debug, error};
 
 /// Represents different types of trace lines for multi-line display
@@ -58,8 +57,37 @@ enum TraceLineType {
 }
 
 /// Trace panel implementation
+/// This is a hacky trick to avoid heavy data movement over trace
 #[derive(Debug)]
 pub struct TracePanel {
+    trace: Option<Trace>,
+    inner: TracePanelInner,
+}
+
+impl Deref for TracePanel {
+    type Target = TracePanelInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for TracePanel {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl TracePanel {
+    /// Create a new trace panel
+    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
+        Self { trace: None, inner: TracePanelInner::new(exec_mgr, resolver, theme_mgr) }
+    }
+}
+/// Inner implementation details for the trace panel
+/// This is a hacky trick to avoid heavy data movement over trace
+#[derive(Debug)]
+pub struct TracePanelInner {
     // ========== Display ==========
     /// Currently selected trace entry index
     selected_index: usize,
@@ -83,7 +111,7 @@ pub struct TracePanel {
     theme_mgr: ThemeManager,
 }
 
-impl TracePanel {
+impl TracePanelInner {
     /// Create a new trace panel
     pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
         Self {
@@ -835,9 +863,13 @@ impl PanelTr for TracePanel {
             area.height.saturating_sub(2) // Just borders
         } as usize;
 
+        if self.trace.is_none() {
+            self.trace = self.exec_mgr.get_trace().cloned();
+        }
+
         // Handle different display states
         // XXX (ZZ): we need to get_trace here to prompt exec_mgr to fetch data
-        match self.exec_mgr.get_trace().cloned() {
+        match self.trace {
             // No data: show spinner
             None => {
                 let paragraph =
@@ -852,7 +884,7 @@ impl PanelTr for TracePanel {
                 return;
             }
             // Data available
-            Some(trace) => {
+            Some(ref trace) => {
                 if trace.is_empty() {
                     let paragraph = Paragraph::new("Trace is empty").block(BorderPresets::trace(
                         self.focused,
@@ -873,17 +905,18 @@ impl PanelTr for TracePanel {
                     .skip(self.scroll_offset)
                     .take(self.context_height)
                     .map(|(global_index, line_type)| {
-                        let formatted_line = self.format_display_line(line_type, &trace);
+                        let formatted_line = self.inner.format_display_line(line_type, &trace);
 
-                        let style = if global_index == self.selected_index && self.focused {
-                            Style::default()
-                                .bg(self.theme_mgr.color_scheme.selection_bg)
-                                .fg(self.theme_mgr.color_scheme.selection_fg)
-                        } else if global_index == self.selected_index {
-                            Style::default().bg(self.theme_mgr.color_scheme.highlight_bg)
-                        } else {
-                            Style::default()
-                        };
+                        let style =
+                            if global_index == self.inner.selected_index && self.inner.focused {
+                                Style::default()
+                                    .bg(self.inner.theme_mgr.color_scheme.selection_bg)
+                                    .fg(self.inner.theme_mgr.color_scheme.selection_fg)
+                            } else if global_index == self.inner.selected_index {
+                                Style::default().bg(self.inner.theme_mgr.color_scheme.highlight_bg)
+                            } else {
+                                Style::default()
+                            };
 
                         ListItem::new(formatted_line).style(style)
                     })

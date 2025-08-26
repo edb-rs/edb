@@ -14,14 +14,15 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use alloy_primitives::{Address, Bytes, TxHash};
 use edb_common::{
-    fork_and_prepare, relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
+    fork_and_prepare, relax_context_constraints, Cache, CachePath, EdbCache, EdbCachePath,
+    EdbContext, ForkResult,
 };
 use eyre::Result;
-use foundry_block_explorers::Client;
+use foundry_block_explorers::{contract::ContractCreationData, Client};
 use foundry_compilers::Artifact as _;
 use revm::{
     context::{Cfg, ContextTr},
@@ -31,8 +32,13 @@ use revm::{
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
 
-use crate::{next_etherscan_api_key, tweak, Artifact, TweakInspectorBuilder};
+use crate::{next_etherscan_api_key, Artifact, TweakInspectorBuilder};
 
+/// A utility for modifying deployed contract bytecode by replaying their creation transactions
+/// with replacement bytecode from compiled artifacts.
+///
+/// This struct handles the process of finding contract creation transactions,
+/// replaying them with modified init code, and updating the contract's runtime bytecode.
 pub struct CodeTweaker<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -50,6 +56,13 @@ where
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
+    /// Creates a new `CodeTweaker` instance.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - Mutable reference to the EDB context containing the database
+    /// * `rpc_url` - RPC endpoint URL for fetching blockchain data
+    /// * `etherscan_api_key` - Optional Etherscan API key for fetching contract creation data
     pub fn new(
         ctx: &'a mut EdbContext<DB>,
         rpc_url: String,
@@ -58,6 +71,17 @@ where
         Self { ctx, rpc_url, etherscan_api_key }
     }
 
+    /// Replaces the bytecode of a deployed contract with bytecode from a compiled artifact.
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - Address of the deployed contract to tweak
+    /// * `artifact` - Compiled artifact containing the replacement bytecode
+    /// * `quick` - Whether to use quick mode for faster but less accurate replay
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the bytecode was successfully replaced, or an error if the operation failed.
     pub async fn tweak(&mut self, addr: &Address, artifact: &Artifact, quick: bool) -> Result<()> {
         let tweaked_code = self.get_tweaked_code(addr, artifact, quick).await?;
 
@@ -114,6 +138,18 @@ where
         inspector.into_deployed_code()
     }
 
+    /// Retrieves the transaction hash that created a contract at the given address.
+    ///
+    /// This method first checks the local cache for the creation transaction data.
+    /// If not cached, it queries Etherscan API and caches the result for future use.
+    ///
+    /// # Arguments
+    ///
+    /// * `addr` - Address of the deployed contract
+    ///
+    /// # Returns
+    ///
+    /// Returns the transaction hash that deployed the contract, or an error if not found.
     pub async fn get_creation_tx(&self, addr: &Address) -> Result<TxHash> {
         let chain_id = self.ctx.cfg().chain_id();
 
@@ -121,20 +157,25 @@ where
         let etherscan_cache_dir =
             EdbCachePath::new(None as Option<PathBuf>).etherscan_chain_cache_dir(chain_id);
 
-        let etherscan_api_key = self.etherscan_api_key.clone().unwrap_or(next_etherscan_api_key());
+        let cache = EdbCache::<ContractCreationData>::new(etherscan_cache_dir, None)?;
+        let label = format!("contract_creation_{}", addr);
 
-        // Build client
-        let etherscan = Client::builder()
-            .with_api_key(etherscan_api_key)
-            .with_cache(
-                etherscan_cache_dir,
-                Duration::from_secs(u64::MAX), // No expiration for cache
-            )
-            .chain(chain_id.into())?
-            .build()?;
+        if let Some(creation_data) = cache.load_cache(&label) {
+            return Ok(creation_data.transaction_hash.into());
+        } else {
+            let etherscan_api_key =
+                self.etherscan_api_key.clone().unwrap_or(next_etherscan_api_key());
 
-        // Get creation tx
-        let creation_data = etherscan.contract_creation_data(*addr).await?;
-        Ok(creation_data.transaction_hash.into())
+            // Build client
+            let etherscan = Client::builder()
+                .with_api_key(etherscan_api_key)
+                .chain(chain_id.into())?
+                .build()?;
+
+            // Get creation tx
+            let creation_data = etherscan.contract_creation_data(*addr).await?;
+            cache.save_cache(&label, &creation_data)?;
+            Ok(creation_data.transaction_hash.into())
+        }
     }
 }
