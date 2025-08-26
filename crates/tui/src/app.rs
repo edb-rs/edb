@@ -20,9 +20,9 @@
 
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
 use crate::managers::execution::ExecutionManager;
-use crate::managers::info::InfoManager;
+use crate::managers::resolve::Resolver;
 use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
+use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
 use crate::panels::{
     CodePanel, DisplayPanel, EventResponse, Panel, PanelTr, PanelType, TerminalPanel, TracePanel,
 };
@@ -142,7 +142,7 @@ pub struct App {
     /// Shared execution state manager
     _execution_core: Arc<RwLock<ExecutionManagerCore>>,
     /// Shared resource manager
-    _infomatino_core: Arc<RwLock<InfoManagerCore>>,
+    _infomatino_core: Arc<RwLock<ResolverCore>>,
     /// Shared theme manager
     _theme_core: Arc<RwLock<ThemeManagerCore>>,
     /// RPC connection status and health monitoring
@@ -161,17 +161,9 @@ impl App {
         let current_panel = PanelType::Terminal;
 
         // Create managers wrapped in Arc<RwLock<T>>
-        let mut exec_core = ExecutionManagerCore::new(rpc_client.clone());
-        exec_core.fetch_data().await?;
-        let exec_core = Arc::new(RwLock::new(exec_core));
-
-        let mut info_core = InfoManagerCore::new(rpc_client.clone());
-        info_core.fetch_data().await?;
-        let info_core = Arc::new(RwLock::new(info_core));
-
-        let mut theme_core = ThemeManagerCore::new();
-        theme_core.fetch_data().await?;
-        let theme_core = Arc::new(RwLock::new(theme_core));
+        let exec_core = Arc::new(RwLock::new(ExecutionManagerCore::new(rpc_client.clone())));
+        let resolver_core = Arc::new(RwLock::new(ResolverCore::new(rpc_client.clone())));
+        let theme_core = Arc::new(RwLock::new(ThemeManagerCore::new()));
 
         // Initialize panels - they start with no managers and will get them set later
         let mut panels: HashMap<PanelType, Panel> = HashMap::new();
@@ -179,7 +171,7 @@ impl App {
             PanelType::Trace,
             Panel::Trace(TracePanel::new(
                 ExecutionManager::new(exec_core.clone()),
-                InfoManager::new(info_core.clone()),
+                Resolver::new(resolver_core.clone()),
                 ThemeManager::new(theme_core.clone()),
             )),
         );
@@ -187,7 +179,7 @@ impl App {
             PanelType::Code,
             Panel::Code(CodePanel::new(
                 ExecutionManager::new(exec_core.clone()),
-                InfoManager::new(info_core.clone()),
+                Resolver::new(resolver_core.clone()),
                 ThemeManager::new(theme_core.clone()),
             )),
         );
@@ -195,7 +187,7 @@ impl App {
             PanelType::Display,
             Panel::Display(DisplayPanel::new(
                 ExecutionManager::new(exec_core.clone()),
-                InfoManager::new(info_core.clone()),
+                Resolver::new(resolver_core.clone()),
                 ThemeManager::new(theme_core.clone()),
             )),
         );
@@ -203,7 +195,7 @@ impl App {
             PanelType::Terminal,
             Panel::Terminal(TerminalPanel::new(
                 ExecutionManager::new(exec_core.clone()),
-                InfoManager::new(info_core.clone()),
+                Resolver::new(resolver_core.clone()),
                 ThemeManager::new(theme_core.clone()),
             )),
         );
@@ -216,7 +208,7 @@ impl App {
             should_exit: false,
             compact_main_panel: PanelType::Code, // Default to Code in compact mode
             _execution_core: exec_core,
-            _infomatino_core: info_core,
+            _infomatino_core: resolver_core,
             _theme_core: theme_core,
             connection_status: ConnectionStatus::new(),
             last_health_check: None,

@@ -200,16 +200,10 @@ impl ExecutionManagerCore {
         }
 
         match self.rpc_client.get_trace().await {
-            Ok(trace_value) => match serde_json::from_value::<Trace>(trace_value) {
-                Ok(trace) => {
-                    self.trace_data = Some(trace);
-                    Ok(())
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to deserialize trace: {}", e);
-                    Err(e.into())
-                }
-            },
+            Ok(trace_value) => {
+                self.trace_data = Some(trace_value);
+                Ok(())
+            }
             Err(e) => {
                 tracing::warn!("Failed to fetch trace: {}", e);
                 Err(e)

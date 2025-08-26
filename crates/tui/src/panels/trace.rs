@@ -20,7 +20,7 @@
 
 use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::execution::ExecutionManager;
-use crate::managers::info::InfoManager;
+use crate::managers::resolve::Resolver;
 use crate::managers::theme::ThemeManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
@@ -77,15 +77,15 @@ pub struct TracePanel {
     // ========== Managers ==========
     /// Shared execution state manager
     exec_mgr: ExecutionManager,
-    /// Shared information manager
-    info_mgr: InfoManager,
+    /// Shared label/abi resolver
+    resolver: Resolver,
     /// Shared theme manager for styling
     theme_mgr: ThemeManager,
 }
 
 impl TracePanel {
     /// Create a new trace panel
-    pub fn new(exec_mgr: ExecutionManager, info_mgr: InfoManager, theme_mgr: ThemeManager) -> Self {
+    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
         Self {
             selected_index: 0,
             focused: false,
@@ -94,7 +94,7 @@ impl TracePanel {
             syntax_highlighter: SyntaxHighlighter::new(),
             collapsed_entries: HashSet::new(),
             exec_mgr,
-            info_mgr,
+            resolver,
             theme_mgr,
         }
     }
@@ -262,7 +262,7 @@ impl TracePanel {
     }
 
     /// Format a display line based on its type
-    fn format_display_line(&self, line_type: &TraceLineType, trace: &Trace) -> Line<'static> {
+    fn format_display_line(&mut self, line_type: &TraceLineType, trace: &Trace) -> Line<'static> {
         match line_type {
             TraceLineType::Call(entry_id) => {
                 if let Some(entry) = trace.iter().find(|e| e.id == *entry_id) {
@@ -358,7 +358,7 @@ impl TracePanel {
     }
 
     /// Format a compact trace entry (main call line without events/returns)
-    fn format_trace_entry_compact(&self, entry: &TraceEntry, depth: usize) -> Line<'static> {
+    fn format_trace_entry_compact(&mut self, entry: &TraceEntry, depth: usize) -> Line<'static> {
         // Check if this entry has children
         let has_children = if let Some(trace) = &self.exec_mgr.trace_data {
             trace.iter().any(|e| e.parent_id == Some(entry.id))
@@ -431,36 +431,34 @@ impl TracePanel {
             Span::styled(call_type_str, Style::default().fg(call_color)),
             Span::raw(" "),
             Span::styled(
-                self.format_address_readable(entry.code_address),
+                self.resolver.resolve_address(entry.code_address, true),
                 Style::default().fg(self.theme_mgr.color_scheme.accent_color),
             ),
         ];
 
         // Add function call details
         if matches!(entry.call_type, CallType::Create(_)) {
-            if let Some(constructor_call) = self.format_constructor_call(entry) {
+            if let Some(constructor_call) =
+                self.resolver.resolve_constructor_call(entry.code_address)
+            {
                 spans.push(Span::raw(" "));
                 spans.push(Span::styled(
                     constructor_call,
                     Style::default().fg(self.theme_mgr.color_scheme.keyword_color),
                 ));
+            } else {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(
+                    "constructor(...)",
+                    Style::default().fg(self.theme_mgr.color_scheme.error_color),
+                ));
             }
         } else {
-            let selector = if entry.input.len() >= 4 {
-                Some(Selector::from_slice(&entry.input[..4]))
-            } else {
-                None
-            };
-            if let Some(function_abi) = entry
-                .abi
-                .as_ref()
-                .zip(selector)
-                .and_then(|(abi, sel)| abi.function_by_selector(sel))
+            if let Some(call_str) =
+                self.resolver.resolve_function_call(&entry.input, Some(entry.code_address))
             {
                 spans.push(Span::raw(" "));
-                spans.extend(
-                    self.format_function_call_with_highlighting(function_abi, &entry.input),
-                );
+                spans.extend(self.highlight_solidity_code(call_str));
             } else if !entry.input.is_empty() {
                 spans.push(Span::raw(" "));
                 if entry.input.len() >= 4 {
@@ -490,8 +488,8 @@ impl TracePanel {
             spans.push(Span::styled(
                 format!(
                     " → {} ({} ETH)",
-                    self.format_address_readable(*beneficiary),
-                    self.format_ether(*value)
+                    self.resolver.resolve_address(*beneficiary, true),
+                    self.resolver.resolve_ether(*value)
                 ),
                 Style::default().fg(self.theme_mgr.color_scheme.warning_color),
             ));
@@ -528,7 +526,7 @@ impl TracePanel {
     }
 
     /// Format an event line
-    fn format_event_line(&self, entry: &TraceEntry, event_idx: usize) -> Line<'static> {
+    fn format_event_line(&mut self, entry: &TraceEntry, event_idx: usize) -> Line<'static> {
         if let Some(event) = entry.events.get(event_idx) {
             // Detail line: vertical connector + spaces + dot
             let full_indent = if entry.depth == 0 {
@@ -547,7 +545,19 @@ impl TracePanel {
                     format!("  {}│     ", tree_indent) // Parent has more siblings, continue vertical line
                 }
             };
-            let event_text = self.format_event(event, entry.abi.as_ref());
+
+            let event_text = match self.resolver.resolve_event(event, Some(entry.code_address)) {
+                Some(text) => text,
+                None if event.topics().len() == 0 => {
+                    format!("Anonymous event ({} bytes data)", event.data.len())
+                }
+                None => format!(
+                    "Event 0x{}... ({} indexed, {} bytes data)",
+                    hex::encode(&event.topics()[0].as_slice()[..4]),
+                    event.topics().len() - 1,
+                    event.data.len()
+                ),
+            };
 
             Line::from(vec![
                 Span::styled(
@@ -570,7 +580,7 @@ impl TracePanel {
     }
 
     /// Format a return value line  
-    fn format_return_line(&self, entry: &TraceEntry) -> Line<'static> {
+    fn format_return_line(&mut self, entry: &TraceEntry) -> Line<'static> {
         // Detail line: vertical connector + spaces + dot
         let full_indent = if entry.depth == 0 {
             // Root level details - check if this root entry has more siblings
@@ -595,7 +605,24 @@ impl TracePanel {
                     "()".to_string()
                 } else {
                     // Try to decode return value using ABI
-                    self.decode_return_value(entry, output)
+                    match self.resolver.resolve_function_return(
+                        &entry.input,
+                        output,
+                        Some(entry.code_address),
+                    ) {
+                        Some(return_str) => return_str,
+                        None => {
+                            if output.len() <= 32 {
+                                format!("0x{}", hex::encode(output))
+                            } else {
+                                format!(
+                                    "0x{}...({} bytes)",
+                                    hex::encode(&output[..8]),
+                                    output.len()
+                                )
+                            }
+                        }
+                    }
                 };
 
                 Line::from(vec![
@@ -660,77 +687,6 @@ impl TracePanel {
                 ])
             }
             None => Line::from("Unknown result"),
-        }
-    }
-
-    /// Decode return value using function ABI
-    fn decode_return_value(&self, entry: &TraceEntry, output: &Bytes) -> String {
-        // Get the function selector from the input
-        if entry.input.len() >= 4 {
-            let selector = Selector::from_slice(&entry.input[..4]);
-
-            // Try to find the function in the ABI and decode return value
-            if let Some(function_abi) =
-                entry.abi.as_ref().and_then(|abi| abi.function_by_selector(selector))
-            {
-                // Try to decode the return data
-                match function_abi.abi_decode_output(output) {
-                    Ok(decoded_values) => {
-                        if decoded_values.is_empty() {
-                            return "()".to_string();
-                        }
-
-                        // Format decoded return values with names if available
-                        let mut return_parts = Vec::new();
-                        for (i, value) in decoded_values.iter().enumerate() {
-                            let param_name = function_abi
-                                .outputs
-                                .get(i)
-                                .map(|param| param.name.as_str())
-                                .filter(|name| !name.is_empty());
-
-                            if let Some(name) = param_name {
-                                return_parts.push(format!(
-                                    "{} {}: {}",
-                                    value.format_type(),
-                                    name,
-                                    value.format_value(false)
-                                ));
-                            } else {
-                                return_parts.push(value.format_value(true));
-                            }
-                        }
-
-                        if return_parts.len() == 1 {
-                            return_parts[0].clone()
-                        } else {
-                            format!("({})", return_parts.join(", "))
-                        }
-                    }
-                    Err(_) => {
-                        // Fallback to hex if decoding fails
-                        if output.len() <= 32 {
-                            format!("0x{}", hex::encode(output))
-                        } else {
-                            format!("0x{}...({} bytes)", hex::encode(&output[..8]), output.len())
-                        }
-                    }
-                }
-            } else {
-                // No ABI available, show hex
-                if output.len() <= 32 {
-                    format!("0x{}", hex::encode(output))
-                } else {
-                    format!("0x{}...({} bytes)", hex::encode(&output[..8]), output.len())
-                }
-            }
-        } else {
-            // No selector, show hex
-            if output.len() <= 32 {
-                format!("0x{}", hex::encode(output))
-            } else {
-                format!("0x{}...({} bytes)", hex::encode(&output[..8]), output.len())
-            }
         }
     }
 
@@ -816,201 +772,6 @@ impl TracePanel {
         }
     }
 
-    /// Format address in a more readable way for unlabeled addresses (8...6 format)
-    fn format_address_readable(&self, address: Address) -> String {
-        if address == Address::ZERO {
-            "0x0000000000000000".to_string()
-        } else {
-            let addr_str = format!("{:?}", address);
-            // Show more characters for better identification: 8 chars + ... + 6 chars
-            format!("{}...{}", &addr_str[..8], &addr_str[addr_str.len() - 6..])
-        }
-    }
-
-    /// Format function call with ABI decoding (returns string for backwards compatibility)
-    fn format_function_call(&self, function_abi: &Function, input_data: &Bytes) -> String {
-        if input_data.len() < 4 {
-            return format!("{}()", function_abi.name);
-        }
-
-        // Try to decode the input data
-        match function_abi.abi_decode_input(&input_data[4..]) {
-            Ok(decoded) => {
-                let params: Vec<String> =
-                    decoded.iter().map(|param| param.format_value(true)).collect();
-
-                format!("{}({})", function_abi.name, params.join(", "))
-            }
-            Err(_) => {
-                // Fallback to raw data display
-                format!(
-                    "{}(0x{}...)",
-                    function_abi.name,
-                    hex::encode(&input_data[4..input_data.len().min(8)])
-                )
-            }
-        }
-    }
-
-    /// Format function call with syntax highlighting using the syntax highlighter
-    fn format_function_call_with_highlighting(
-        &self,
-        function_abi: &Function,
-        input_data: &Bytes,
-    ) -> Vec<Span<'static>> {
-        // Get the function call as a string (reuse existing logic)
-        let call_string = self.format_function_call(function_abi, input_data);
-
-        // Use the syntax highlighter to tokenize and highlight the string
-        self.highlight_solidity_code(call_string)
-    }
-
-    /// Format Wei value to ETH
-    fn format_ether(&self, value: U256) -> String {
-        // Convert Wei to ETH (1 ETH = 10^18 Wei)
-        let eth_value = value.to_string();
-        if eth_value.len() <= 18 {
-            // Less than 1 ETH - show significant digits only
-            let padded = format!("{:0>18}", eth_value);
-            let trimmed = padded.trim_end_matches('0');
-            if trimmed.is_empty() {
-                "0".to_string()
-            } else {
-                format!("0.{}", &trimmed[..trimmed.len().min(6)])
-            }
-        } else {
-            // More than 1 ETH
-            let (whole, decimal) = eth_value.split_at(eth_value.len() - 18);
-            let decimal_trimmed = decimal[..4.min(decimal.len())].trim_end_matches('0');
-            if decimal_trimmed.is_empty() {
-                whole.to_string()
-            } else {
-                format!("{}.{}", whole, decimal_trimmed)
-            }
-        }
-    }
-
-    /// Format event data using ABI if available
-    fn format_event(&self, event: &LogData, abi: Option<&JsonAbi>) -> String {
-        if event.topics().is_empty() {
-            return format!("Anonymous event ({} bytes data)", event.data.len());
-        }
-
-        let event_signature = event.topics()[0];
-
-        // Try to find the event in the ABI
-        if let Some(abi) = abi {
-            if let Some(event_abi) = abi.events().find(|e| e.selector() == event_signature) {
-                // Try to decode the event
-                match event_abi.decode_log(event) {
-                    Ok(decoded) => {
-                        // Format decoded event with parameters
-                        let mut params = Vec::new();
-                        for (param, value) in event_abi.inputs.iter().zip(decoded.body.iter()) {
-                            params.push(format!(
-                                "{} {}: {}",
-                                value.format_type(),
-                                param.name,
-                                value.format_value(false)
-                            ));
-                        }
-
-                        if params.is_empty() {
-                            format!("{}()", event_abi.name)
-                        } else {
-                            format!("{}({})", event_abi.name, params.join(", "))
-                        }
-                    }
-                    Err(_) => {
-                        // Fallback to event name with raw data
-                        format!("{}(...) [decode failed]", event_abi.name)
-                    }
-                }
-            } else {
-                // Unknown event signature
-                format!(
-                    "Event 0x{}... ({} indexed, {} bytes data)",
-                    hex::encode(&event_signature.as_slice()[..4]),
-                    event.topics().len() - 1,
-                    event.data.len()
-                )
-            }
-        } else {
-            // No ABI available
-            format!(
-                "Event 0x{}... ({} indexed, {} bytes data)",
-                hex::encode(&event_signature.as_slice()[..4]),
-                event.topics().len() - 1,
-                event.data.len()
-            )
-        }
-    }
-
-    /// Try to decode constructor arguments for contract creation
-    fn format_constructor_call(&self, entry: &TraceEntry) -> Option<String> {
-        // Only for contract creation calls
-        if !matches!(entry.call_type, CallType::Create(_)) {
-            return None;
-        }
-
-        // Try to get constructor ABI
-        if let Some(abi) = &entry.abi {
-            if let Some(constructor) = abi.constructor() {
-                // For contract creation, the input contains: bytecode + constructor arguments
-                // We need to try to extract just the constructor arguments
-                // This is tricky because we don't know the exact bytecode length
-
-                // Simple heuristic: if input is much larger than typical bytecode and has trailing data,
-                // assume the trailing data are constructor arguments
-                if entry.input.len() > 1000 {
-                    // Arbitrary threshold for "has constructor args"
-                    // Try different offsets to find valid constructor arguments
-                    // Start from the end and work backwards in 32-byte chunks
-                    let input_len = entry.input.len();
-
-                    // Calculate expected argument size from constructor ABI
-                    let expected_size: usize = constructor
-                        .inputs
-                        .iter()
-                        .map(|input| match input.ty.as_str() {
-                            ty if ty.starts_with("uint") || ty.starts_with("int") => 32,
-                            "address" => 32, // padded to 32 bytes
-                            "bool" => 32,    // padded to 32 bytes
-                            ty if ty.starts_with("bytes") && ty != "bytes" => 32, // fixed bytes
-                            _ => 32,         // rough estimate for dynamic types
-                        })
-                        .sum();
-
-                    if input_len >= expected_size {
-                        let potential_args = &entry.input[input_len - expected_size..];
-
-                        if let Ok(decoded) = constructor.abi_decode_input(potential_args) {
-                            let params: Vec<String> = decoded
-                                .iter()
-                                .zip(constructor.inputs.iter())
-                                .map(|(value, input)| {
-                                    format!(
-                                        "{} {}: {}",
-                                        value.format_type(),
-                                        input.name,
-                                        value.format_value(false)
-                                    )
-                                })
-                                .collect();
-
-                            return Some(format!("constructor({})", params.join(", ")));
-                        }
-                    }
-                }
-
-                // Fallback: just show that it's a constructor without decoding
-                return Some("constructor(...)".to_string());
-            }
-        }
-
-        None
-    }
-
     /// Apply syntax highlighting to Solidity code using the existing syntax highlighter (for owned strings)
     fn highlight_solidity_code(&self, code: String) -> Vec<Span<'static>> {
         let tokens = self.syntax_highlighter.tokenize(&code, SyntaxType::Solidity);
@@ -1075,7 +836,7 @@ impl PanelTr for TracePanel {
         } as usize;
 
         // Handle different display states
-        match self.exec_mgr.trace_data {
+        match self.exec_mgr.trace_data.clone() {
             // No data: show spinner
             None => {
                 let paragraph =
@@ -1090,7 +851,7 @@ impl PanelTr for TracePanel {
                 return;
             }
             // Data available
-            Some(ref trace) => {
+            Some(trace) => {
                 if trace.is_empty() {
                     let paragraph = Paragraph::new("Trace is empty").block(BorderPresets::trace(
                         self.focused,
@@ -1103,7 +864,7 @@ impl PanelTr for TracePanel {
                 }
 
                 // Generate display lines with expansion/collapse support
-                let display_lines = self.generate_display_lines(trace);
+                let display_lines = self.generate_display_lines(&trace);
 
                 let items: Vec<ListItem<'_>> = display_lines
                     .iter()
@@ -1111,7 +872,7 @@ impl PanelTr for TracePanel {
                     .skip(self.scroll_offset)
                     .take(self.context_height)
                     .map(|(global_index, line_type)| {
-                        let formatted_line = self.format_display_line(line_type, trace);
+                        let formatted_line = self.format_display_line(line_type, &trace);
 
                         let style = if global_index == self.selected_index && self.focused {
                             Style::default()
@@ -1148,7 +909,6 @@ impl PanelTr for TracePanel {
                         height: 1,
                     };
 
-                    let display_lines = self.generate_display_lines(trace);
                     let selected_entry_id = self.selected_entry().map(|e| e.id).unwrap_or_default();
 
                     let status_bar =
@@ -1156,9 +916,9 @@ impl PanelTr for TracePanel {
                             "Line: {}/{} | Trace: {}/{}",
                             self.selected_index + 1,
                             display_lines.len(),
-                            selected_entry_id,
+                            selected_entry_id + 1,
                             self.exec_mgr.trace_data.as_ref().map(|d| d.len()).unwrap_or(0)
-                        )); // TODO
+                        ));
 
                     let status_text = status_bar.build();
                     let status_paragraph = Paragraph::new(status_text)
@@ -1232,7 +992,7 @@ impl PanelTr for TracePanel {
 
     async fn fetch_data(&mut self) -> Result<()> {
         self.exec_mgr.fetch_data().await?;
-        self.info_mgr.fetch_data().await?;
+        self.resolver.fetch_data().await?;
         self.theme_mgr.fetch_data().await?;
 
         Ok(())

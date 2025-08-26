@@ -19,7 +19,7 @@
 //! This module contains the panel trait and all panel implementations.
 
 use crate::{
-    managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore},
+    managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore},
     ColorScheme,
 };
 use crossterm::event::{Event, KeyEvent};

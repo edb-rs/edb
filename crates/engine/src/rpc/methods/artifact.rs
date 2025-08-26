@@ -19,6 +19,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use alloy_primitives::Address;
 use edb_common::types::{Code, OpcodeInfo, SourceInfo};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
@@ -129,5 +130,39 @@ where
     })?;
 
     debug!("Retrieved code for snapshot {}", snapshot_id);
+    Ok(json_value)
+}
+
+pub fn get_constructor_args<DB>(
+    context: &Arc<EngineContext<DB>>,
+    params: Option<Value>,
+) -> Result<serde_json::Value, RpcError>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    // Parse the address as the first argument
+    let address: Address = params
+        .as_ref()
+        .and_then(|p| p.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or_else(|| RpcError {
+            code: -32602,
+            message: "Invalid params: expected [address]".to_string(),
+            data: None,
+        })?;
+
+    let args =
+        context.artifacts.get(&address).map(|artifact| artifact.meta.constructor_arguments.clone());
+
+    let json_value = serde_json::to_value(args).map_err(|e| RpcError {
+        code: -32603,
+        message: format!("Failed to serialize ABI: {}", e),
+        data: None,
+    })?;
+
+    debug!("Retrieved contract ABI for address {}", address);
     Ok(json_value)
 }

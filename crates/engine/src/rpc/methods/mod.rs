@@ -18,7 +18,8 @@
 //!
 //! This module contains all the RPC method implementations for the debug server.
 
-mod code;
+mod artifact;
+mod resolve;
 mod snapshot;
 mod trace;
 
@@ -59,8 +60,10 @@ where
 
         match method {
             "edb_getTrace" => trace::get_trace(&self.context),
-            "edb_getCode" => code::get_code(&self.context, params),
+            "edb_getCode" => artifact::get_code(&self.context, params),
             "edb_getSnapshotInfo" => snapshot::get_snapshot_info(&self.context, params),
+            "edb_getContractABI" => resolve::get_contract_abi(&self.context, params),
+            "edb_getConstructorArgs" => artifact::get_constructor_args(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: -32601,

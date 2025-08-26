@@ -20,9 +20,9 @@
 
 use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::execution::ExecutionManager;
-use crate::managers::info::InfoManager;
+use crate::managers::resolve::Resolver;
 use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
+use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
@@ -117,15 +117,15 @@ pub struct CodePanel {
     // ========== Managers ==========
     /// Shared execution state manager
     exec_mgr: ExecutionManager,
-    /// Shared information manager
-    info_mgr: InfoManager,
+    /// Shared label/abi resolver
+    resolver: Resolver,
     /// Shared theme manager for styling
     theme_mgr: ThemeManager,
 }
 
 impl CodePanel {
     /// Create a new code panel
-    pub fn new(exec_mgr: ExecutionManager, info_mgr: InfoManager, theme_mgr: ThemeManager) -> Self {
+    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
         // Mock server response - for addresses WITH source code
         // In reality, if has_source_code is true, we show source
         // If has_source_code is false, we show opcodes
@@ -219,7 +219,7 @@ impl CodePanel {
             file_selector_height_percent: 20,
             context_height: 0,
             exec_mgr,
-            info_mgr,
+            resolver,
             theme_mgr,
             syntax_highlighter: SyntaxHighlighter::new(),
         }
@@ -832,7 +832,7 @@ impl PanelTr for CodePanel {
     async fn fetch_data(&mut self) -> Result<()> {
         self.theme_mgr.fetch_data().await?;
         self.exec_mgr.fetch_data().await?;
-        self.info_mgr.fetch_data().await?;
+        self.resolver.fetch_data().await?;
         Ok(())
     }
 }

@@ -72,6 +72,7 @@ where
             // For opcode snapshots, return complete execution state
             SnapshotInfo::Opcode(OpcodeSnapshotInfo {
                 address: opcode_snapshot.address,
+                frame_id: *frame_id,
                 pc: opcode_snapshot.pc,
                 opcode: opcode_snapshot.opcode,
                 memory: opcode_snapshot.memory.as_ref().clone(),
@@ -115,6 +116,7 @@ where
 
             SnapshotInfo::Hook(HookSnapshotInfo {
                 address,
+                frame_id: *frame_id,
                 path: source_analysis.path.clone(),
                 offset: source_location.start.unwrap_or(0),
                 length: source_location.length.unwrap_or(0),

@@ -20,9 +20,9 @@
 
 use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::execution::ExecutionManager;
-use crate::managers::info::InfoManager;
+use crate::managers::resolve::Resolver;
 use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
+use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crate::ColorScheme;
@@ -121,15 +121,15 @@ pub struct DisplayPanel {
     // ========== Managers ==========
     /// Shared execution state manager
     exec_mgr: ExecutionManager,
-    /// Shared information manager
-    info_mgr: InfoManager,
+    /// Shared label/abi resolver
+    resolver: Resolver,
     /// Shared theme manager for styling
     theme_mgr: ThemeManager,
 }
 
 impl DisplayPanel {
     /// Create a new display panel
-    pub fn new(exec_mgr: ExecutionManager, info_mgr: InfoManager, theme_mgr: ThemeManager) -> Self {
+    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
         Self {
             mode: DisplayMode::Variables,
             selected_index: 0,
@@ -161,7 +161,7 @@ impl DisplayPanel {
             ],
             focused: false,
             exec_mgr,
-            info_mgr,
+            resolver,
             theme_mgr,
         }
     }
@@ -397,7 +397,7 @@ impl PanelTr for DisplayPanel {
     async fn fetch_data(&mut self) -> Result<()> {
         self.theme_mgr.fetch_data().await?;
         self.exec_mgr.fetch_data().await?;
-        self.info_mgr.fetch_data().await?;
+        self.resolver.fetch_data().await?;
         Ok(())
     }
 }

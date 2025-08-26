@@ -4,6 +4,8 @@ use alloy_primitives::{Address, Bytes, U256};
 use revm::state::TransientStorage;
 use serde::{Deserialize, Serialize};
 
+use crate::types::ExecutionFrameId;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SnapshotInfo {
     Opcode(OpcodeSnapshotInfo),
@@ -14,6 +16,8 @@ pub enum SnapshotInfo {
 pub struct HookSnapshotInfo {
     /// Address of the contract
     pub address: Address,
+    /// Execution Frame Id
+    pub frame_id: ExecutionFrameId,
     /// Current file
     pub path: PathBuf,
     /// Offset within the file
@@ -26,6 +30,8 @@ pub struct HookSnapshotInfo {
 pub struct OpcodeSnapshotInfo {
     /// Address of the contract
     pub address: Address,
+    /// Execution Frame Id
+    pub frame_id: ExecutionFrameId,
     /// Program counter (instruction offset)
     pub pc: usize,
     /// Current opcode

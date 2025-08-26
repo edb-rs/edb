@@ -176,8 +176,6 @@ pub struct TraceEntry {
     pub self_destruct: Option<(Address, U256)>,
     /// Events
     pub events: Vec<LogData>,
-    /// Json ABI of the contract at the code address
-    pub abi: Option<JsonAbi>,
     /// The first snapshot id that belongs to this entry
     pub first_snapshot_id: Option<usize>,
 }

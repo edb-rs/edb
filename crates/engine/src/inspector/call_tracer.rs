@@ -193,7 +193,6 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             create_scheme: None,
             bytecode: None,          // Will be set in step
             target_label: None,      // Will be set in post-analysis
-            abi: None,               // Will be set in post-analysis
             first_snapshot_id: None, // Will be set in post-analysis
         };
 
@@ -258,7 +257,6 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             create_scheme: Some(inputs.scheme),
             bytecode: None,          // Will be set in step
             target_label: None,      // Will be set in post-analysis
-            abi: None,               // Will be set in post-analysis
             first_snapshot_id: None, // Will be set in post-analysis
         };
 

@@ -20,9 +20,9 @@
 
 use super::{EventResponse, PanelTr, PanelType};
 use crate::managers::execution::ExecutionManager;
-use crate::managers::info::InfoManager;
+use crate::managers::resolve::Resolver;
 use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, InfoManagerCore, ThemeManagerCore};
+use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
 use crate::ui::borders::BorderPresets;
 use crate::ui::colors::ColorScheme;
 use crate::ui::icons::Icons;
@@ -114,15 +114,15 @@ pub struct TerminalPanel {
     // ========== Managers ==========
     /// Shared execution state manager
     exec_mgr: ExecutionManager,
-    /// Shared information manager
-    info_mgr: InfoManager,
+    /// Shared label/abi resolver
+    resolver: Resolver,
     /// Shared theme manager for styling
     theme_mgr: ThemeManager,
 }
 
 impl TerminalPanel {
     /// Create a new terminal panel
-    pub fn new(exec_mgr: ExecutionManager, info_mgr: InfoManager, theme_mgr: ThemeManager) -> Self {
+    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
         let mut panel = Self {
             lines: Vec::new(),
             mode: TerminalMode::Insert,
@@ -139,7 +139,7 @@ impl TerminalPanel {
             vim_number_prefix: String::new(),
             vim_cursor_line: 1, // Start at first line (1-based like code panel)
             exec_mgr,
-            info_mgr,
+            resolver,
             theme_mgr,
         };
 
@@ -1129,7 +1129,7 @@ impl PanelTr for TerminalPanel {
 
     async fn fetch_data(&mut self) -> Result<()> {
         self.exec_mgr.fetch_data().await?;
-        self.info_mgr.fetch_data().await?;
+        self.resolver.fetch_data().await?;
         self.theme_mgr.fetch_data().await?;
         Ok(())
     }

@@ -150,13 +150,16 @@ impl Engine {
             fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
+        info!("Replaying transaction to collect call trace and touched contracts");
         let replay_result = self.replay_and_collect_trace(ctx.clone(), tx.clone())?;
 
         // Step 2: Download verified source code for each contract
+        info!("Downloading verified source code for each contract");
         let artifacts =
             self.download_verified_source_code(&replay_result, ctx.chain_id().to::<u64>()).await?;
 
         // Step 3: Collect opcode-level step execution results
+        info!("Collecting opcode-level step execution results");
         let opcode_snapshots = self.capture_opcode_level_snapshots(
             ctx.clone(),
             tx.clone(),
@@ -164,21 +167,26 @@ impl Engine {
         )?;
 
         // Step 4: Analyze source code to identify instrumentation points
+        info!("Analyzing source code");
         let analysis_results = self.analyze_source_code(&artifacts)?;
 
         // Step 5: Instrument source code
+        info!("Instrumenting source code");
         let recompiled_artifacts =
             self.instrument_and_recompile_source_code(&artifacts, &analysis_results)?;
 
         // Step 6: Replace original bytecode with instrumented versions
+        info!("Tweaking bytecode");
         let contracts_in_tx = self.tweak_bytecode(&mut ctx, &recompiled_artifacts, tx_hash).await?;
 
         // Step 7: Re-execute the transaction with snapshot collection
+        info!("Re-executing transaction with snapshot collection");
         let hook_creation =
             self.collect_creation_hooks(&artifacts, &recompiled_artifacts, contracts_in_tx)?;
         let hook_snapshots = self.capture_hook_snapshots(ctx.clone(), tx.clone(), hook_creation)?;
 
         // Step 8: Start RPC server with analysis results and snapshots
+        info!("Starting RPC server with analysis results and snapshots");
         let snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         // Let's pack the debug context
         let mut context = EngineContext {

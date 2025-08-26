@@ -86,15 +86,6 @@ where
                     break;
                 }
             }
-
-            // We then try to update the function abi
-            let address = entry.code_address;
-            entry.abi = self
-                .artifacts
-                .get(&address)
-                .and_then(|artifact| artifact.contract())
-                .and_then(|contract| contract.abi.as_ref())
-                .cloned();
         }
     }
 }
