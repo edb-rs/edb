@@ -64,9 +64,7 @@ pub struct CodeDisplayInfo {
     /// Whether source code is available from server
     pub has_source_code: bool,
     /// Server's preferred display mode
-    pub preferred_display: CodeMode,
-    /// Whether opcodes are available (always true)
-    pub opcodes_available: bool,
+    pub mode: CodeMode,
     /// List of available source files for this address
     pub available_files: Vec<String>,
     /// Enhanced file information with metadata
@@ -101,8 +99,6 @@ pub struct CodePanel {
     syntax_highlighter: SyntaxHighlighter,
 
     // ========== Data ==========
-    /// Current code display mode (respects server preferences)
-    mode: CodeMode,
     /// Server-provided display information
     display_info: CodeDisplayInfo,
     /// Mock source code lines
@@ -155,8 +151,7 @@ impl CodePanel {
 
         let display_info = CodeDisplayInfo {
             has_source_code: true, // This address has source code
-            preferred_display: CodeMode::Source,
-            opcodes_available: false, // When we have source, we don't show opcodes
+            mode: CodeMode::Source,
             available_files: file_info.iter().map(|f| f.path.clone()).collect(),
             file_info,
         };
@@ -202,13 +197,12 @@ impl CodePanel {
         };
 
         Self {
-            mode: display_info.preferred_display,
             display_info,
-            source_lines,
+            source_lines: vec![],
             opcode_lines: vec![],
-            source_paths: vec!["contracts/SimpleToken.sol".to_string()],
+            source_paths: vec![],
             selected_path_index: 0,
-            current_execution_line: Some(10),
+            current_execution_line: Some(10), // TODO
             user_cursor_line: Some(1),
             scroll_offset: 0,
             focused: false,
@@ -227,7 +221,7 @@ impl CodePanel {
 
     /// Get current lines to display
     fn get_display_lines(&self) -> &Vec<String> {
-        match self.mode {
+        match self.display_info.mode {
             CodeMode::Source => &self.source_lines,
             CodeMode::Opcodes => &self.opcode_lines,
         }
@@ -243,7 +237,7 @@ impl CodePanel {
         use ratatui::text::{Line, Span};
 
         // Determine syntax type based on display mode
-        let syntax_type = match self.mode {
+        let syntax_type = match self.display_info.mode {
             CodeMode::Source => SyntaxType::Solidity,
             CodeMode::Opcodes => SyntaxType::Opcodes,
         };
@@ -299,6 +293,11 @@ impl CodePanel {
 
     /// Toggle file selector visibility
     fn toggle_file_selector(&mut self) {
+        if self.display_info.mode != CodeMode::Source || !self.display_info.has_source_code {
+            // File selector only available in source mode with source code
+            return;
+        }
+
         self.show_file_selector = !self.show_file_selector;
         if self.show_file_selector {
             // Reset selection to current file when opening
@@ -374,7 +373,7 @@ impl CodePanel {
     }
 
     /// Render the file selector panel
-    fn render_file_selector(&mut self, frame: &mut Frame, area: Rect, _border_color: Color) {
+    fn render_file_selector(&mut self, frame: &mut Frame, area: Rect) {
         // Calculate file selector context height for viewport calculations
         self.file_selector_context_height = area.height.saturating_sub(2) as usize; // Account for borders
 
@@ -403,8 +402,8 @@ impl CodePanel {
                         .bg(self.theme_mgr.color_scheme.selection_bg)
                         .fg(self.theme_mgr.color_scheme.selection_fg)
                 } else if file_info.has_execution {
+                    // Highlight files with current execution
                     Style::default().fg(self.theme_mgr.color_scheme.warning_color)
-                // Highlight files with current execution
                 } else {
                     Style::default()
                 };
@@ -430,7 +429,7 @@ impl CodePanel {
     }
 
     /// Render the main code content with syntax highlighting
-    fn render_code_content(&mut self, frame: &mut Frame, area: Rect, _border_color: Color) {
+    fn render_code_content(&mut self, frame: &mut Frame, area: Rect) {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{List, ListItem, Paragraph};
 
@@ -564,8 +563,11 @@ impl CodePanel {
             };
             let help_text = if self.show_file_selector {
                 "↑/↓: Navigate • Enter: Select • F: Close".to_string()
-            } else {
+            } else if self.display_info.mode == CodeMode::Source {
                 "↑/↓: Navigate • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint"
+                    .to_string()
+            } else {
+                "↑/↓: Navigate • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • B: Breakpoint"
                     .to_string()
             };
             let help_paragraph = Paragraph::new(help_text)
@@ -581,7 +583,7 @@ impl PanelTr for CodePanel {
     }
 
     fn title(&self) -> String {
-        let mode_str = match self.mode {
+        let mode_str = match self.display_info.mode {
             CodeMode::Source => "Source",
             CodeMode::Opcodes => "Opcodes",
         };
@@ -611,12 +613,6 @@ impl PanelTr for CodePanel {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let border_color = if self.focused {
-            self.theme_mgr.color_scheme.focused_border
-        } else {
-            self.theme_mgr.color_scheme.unfocused_border
-        };
-
         // Split area if file selector is shown
         let (file_selector_area, code_area) = if self.show_file_selector {
             let file_height = (area.height * self.file_selector_height_percent / 100).max(3);
@@ -631,11 +627,11 @@ impl PanelTr for CodePanel {
 
         // Render file selector if shown
         if let Some(selector_area) = file_selector_area {
-            self.render_file_selector(frame, selector_area, border_color);
+            self.render_file_selector(frame, selector_area);
         }
 
         // Render main code content
-        self.render_code_content(frame, code_area, border_color);
+        self.render_code_content(frame, code_area);
     }
 
     fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
@@ -662,11 +658,6 @@ impl PanelTr for CodePanel {
                     }
                     KeyCode::Enter => {
                         self.select_file_from_selector();
-                        Ok(EventResponse::Handled)
-                    }
-                    KeyCode::Esc => {
-                        self.show_file_selector = false;
-                        debug!("File selector closed with Esc");
                         Ok(EventResponse::Handled)
                     }
                     KeyCode::Char('f') | KeyCode::Char('F') => {
@@ -748,13 +739,13 @@ impl PanelTr for CodePanel {
                 // TODO: This will send a step command to the RPC server
                 debug!("Step (next instruction) requested from code panel");
                 // For now, simulate moving to next snapshot
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
-                if current < total.saturating_sub(1) {
-                    // TODO
-                    // self.exec_mgr_mut().update_state(current + 1, total, Some(current + 10), None);
-                    debug!("Stepped to snapshot {}", current + 1);
-                }
+                // let current = self.exec_mgr.current_snapshot;
+                // let total = self.exec_mgr.snapshot_count;
+                // if current < total.saturating_sub(1) {
+                //     // TODO
+                //     // self.exec_mgr_mut().update_state(current + 1, total, Some(current + 10), None);
+                //     debug!("Stepped to snapshot {}", current + 1);
+                // }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('r') => {
@@ -762,26 +753,26 @@ impl PanelTr for CodePanel {
                 // TODO: This will send a reverse step command to the RPC server
                 debug!("Reverse step (previous instruction) requested from code panel");
                 // For now, simulate moving to previous snapshot
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
-                if current > 0 {
-                    // TODO
-                    // self.exec_mgr_mut().update_state(current - 1, total, Some(current + 8), None);
-                    debug!("Reverse stepped to snapshot {}", current - 1);
-                }
+                // let current = self.exec_mgr.current_snapshot;
+                // let total = self.exec_mgr.snapshot_count;
+                // if current > 0 {
+                //     // TODO
+                //     // self.exec_mgr_mut().update_state(current - 1, total, Some(current + 8), None);
+                //     debug!("Reverse stepped to snapshot {}", current - 1);
+                // }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('n') => {
                 // Next: Step over function calls (skip internal calls)
                 // TODO: This will send a next command to the RPC server
                 debug!("Next (step over) requested from code panel");
-                // For now, simulate stepping over to next significant point
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
-                let next_pos = (current + 5).min(total.saturating_sub(1));
-                // TODO
-                // self.exec_mgr_mut().update_state(next_pos, total, Some(next_pos + 9), None);
-                debug!("Next (step over) to snapshot {}", next_pos);
+                // // For now, simulate stepping over to next significant point
+                // let current = self.exec_mgr.current_snapshot;
+                // let total = self.exec_mgr.snapshot_count;
+                // let next_pos = (current + 5).min(total.saturating_sub(1));
+                // // TODO
+                // // self.exec_mgr_mut().update_state(next_pos, total, Some(next_pos + 9), None);
+                // debug!("Next (step over) to snapshot {}", next_pos);
 
                 Ok(EventResponse::Handled)
             }
@@ -789,13 +780,13 @@ impl PanelTr for CodePanel {
                 // Previous: Step back over function calls (reverse step over)
                 // TODO: This will send a previous command to the RPC server
                 debug!("Previous (reverse step over) requested from code panel");
-                // For now, simulate stepping back to previous significant point
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
-                let prev_pos = current.saturating_sub(5);
-                // TODO
-                // self.exec_mgr_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
-                debug!("Previous (reverse step over) to snapshot {}", prev_pos);
+                // // For now, simulate stepping back to previous significant point
+                // let current = self.exec_mgr.current_snapshot;
+                // let total = self.exec_mgr.snapshot_count;
+                // let prev_pos = current.saturating_sub(5);
+                // // TODO
+                // // self.exec_mgr_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
+                // debug!("Previous (reverse step over) to snapshot {}", prev_pos);
 
                 Ok(EventResponse::Handled)
             }

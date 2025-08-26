@@ -250,8 +250,8 @@ impl TerminalPanel {
         match parts[0] {
             "next" | "n" => {
                 self.add_system("Stepping to next snapshot...");
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
+                let current = 0usize;
+                let total = 10usize;
                 if current < total.saturating_sub(1) {
                     // TODO
                     // self.exec_mgr.update_state(current + 1, total, Some(current + 10), None);
@@ -262,8 +262,8 @@ impl TerminalPanel {
             }
             "prev" | "p" => {
                 self.add_system("Stepping to previous snapshot...");
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
+                let current = 0usize;
+                let total = 10usize;
                 if current > 0 {
                     // TODO
                     // self.exec_mgr.update_state(current - 1, total, Some(current + 8), None);
@@ -276,8 +276,8 @@ impl TerminalPanel {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.add_output(&format!("Stepping {} snapshots...", count));
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
+                let current = 0usize;
+                let total = 10usize;
                 let new_pos = (current + count).min(total.saturating_sub(1));
                 // TODO
                 // self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
@@ -290,8 +290,8 @@ impl TerminalPanel {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.add_output(&format!("Reverse stepping {} snapshots...", count));
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
+                let current = 0usize;
+                let total = 10usize;
                 let new_pos = current.saturating_sub(count);
                 // TODO
                 // self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
@@ -302,8 +302,8 @@ impl TerminalPanel {
             }
             "call" | "c" => {
                 self.add_system("Stepping to next function call...");
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
+                let current = 0usize;
+                let total = 10usize;
                 // Simulate jumping to next significant call (larger step)
                 let new_pos = (current + 10).min(total.saturating_sub(1));
                 // TODO
@@ -315,8 +315,8 @@ impl TerminalPanel {
             }
             "rcall" | "rc" => {
                 self.add_system("Stepping back from function call...");
-                let current = self.exec_mgr.current_snapshot;
-                let total = self.exec_mgr.total_snapshots;
+                let current = 0usize;
+                let total = 10usize;
                 // Simulate jumping back to previous significant call
                 let new_pos = current.saturating_sub(10);
                 // TODO
@@ -330,7 +330,7 @@ impl TerminalPanel {
                 if parts.len() > 1 {
                     if let Ok(index) = parts[1].parse::<usize>() {
                         self.add_output(&format!("Jumping to snapshot {}...", index));
-                        let total = self.exec_mgr.total_snapshots;
+                        let total = self.exec_mgr.get_snapshot_count();
                         if index < total {
                             // TODO
                             // self.exec_mgr.update_state(index, total, Some(index + 9), None);

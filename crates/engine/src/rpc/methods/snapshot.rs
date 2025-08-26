@@ -134,3 +134,18 @@ where
     debug!("Retrieved snapshot info for snapshot {}", snapshot_id);
     Ok(json_value)
 }
+
+/// Get the total number of snapshots
+pub fn get_snapshot_count<DB>(context: &Arc<EngineContext<DB>>) -> Result<Value, RpcError>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    let total_snapshots = context.snapshots.len();
+    Ok(serde_json::to_value(total_snapshots).map_err(|e| RpcError {
+        code: -32603,
+        message: format!("Failed to serialize total snapshots: {}", e),
+        data: None,
+    })?)
+}

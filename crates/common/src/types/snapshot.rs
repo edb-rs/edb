@@ -12,6 +12,22 @@ pub enum SnapshotInfo {
     Hook(HookSnapshotInfo),
 }
 
+impl SnapshotInfo {
+    pub fn address(&self) -> Address {
+        match self {
+            SnapshotInfo::Opcode(info) => info.address,
+            SnapshotInfo::Hook(info) => info.address,
+        }
+    }
+
+    pub fn frame_id(&self) -> ExecutionFrameId {
+        match self {
+            SnapshotInfo::Opcode(info) => info.frame_id,
+            SnapshotInfo::Hook(info) => info.frame_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookSnapshotInfo {
     /// Address of the contract

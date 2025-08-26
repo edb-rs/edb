@@ -46,6 +46,7 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
+    /// Create a new method handler
     pub fn new(context: Arc<EngineContext<DB>>) -> Self {
         Self { context }
     }
@@ -61,9 +62,10 @@ where
         match method {
             "edb_getTrace" => trace::get_trace(&self.context),
             "edb_getCode" => artifact::get_code(&self.context, params),
+            "edb_getConstructorArgs" => artifact::get_constructor_args(&self.context, params),
+            "edb_getSnapshotCount" => snapshot::get_snapshot_count(&self.context),
             "edb_getSnapshotInfo" => snapshot::get_snapshot_info(&self.context, params),
             "edb_getContractABI" => resolve::get_contract_abi(&self.context, params),
-            "edb_getConstructorArgs" => artifact::get_constructor_args(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: -32601,

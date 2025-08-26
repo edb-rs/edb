@@ -30,6 +30,7 @@ use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
 use edb_common::SolValueFormatter;
 use eyre::Result;
+use serde::de;
 use std::{
     collections::HashSet,
     ops::{Deref, DerefMut},
@@ -44,6 +45,25 @@ enum PendingRequest {
 
     /// Request for contract constructor arguments
     ConstructorArgs(Address),
+}
+
+#[derive(Debug, Clone, Default)]
+struct ResolverState {
+    contract_abi: FetchCache<(Address, bool), JsonAbi>,
+    constructor_args: FetchCache<Address, Bytes>,
+}
+
+impl ResolverState {
+    /// Update the state with another state's data
+    fn update(&mut self, other: &ResolverState) {
+        if self.contract_abi.need_update(&other.contract_abi) {
+            self.contract_abi.update(&other.contract_abi);
+        }
+
+        if self.constructor_args.need_update(&other.constructor_args) {
+            self.constructor_args.update(&other.constructor_args);
+        }
+    }
 }
 
 /// Per-thread info manager providing cached data for rendering
@@ -68,9 +88,7 @@ enum PendingRequest {
 pub struct Resolver {
     /// Pending requests
     pending_requests: HashSet<PendingRequest>,
-
-    contract_abi: FetchCache<(Address, bool), JsonAbi>,
-    constructor_args: FetchCache<Address, Bytes>,
+    state: ResolverState,
 
     core: Arc<RwLock<ResolverCore>>,
 }
@@ -92,12 +110,7 @@ impl DerefMut for Resolver {
 impl Resolver {
     /// Create a new info manager with a shared core
     pub fn new(core: Arc<RwLock<ResolverCore>>) -> Self {
-        Self {
-            pending_requests: HashSet::new(),
-            contract_abi: FetchCache::new(),
-            constructor_args: FetchCache::new(),
-            core,
-        }
+        Self { pending_requests: HashSet::new(), state: ResolverState::default(), core }
     }
 
     /// Add a new fetching request
@@ -106,26 +119,30 @@ impl Resolver {
     }
 
     /// Fetch the constructor arguments for a specific address
-    pub fn get_constructor_args(&mut self, address: Address) -> Option<Bytes> {
-        match self.constructor_args.get(&address) {
-            Some(args) => args.clone(),
-            _ => {
-                debug!("Constructor arguments not found in cache, fetching...");
-                self.new_fetching_request(PendingRequest::ConstructorArgs(address));
-                None
-            }
+    pub fn get_constructor_args(&mut self, address: Address) -> Option<&Bytes> {
+        if !self.state.constructor_args.contains_key(&address) {
+            debug!("Constructor arguments not found in cache, fetching...");
+            self.new_fetching_request(PendingRequest::ConstructorArgs(address));
+            return None;
+        }
+
+        match self.state.constructor_args.get(&address) {
+            Some(args) => args.as_ref(),
+            _ => None,
         }
     }
 
     /// Fetch the contract ABI for a specific address
-    pub fn get_contract_abi(&mut self, address: Address, recompiled: bool) -> Option<JsonAbi> {
-        match self.contract_abi.get(&(address, recompiled)) {
-            Some(abi) => abi.clone(),
-            _ => {
-                debug!("Contract ABI not found in cache, fetching...");
-                self.new_fetching_request(PendingRequest::ContractAbi(address, recompiled));
-                None
-            }
+    pub fn get_contract_abi(&mut self, address: Address, recompiled: bool) -> Option<&JsonAbi> {
+        if !self.state.contract_abi.contains_key(&(address, recompiled)) {
+            debug!("Contract ABI not found in cache, fetching...");
+            self.new_fetching_request(PendingRequest::ContractAbi(address, recompiled));
+            return None;
+        }
+
+        match self.state.contract_abi.get(&(address, recompiled)) {
+            Some(abi) => abi.as_ref(),
+            _ => None,
         }
     }
 
@@ -223,7 +240,7 @@ impl Resolver {
 
     /// Resolve constructor call
     pub fn resolve_constructor_call(&mut self, address: Address) -> Option<String> {
-        let Some(args) = self.get_constructor_args(address) else {
+        let Some(args) = self.get_constructor_args(address).cloned() else {
             return None;
         };
 
@@ -348,13 +365,7 @@ impl Resolver {
             core.fetch_data(request).await?;
         }
 
-        if self.contract_abi.need_update(&core.contract_abi) {
-            self.contract_abi.update(&core.contract_abi);
-        }
-
-        if self.constructor_args.need_update(&core.constructor_args) {
-            self.constructor_args.update(&core.constructor_args);
-        }
+        self.state.update(&core.state);
 
         Ok(())
     }
@@ -384,38 +395,35 @@ pub struct ResolverCore {
     /// RPC client for server communication
     rpc_client: Arc<RpcClient>,
 
-    /// Cached contract ABI
-    contract_abi: FetchCache<(Address, bool), JsonAbi>,
-
-    /// Cached constructor arguments
-    constructor_args: FetchCache<Address, Bytes>,
+    /// Cached state
+    state: ResolverState,
 }
 
 impl ResolverCore {
     /// Create a new info manager core with RPC client
     pub fn new(rpc_client: Arc<RpcClient>) -> Self {
-        Self { rpc_client, contract_abi: FetchCache::new(), constructor_args: FetchCache::new() }
+        Self { rpc_client, state: ResolverState::default() }
     }
 
     /// Fetch latest data from the debug server
     ///
     /// This method handles all RPC communication and updates
     /// internal caches that InfoManager instances can read
-    pub async fn fetch_data(&mut self, request: PendingRequest) -> Result<()> {
+    async fn fetch_data(&mut self, request: PendingRequest) -> Result<()> {
         match request {
             PendingRequest::ContractAbi(address, recompiled) => {
-                if self.contract_abi.has_cached(&(address, recompiled)) {
+                if self.state.contract_abi.has_cached(&(address, recompiled)) {
                     return Ok(());
                 }
                 let abi = self.rpc_client.get_contract_abi(address, recompiled).await?;
-                self.contract_abi.insert((address, recompiled), abi);
+                self.state.contract_abi.insert((address, recompiled), abi);
             }
             PendingRequest::ConstructorArgs(address) => {
-                if self.constructor_args.has_cached(&address) {
+                if self.state.constructor_args.has_cached(&address) {
                     return Ok(());
                 }
                 let args = self.rpc_client.get_constructor_args(address).await?;
-                self.constructor_args.insert(address, args);
+                self.state.constructor_args.insert(address, args);
             }
         }
 

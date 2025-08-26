@@ -112,7 +112,7 @@ impl TracePanel {
 
     /// Move selection down
     fn move_down(&mut self) {
-        if let Some(trace) = &self.exec_mgr.trace_data {
+        if let Some(trace) = self.exec_mgr.get_trace_ref() {
             let display_lines = self.generate_display_lines(trace);
             let max_lines = display_lines.len();
             if self.selected_index < max_lines.saturating_sub(1) {
@@ -127,8 +127,8 @@ impl TracePanel {
     }
 
     /// Get currently selected trace entry
-    pub fn selected_entry(&self) -> Option<&TraceEntry> {
-        if let Some(trace) = &self.exec_mgr.trace_data {
+    pub fn selected_entry(&mut self) -> Option<&TraceEntry> {
+        if let Some(trace) = self.exec_mgr.get_trace_ref() {
             let display_lines = self.generate_display_lines(trace);
             if let Some(line_type) = display_lines.get(self.selected_index) {
                 let entry_id = match line_type {
@@ -147,7 +147,7 @@ impl TracePanel {
 
     /// Toggle expansion/collapse for current selected entry
     pub fn toggle_expansion(&mut self) {
-        if let Some(trace) = &self.exec_mgr.trace_data {
+        if let Some(trace) = self.exec_mgr.get_trace_ref() {
             let display_lines = self.generate_display_lines(trace);
             if let Some(line_type) = display_lines.get(self.selected_index) {
                 let entry_id = match line_type {
@@ -180,7 +180,7 @@ impl TracePanel {
 
     /// Adjust selection to stay on the main call line after expansion/collapse
     fn adjust_selection_after_expansion(&mut self, entry_id: usize) {
-        if let Some(trace) = &self.exec_mgr.trace_data {
+        if let Some(trace) = self.exec_mgr.get_trace_ref() {
             let display_lines = self.generate_display_lines(trace);
             // Find the call line for this entry
             if let Some(call_line_index) = display_lines
@@ -210,7 +210,7 @@ impl TracePanel {
                     return false;
                 }
                 // Find the parent entry to check its parent
-                if let Some(trace) = &self.exec_mgr.trace_data {
+                if let Some(trace) = self.exec_mgr.get_trace_ref() {
                     if let Some(parent_entry) = trace.iter().find(|e| e.id == pid) {
                         current_parent_id = parent_entry.parent_id;
                     } else {
@@ -291,7 +291,7 @@ impl TracePanel {
     /// Check if this entry is the last child of its parent
     fn is_last_child(&self, entry: &TraceEntry) -> bool {
         if let Some(parent_id) = entry.parent_id {
-            if let Some(trace) = &self.exec_mgr.trace_data {
+            if let Some(trace) = self.exec_mgr.get_trace_ref() {
                 // Find all visible siblings (same parent)
                 let visible_siblings: Vec<_> = trace
                     .iter()
@@ -323,7 +323,7 @@ impl TracePanel {
             }
 
             if let Some(parent_id) = e.parent_id {
-                if let Some(trace) = &self.exec_mgr.trace_data {
+                if let Some(trace) = self.exec_mgr.get_trace_ref() {
                     current = trace.iter().find(|p| p.id == parent_id);
                     current_depth = current_depth.saturating_sub(1);
                 } else {
@@ -360,7 +360,7 @@ impl TracePanel {
     /// Format a compact trace entry (main call line without events/returns)
     fn format_trace_entry_compact(&mut self, entry: &TraceEntry, depth: usize) -> Line<'static> {
         // Check if this entry has children
-        let has_children = if let Some(trace) = &self.exec_mgr.trace_data {
+        let has_children = if let Some(trace) = self.exec_mgr.get_trace_ref() {
             trace.iter().any(|e| e.parent_id == Some(entry.id))
         } else {
             false
@@ -817,7 +817,7 @@ impl PanelTr for TracePanel {
     }
 
     fn title(&self) -> String {
-        if let Some(trace) = &self.exec_mgr.trace_data {
+        if let Some(trace) = self.exec_mgr.get_trace_ref() {
             let display_lines = self.generate_display_lines(trace);
             let visible_entries = trace.iter().filter(|entry| self.is_entry_visible(entry)).count();
             format!("Trace ({} lines, {} entries)", display_lines.len(), visible_entries)
@@ -836,7 +836,8 @@ impl PanelTr for TracePanel {
         } as usize;
 
         // Handle different display states
-        match self.exec_mgr.trace_data.clone() {
+        // XXX (ZZ): we need to get_trace here to prompt exec_mgr to fetch data
+        match self.exec_mgr.get_trace().cloned() {
             // No data: show spinner
             None => {
                 let paragraph =
@@ -917,7 +918,7 @@ impl PanelTr for TracePanel {
                             self.selected_index + 1,
                             display_lines.len(),
                             selected_entry_id + 1,
-                            self.exec_mgr.trace_data.as_ref().map(|d| d.len()).unwrap_or(0)
+                            self.exec_mgr.get_trace_ref().map(|d| d.len()).unwrap_or(0)
                         ));
 
                     let status_text = status_bar.build();

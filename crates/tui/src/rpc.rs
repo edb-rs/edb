@@ -21,7 +21,7 @@
 use crate::ui::spinner::Spinner;
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{Address, Bytes};
-use edb_common::types::Trace;
+use edb_common::types::{Code, SnapshotInfo, Trace};
 use eyre::Result;
 use jsonrpsee::{
     core::client::ClientT,
@@ -266,6 +266,47 @@ impl RpcClient {
 
         serde_json::from_value(value)
             .map_err(|e| eyre::eyre!("Failed to parse contract constructor arguments: {}", e))
+    }
+
+    /// Get total snapshot count
+    pub async fn get_snapshot_count(&self) -> Result<usize> {
+        let value = self
+            .request_with_spinner(
+                "edb_getSnapshotCount",
+                rpc_params!(),
+                "Getting total snapshot count",
+            )
+            .await?;
+
+        serde_json::from_value(value)
+            .map_err(|e| eyre::eyre!("Failed to parse snapshot count: {}", e))
+    }
+
+    /// Get snapshot information
+    pub async fn get_snapshot_info(&self, snapshot_id: usize) -> Result<SnapshotInfo> {
+        let value = self
+            .request_with_spinner(
+                "edb_getSnapshotInfo",
+                rpc_params!(snapshot_id),
+                &format!("Getting info for snapshot {}", snapshot_id),
+            )
+            .await?;
+
+        serde_json::from_value(value)
+            .map_err(|e| eyre::eyre!("Failed to parse snapshot info: {}", e))
+    }
+
+    /// Get code
+    pub async fn get_code(&self, snapshot_id: usize) -> Result<Code> {
+        let value = self
+            .request_with_spinner(
+                "edb_getCode",
+                rpc_params!(snapshot_id),
+                &format!("Getting code for snapshot {}", snapshot_id),
+            )
+            .await?;
+
+        serde_json::from_value(value).map_err(|e| eyre::eyre!("Failed to parse code: {}", e))
     }
 }
 
