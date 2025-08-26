@@ -44,7 +44,7 @@ use revm::{
     interpreter::{CallScheme, InstructionResult},
 };
 use std::collections::HashSet;
-use tracing::debug;
+use tracing::{debug, error};
 
 /// Represents different types of trace lines for multi-line display
 #[derive(Debug, Clone)]
@@ -967,9 +967,12 @@ impl PanelTr for TracePanel {
                     // Jump to the first snapshot of this trace entry if available
                     if let Some(snapshot_id) = entry.first_snapshot_id {
                         debug!("Jumping to snapshot: {}", snapshot_id);
-                        // TODO: Use execution manager to set current snapshot
-                        // This would require an async RPC call to set_current_snapshot
+                        self.exec_mgr.display_snapshot(snapshot_id)?;
+                    } else {
+                        error!("No snapshot available for trace entry");
                     }
+                } else {
+                    error!("No trace entry selected");
                 }
                 Ok(EventResponse::Handled)
             }

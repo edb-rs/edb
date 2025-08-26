@@ -288,7 +288,7 @@ where
         }
 
         // Check if we should record for the caller address
-        let caller_address = inputs.bytecode_address;
+        let caller_address = inputs.caller;
 
         // Extract usid from call data (assume it's a single U256)
         let input_data = match &inputs.input {

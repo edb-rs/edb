@@ -28,6 +28,7 @@ use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use crate::ColorScheme;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use edb_common::types::Code;
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -35,6 +36,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem},
     Frame,
 };
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
@@ -99,12 +101,18 @@ pub struct CodePanel {
     syntax_highlighter: SyntaxHighlighter,
 
     // ========== Data ==========
+    /// Current snapshot id (flag)
+    current_snapshot_id: Option<usize>,
+    /// Current selected path (flag)
+    current_selected_path_id: Option<usize>,
     /// Server-provided display information
     display_info: CodeDisplayInfo,
     /// Mock source code lines
     source_lines: Vec<String>,
     /// Mock opcode lines
     opcode_lines: Vec<String>,
+    /// Available source code
+    sources: HashMap<String, String>,
     /// Available source paths
     source_paths: Vec<String>,
     /// Currently selected source path index
@@ -198,9 +206,12 @@ impl CodePanel {
 
         Self {
             display_info,
+            current_snapshot_id: None,
+            current_selected_path_id: None,
             source_lines: vec![],
             opcode_lines: vec![],
             source_paths: vec![],
+            sources: HashMap::new(),
             selected_path_index: 0,
             current_execution_line: Some(10), // TODO
             user_cursor_line: Some(1),
@@ -539,15 +550,18 @@ impl CodePanel {
                 self.current_execution_line.map_or("None".to_string(), |l| l.to_string());
             let user_line = self.user_cursor_line.map_or("None".to_string(), |l| l.to_string());
 
-            let status_bar = StatusBar::new()
+            let mut status_bar = StatusBar::new()
                 .current_panel("Code".to_string())
-                .message(format!("► Exec: {}", exec_line))
-                .message(format!("◯ User: {}", user_line))
-                .message(format!(
+                .message(format!("► Exec: {} / {}", exec_line, lines.len()))
+                .message(format!("◯ User: {} / {}", user_line, lines.len()));
+
+            if self.display_info.has_source_code {
+                status_bar = status_bar.message(format!(
                     "Files: {}/{}",
                     self.selected_path_index + 1,
                     self.display_info.file_info.len()
                 ));
+            }
 
             let status_text = status_bar.build();
             let status_paragraph = Paragraph::new(status_text)
@@ -574,6 +588,105 @@ impl CodePanel {
                 .style(Style::default().fg(self.theme_mgr.color_scheme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
+    }
+
+    fn update_display_info(&mut self) -> Option<()> {
+        let id = self.exec_mgr.get_display_snapshot();
+        if self.current_snapshot_id == Some(id) {
+            return Some(()); // No change
+        }
+
+        let execution_path = self.exec_mgr.get_snapshot_info(id)?.path().cloned();
+        let code = self.exec_mgr.get_code(id)?;
+        match code {
+            Code::Source(info) => {
+                self.display_info.has_source_code = true;
+                self.display_info.mode = CodeMode::Source;
+                self.display_info.available_files = info
+                    .sources
+                    .keys()
+                    .map(|p| p.as_os_str().to_string_lossy().to_string())
+                    .collect();
+                self.display_info.file_info = info
+                    .sources
+                    .iter()
+                    .map(|(p, s)| {
+                        let path = p.as_os_str().to_string_lossy().to_string();
+                        let line_count = s.lines().count();
+                        let has_execution = execution_path.as_ref() == Some(p);
+                        FileInfo { path, line_count, has_execution }
+                    })
+                    .collect();
+
+                self.display_info.available_files.sort();
+                self.display_info.file_info.sort_by(|a, b| a.path.cmp(&b.path));
+
+                self.source_paths = self.display_info.available_files.clone();
+                self.source_lines.clear(); // We will update this later
+                self.opcode_lines.clear();
+
+                self.sources = info
+                    .sources
+                    .iter()
+                    .map(|(p, s)| {
+                        let path = p.as_os_str().to_string_lossy().to_string();
+                        (path, s.clone())
+                    })
+                    .collect();
+
+                self.selected_path_index =
+                    self.display_info.file_info.iter().position(|p| p.has_execution).unwrap_or(0);
+            }
+            Code::Opcode(info) => {
+                self.display_info.has_source_code = false;
+                self.display_info.mode = CodeMode::Opcodes;
+                self.display_info.available_files.clear();
+                self.display_info.file_info.clear();
+
+                self.source_lines.clear();
+                self.source_paths.clear();
+                self.selected_path_index = 0;
+
+                let mut opcodes: Vec<_> =
+                    info.codes.iter().map(|(pc, insn)| (*pc, insn.clone())).collect();
+                opcodes.sort_by_key(|(pc, _)| *pc);
+
+                // TODO: We need a better way to render opcodes
+                self.opcode_lines =
+                    opcodes.iter().map(|(pc, insn)| format!("{:03}: {}", pc, insn)).collect();
+            }
+        }
+
+        // Reset scroll and cursor
+        self.scroll_offset = 0;
+        self.user_cursor_line = Some(1);
+
+        self.current_snapshot_id = Some(id);
+        self.current_selected_path_id = None; // We always reset the selected path
+        Some(())
+    }
+
+    fn fresh_source_code(&mut self) {
+        if self.current_selected_path_id == Some(self.selected_path_index) {
+            return; // No change
+        }
+
+        if !self.display_info.has_source_code || self.source_paths.is_empty() {
+            self.source_lines.clear();
+            return;
+        }
+
+        let selected_file = &self.source_paths[self.selected_path_index];
+
+        if let Some(source) = self.sources.get(selected_file) {
+            self.source_lines = source.lines().map(|l| l.to_string()).collect();
+        }
+
+        // Reset scroll and cursor
+        self.scroll_offset = 0;
+        self.user_cursor_line = Some(1);
+
+        self.current_selected_path_id = Some(self.selected_path_index);
     }
 }
 
@@ -613,6 +726,10 @@ impl PanelTr for CodePanel {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect) {
+        if self.update_display_info().is_some() {
+            self.fresh_source_code();
+        }
+
         // Split area if file selector is shown
         let (file_selector_area, code_area) = if self.show_file_selector {
             let file_height = (area.height * self.file_selector_height_percent / 100).max(3);

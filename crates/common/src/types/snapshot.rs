@@ -26,6 +26,13 @@ impl SnapshotInfo {
             SnapshotInfo::Hook(info) => info.frame_id,
         }
     }
+
+    pub fn path(&self) -> Option<&PathBuf> {
+        match self {
+            SnapshotInfo::Opcode(_) => None,
+            SnapshotInfo::Hook(info) => Some(&info.path),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
