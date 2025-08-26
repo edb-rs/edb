@@ -30,7 +30,6 @@ use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
 use edb_common::SolValueFormatter;
 use eyre::Result;
-use serde::de;
 use std::{
     collections::HashSet,
     ops::{Deref, DerefMut},

@@ -13,13 +13,6 @@ pub enum SnapshotInfo {
 }
 
 impl SnapshotInfo {
-    pub fn address(&self) -> Address {
-        match self {
-            SnapshotInfo::Opcode(info) => info.address,
-            SnapshotInfo::Hook(info) => info.address,
-        }
-    }
-
     pub fn frame_id(&self) -> ExecutionFrameId {
         match self {
             SnapshotInfo::Opcode(info) => info.frame_id,
@@ -37,8 +30,6 @@ impl SnapshotInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookSnapshotInfo {
-    /// Address of the contract
-    pub address: Address,
     /// Execution Frame Id
     pub frame_id: ExecutionFrameId,
     /// Current file
@@ -51,8 +42,6 @@ pub struct HookSnapshotInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpcodeSnapshotInfo {
-    /// Address of the contract
-    pub address: Address,
     /// Execution Frame Id
     pub frame_id: ExecutionFrameId,
     /// Program counter (instruction offset)

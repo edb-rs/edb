@@ -57,6 +57,7 @@ where
     <DB as Database>::Error: Clone,
 {
     /// Contract address that triggered the hook
+    #[deprecated(note = "Use `trace` to get the address")]
     pub address: Address,
     /// Database state at the hook point
     pub database: CacheDB<DB>,
@@ -319,6 +320,7 @@ where
         snap.commit(changes);
 
         // Create hook snapshot
+        #[allow(deprecated)]
         let hook_snapshot = HookSnapshot { address: caller_address, database: snap, usid };
 
         // Update the last frame with this snapshot
@@ -527,6 +529,7 @@ where
                 // Frame with hooks - collect all USIDs in execution order (no sorting)
                 let usids: Vec<_> = hooks.iter().map(|h| h.usid).collect();
                 let hook_count = hooks.len();
+                #[allow(deprecated)]
                 let addresses: std::collections::HashSet<_> =
                     hooks.iter().map(|h| h.address).collect();
 

@@ -68,19 +68,22 @@ where
         data: None,
     })?;
 
+    let trace_entry = context.trace.get(frame_id.trace_entry_id()).ok_or_else(|| RpcError {
+        code: -32603,
+        message: format!("Trace entry with id {} not found", frame_id.trace_entry_id()),
+        data: None,
+    })?;
+
+    let address = trace_entry.target;
+    let bytecode_address = trace_entry.code_address;
+
     let code = match snapshot {
-        Snapshot::Opcode(opcode_snapshot) => {
+        Snapshot::Opcode(..) => {
             // For opcode snapshots, return disassembled bytecode
             // Get the bytecode from the database
-            let entry_id = frame_id.trace_entry_id();
-            let entry = context.trace.get(entry_id).ok_or_else(|| RpcError {
+            let bytecode = trace_entry.bytecode.as_ref().ok_or_else(|| RpcError {
                 code: -32603,
-                message: format!("Trace entry with id {} not found", entry_id),
-                data: None,
-            })?;
-            let bytecode = entry.bytecode.as_ref().ok_or_else(|| RpcError {
-                code: -32603,
-                message: format!("No bytecode found for trace entry {}", entry_id),
+                message: format!("No bytecode found for trace entry {}", frame_id.trace_entry_id()),
                 data: None,
             })?;
 
@@ -99,16 +102,13 @@ where
                 codes.insert(pc, opcode_str);
             }
 
-            Code::Opcode(OpcodeInfo { address: opcode_snapshot.address, codes })
+            Code::Opcode(OpcodeInfo { address, bytecode_address, codes })
         }
-        Snapshot::Hook(hook_snapshot) => {
-            // For hook snapshots, return source code from artifacts
-            let address = hook_snapshot.address;
-
+        Snapshot::Hook(..) => {
             // Get the artifact for this address
-            let artifact = context.artifacts.get(&address).ok_or_else(|| RpcError {
+            let artifact = context.artifacts.get(&bytecode_address).ok_or_else(|| RpcError {
                 code: -32603,
-                message: format!("No artifact found for address {}", address),
+                message: format!("No artifact found for address {}", bytecode_address),
                 data: None,
             })?;
 
@@ -118,7 +118,7 @@ where
                 sources.insert(path.clone(), source.content.to_string());
             }
 
-            Code::Source(SourceInfo { address, sources })
+            Code::Source(SourceInfo { address, bytecode_address, sources })
         }
     };
 

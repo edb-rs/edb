@@ -67,11 +67,16 @@ where
         data: None,
     })?;
 
+    let trace_entry = context.trace.get(frame_id.trace_entry_id()).ok_or_else(|| RpcError {
+        code: -32602,
+        message: format!("Trace entry with id {} not found", frame_id.trace_entry_id()),
+        data: None,
+    })?;
+
     let snapshot_info = match snapshot {
         Snapshot::Opcode(opcode_snapshot) => {
             // For opcode snapshots, return complete execution state
             SnapshotInfo::Opcode(OpcodeSnapshotInfo {
-                address: opcode_snapshot.address,
                 frame_id: *frame_id,
                 pc: opcode_snapshot.pc,
                 opcode: opcode_snapshot.opcode,
@@ -83,14 +88,14 @@ where
         }
         Snapshot::Hook(hook_snapshot) => {
             // For hook snapshots, get source location from analysis results
-            let address = hook_snapshot.address;
+            let bytecode_address = trace_entry.code_address;
             let usid = hook_snapshot.usid;
 
             // Get the analysis result for this address
             let analysis_result =
-                context.analysis_results.get(&address).ok_or_else(|| RpcError {
+                context.analysis_results.get(&bytecode_address).ok_or_else(|| RpcError {
                     code: -32603,
-                    message: format!("No analysis result found for address {}", address),
+                    message: format!("No analysis result found for address {}", bytecode_address),
                     data: None,
                 })?;
 
@@ -115,7 +120,6 @@ where
                 })?;
 
             SnapshotInfo::Hook(HookSnapshotInfo {
-                address,
                 frame_id: *frame_id,
                 path: source_analysis.path.clone(),
                 offset: source_location.start.unwrap_or(0),

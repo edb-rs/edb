@@ -41,7 +41,7 @@ use crate::{managers::FetchCache, RpcClient};
 enum PendingRequest {
     Trace(),
     SnapshotInfo(usize),
-    Code(usize, Address),
+    Code(usize),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -211,15 +211,29 @@ impl ExecutionManager {
     }
 
     pub fn get_code(&mut self, id: usize) -> Option<&Code> {
-        let info = self.get_snapshot_info(id)?;
-        let address = info.address();
-        if !self.state.code.contains_key(&address) {
+        let Some(entry_id) =
+            self.get_snapshot_info(id).map(|info| info.frame_id().trace_entry_id())
+        else {
             debug!("Code not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::Code(id, address));
+            self.new_fetching_request(PendingRequest::Code(id));
+            return None;
+        };
+
+        let Some(bytecode_address) =
+            self.get_trace_ref().and_then(|trace| trace.get(entry_id).map(|e| e.code_address))
+        else {
+            debug!("Code not found in cache, fetching...");
+            self.new_fetching_request(PendingRequest::Code(id));
+            return None;
+        };
+
+        if !self.state.code.contains_key(&bytecode_address) {
+            debug!("Code not found in cache, fetching...");
+            self.new_fetching_request(PendingRequest::Code(id));
             return None;
         }
 
-        match self.state.code.get(&address) {
+        match self.state.code.get(&bytecode_address) {
             Some(code) => code.as_ref(),
             _ => None,
         }
@@ -312,13 +326,37 @@ impl ExecutionManagerCore {
                 let info = self.rpc_client.get_snapshot_info(id).await?;
                 self.state.snapshot_info.insert(id, Some(info));
             }
-            PendingRequest::Code(id, address) => {
-                if self.state.code.contains_key(&address) {
+            PendingRequest::Code(id) => {
+                if self.state.snapshot_info.get(&id).is_none() {
+                    let info = self.rpc_client.get_snapshot_info(id).await?;
+                    self.state.snapshot_info.insert(id, Some(info));
+                }
+
+                if self.state.trace_data.is_none() {
+                    let trace = self.rpc_client.get_trace().await?;
+                    self.state.trace_data = Some(trace);
+                }
+
+                let entry_id = self
+                    .state
+                    .snapshot_info
+                    .get(&id)
+                    .and_then(|info| info.as_ref().map(|i| i.frame_id()))
+                    .ok_or_else(|| eyre::eyre!("Snapshot info for id {} not found", id))?
+                    .trace_entry_id();
+                let bytecode_address = self
+                    .state
+                    .trace_data
+                    .as_ref()
+                    .and_then(|trace| trace.get(entry_id).map(|e| e.code_address))
+                    .ok_or_else(|| eyre::eyre!("Trace entry with id {} not found", entry_id))?;
+
+                if self.state.code.contains_key(&bytecode_address) {
                     return Ok(());
                 }
 
                 let code = self.rpc_client.get_code(id).await?;
-                self.state.code.insert(address, Some(code));
+                self.state.code.insert(bytecode_address, Some(code));
             }
             PendingRequest::Trace() => {
                 if self.state.trace_data.is_some() {
@@ -347,25 +385,6 @@ impl ExecutionManagerCore {
             }
             Err(e) => {
                 tracing::warn!("Failed to fetch snapshot count: {}", e);
-                Err(e)
-            }
-        }
-    }
-
-    /// Fetch trace data from debug server
-    async fn fetch_trace(&mut self) -> Result<()> {
-        if self.state.trace_data.is_some() {
-            // We already have trace data, no need to fetch
-            return Ok(());
-        }
-
-        match self.rpc_client.get_trace().await {
-            Ok(trace_value) => {
-                self.state.trace_data = Some(trace_value);
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!("Failed to fetch trace: {}", e);
                 Err(e)
             }
         }

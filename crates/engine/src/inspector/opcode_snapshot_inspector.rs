@@ -58,7 +58,8 @@ where
 {
     /// Program counter (instruction offset)
     pub pc: usize,
-    /// Contract address being executed
+    /// Target address being executed (storage)
+    #[deprecated(note = "Use `trace` to get the address")]
     pub address: Address,
     /// Current opcode
     pub opcode: u8,
@@ -245,6 +246,8 @@ where
             return;
         }
 
+        let address = interp.input.target_address();
+
         // Get or create frame state
         let frame_state = self.frame_states.get(&frame_id);
 
@@ -283,9 +286,10 @@ where
         };
 
         // Create snapshot (stack is always cloned as it changes frequently)
+        #[allow(deprecated)]
         let snapshot = OpcodeSnapshot {
             pc: interp.bytecode.pc(),
-            address: contract_address,
+            address,
             opcode: opcode.get(),
             memory: memory.clone(),
             stack: interp.stack.data().clone(),
@@ -555,6 +559,8 @@ where
     fn print_snapshot_line(&self, index: usize, snapshot: &OpcodeSnapshot<DB>, indent: &str) {
         let opcode = unsafe { OpCode::new_unchecked(snapshot.opcode) };
         let opcode_str = format!("{}", opcode.as_str());
+
+        #[allow(deprecated)]
         let addr_short = format!("{:?}", snapshot.address);
         let addr_display = if addr_short.len() > 10 {
             format!("{}...{}", &addr_short[0..6], &addr_short[addr_short.len() - 4..])
