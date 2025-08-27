@@ -36,6 +36,7 @@ use ratatui::{
     Frame,
 };
 use revm::bytecode;
+use std::cmp::{max, min};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
@@ -526,24 +527,17 @@ impl CodePanel {
     fn move_to(&mut self, line: usize) {
         let max_line = self.get_display_lines().len();
         let viewport_height = self.context_height;
+        let half_viewport = viewport_height / 2;
 
-        if line > self.scroll_offset + viewport_height {
-            self.scroll_offset = line - viewport_height;
-            self.user_cursor_line = Some(line);
-        } else if line > self.scroll_offset {
-            // We just need to do in-screen update
-            self.user_cursor_line = Some(line);
-        } else if line > 0 {
-            self.scroll_offset = line - 1;
-            self.user_cursor_line = Some(line);
-        } else if line > max_line {
-            // It is not valid
-            self.scroll_offset = max_line.saturating_sub(viewport_height);
-            self.user_cursor_line = Some(max_line);
-        } else {
-            // It is not valid since user_cursor_line is 1-based
+        if line <= half_viewport || max_line <= viewport_height {
             self.scroll_offset = 0;
-            self.user_cursor_line = Some(1);
+            self.user_cursor_line = Some(max(line, 1));
+        } else if line > max_line - viewport_height {
+            self.scroll_offset = max_line.saturating_sub(viewport_height);
+            self.user_cursor_line = Some(min(line, max_line));
+        } else {
+            self.scroll_offset = line.saturating_sub(half_viewport);
+            self.user_cursor_line = Some(line);
         }
     }
 
@@ -559,6 +553,10 @@ impl CodePanel {
 
         let code = self.exec_mgr.get_code(id)?;
         let bytecode_address = code.bytecode_address();
+
+        // We reset the selected path id here, and only update it as Some when we
+        // are about to show new code.
+        self.current_selected_path_id = None;
         match code {
             Code::Source(info) => {
                 if self.display_info.bytecode_address != bytecode_address {
@@ -587,8 +585,14 @@ impl CodePanel {
 
                     self.display_info.bytecode_address = bytecode_address;
 
-                    self.source_lines.clear(); // We will update this later
-                    self.opcode_lines.clear();
+                    // update selected path index
+                    self.selected_path_index = self
+                        .display_info
+                        .file_info
+                        .iter()
+                        .position(|p| p.has_execution)
+                        .unwrap_or(0);
+                    self.current_selected_path_id = Some(self.selected_path_index);
 
                     self.sources = info
                         .sources
@@ -599,18 +603,16 @@ impl CodePanel {
                         })
                         .collect();
                     self.opcodes.clear();
+
+                    self.source_lines = self
+                        .sources
+                        .get(&self.display_info.available_files[self.selected_path_index])
+                        .map_or(vec![], |source| source.lines().map(|l| l.to_string()).collect());
+                    self.opcode_lines.clear();
                 }
 
-                // update selected path index
-                self.selected_path_index =
-                    self.display_info.file_info.iter().position(|p| p.has_execution).unwrap_or(0);
-
                 // move user cursor
-                let execution_path = self
-                    .display_info
-                    .available_files
-                    .get(self.selected_path_index)
-                    .expect("this id must be valid");
+                let execution_path = &self.display_info.available_files[self.selected_path_index];
                 let execution_line = self
                     .sources
                     .get(execution_path)
@@ -656,16 +658,19 @@ impl CodePanel {
         }
 
         self.current_display_snapshot = Some(id);
-        self.current_selected_path_id = None; // We always reset the selected path
         Some(())
     }
 
     fn fresh_source_code(&mut self) {
+        if !self.display_info.has_source_code {
+            return; // Opcode mode
+        }
+
         if self.current_selected_path_id == Some(self.selected_path_index) {
             return; // No change
         }
 
-        if !self.display_info.has_source_code || self.display_info.available_files.is_empty() {
+        if self.display_info.available_files.is_empty() {
             self.source_lines.clear();
             return;
         }
@@ -676,8 +681,9 @@ impl CodePanel {
             self.source_lines = source.lines().map(|l| l.to_string()).collect();
         }
 
-        // Reset scroll and cursor if we changed the selected path but not the file
         if self.current_selected_path_id.is_some() {
+            // This means we are still under the same address, but change to another file
+            // to display.
             self.scroll_offset = 0;
             self.user_cursor_line = Some(1);
         }
