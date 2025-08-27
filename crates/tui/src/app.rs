@@ -27,7 +27,7 @@ use crate::panels::{
     CodePanel, DisplayPanel, EventResponse, Panel, PanelTr, PanelType, TerminalPanel, TracePanel,
 };
 use crate::rpc::RpcClient;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, MouseEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -38,7 +38,7 @@ use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Direction for panel boundary resize
 #[derive(Debug, Clone, Copy)]
@@ -480,7 +480,7 @@ impl App {
         // First, handle global keys
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 self.should_exit = true;
                 return Ok(EventResponse::Exit);
@@ -511,7 +511,24 @@ impl App {
                     }
                     _ => {
                         // In full/mobile mode, Tab cycles through panels
-                        self.cycle_panels();
+                        self.cycle_panels(false);
+                        return Ok(EventResponse::Handled);
+                    }
+                }
+            }
+            KeyCode::Char('`') | KeyCode::Char('~') => {
+                match self.layout_manager.layout_type() {
+                    LayoutType::Compact => {
+                        // In compact mode, `/~ switches main panel between Trace/Code
+                        self.current_panel = match self.current_panel {
+                            PanelType::Terminal => self.compact_main_panel,
+                            _ => PanelType::Terminal,
+                        };
+                        return Ok(EventResponse::Handled);
+                    }
+                    _ => {
+                        // In full/mobile mode, Tab cycles through panels
+                        self.cycle_panels(true);
                         return Ok(EventResponse::Handled);
                     }
                 }
@@ -670,13 +687,22 @@ impl App {
     }
 
     /// Cycle through panels (Tab key)
-    fn cycle_panels(&mut self) {
-        self.current_panel = match self.current_panel {
-            PanelType::Trace => PanelType::Code,
-            PanelType::Code => PanelType::Display,
-            PanelType::Display => PanelType::Terminal,
-            PanelType::Terminal => PanelType::Trace,
-        };
+    fn cycle_panels(&mut self, reversed: bool) {
+        if !reversed {
+            self.current_panel = match self.current_panel {
+                PanelType::Trace => PanelType::Code,
+                PanelType::Code => PanelType::Display,
+                PanelType::Display => PanelType::Terminal,
+                PanelType::Terminal => PanelType::Trace,
+            };
+        } else {
+            self.current_panel = match self.current_panel {
+                PanelType::Trace => PanelType::Terminal,
+                PanelType::Code => PanelType::Trace,
+                PanelType::Display => PanelType::Code,
+                PanelType::Terminal => PanelType::Display,
+            };
+        }
         debug!("Switched to panel: {:?}", self.current_panel);
     }
 
