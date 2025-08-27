@@ -19,10 +19,7 @@
 //! This module contains the core application state management and event handling.
 
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
-use crate::managers::execution::ExecutionManager;
-use crate::managers::resolve::Resolver;
-use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
+use crate::managers::DataManager;
 use crate::panels::{
     CodePanel, DisplayPanel, EventResponse, Panel, PanelTr, PanelType, TerminalPanel, TracePanel,
 };
@@ -33,12 +30,12 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     Frame,
 };
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Direction for panel boundary resize
 #[derive(Debug, Clone, Copy)]
@@ -128,7 +125,7 @@ impl ConnectionStatus {
 /// Main application state
 pub struct App {
     /// RPC client for communicating with debug server
-    rpc_client: Arc<RpcClient>,
+    pub(crate) rpc_client: Arc<RpcClient>,
     /// Layout manager for responsive design
     layout_manager: LayoutManager,
     /// Current focused panel
@@ -139,12 +136,6 @@ pub struct App {
     should_exit: bool,
     /// Main panel type for compact layout (Trace/Code/Display cycle)
     compact_main_panel: PanelType,
-    /// Shared execution state manager
-    _execution_core: Arc<RwLock<ExecutionManagerCore>>,
-    /// Shared resource manager
-    _infomatino_core: Arc<RwLock<ResolverCore>>,
-    /// Shared theme manager
-    _theme_core: Arc<RwLock<ThemeManagerCore>>,
     /// RPC connection status and health monitoring
     connection_status: ConnectionStatus,
     /// Last health check time for periodic monitoring
@@ -160,45 +151,12 @@ impl App {
         let layout_manager = LayoutManager::new();
         let current_panel = PanelType::Terminal;
 
-        // Create managers wrapped in Arc<RwLock<T>>
-        let exec_core = Arc::new(RwLock::new(ExecutionManagerCore::new(rpc_client.clone())));
-        let resolver_core = Arc::new(RwLock::new(ResolverCore::new(rpc_client.clone())));
-        let theme_core = Arc::new(RwLock::new(ThemeManagerCore::new()));
-
-        // Initialize panels - they start with no managers and will get them set later
+        // Initialize panels without managers (they will receive DataManager as parameter)
         let mut panels: HashMap<PanelType, Panel> = HashMap::new();
-        panels.insert(
-            PanelType::Trace,
-            Panel::Trace(TracePanel::new(
-                ExecutionManager::new(exec_core.clone()),
-                Resolver::new(resolver_core.clone()),
-                ThemeManager::new(theme_core.clone()),
-            )),
-        );
-        panels.insert(
-            PanelType::Code,
-            Panel::Code(CodePanel::new(
-                ExecutionManager::new(exec_core.clone()),
-                Resolver::new(resolver_core.clone()),
-                ThemeManager::new(theme_core.clone()),
-            )),
-        );
-        panels.insert(
-            PanelType::Display,
-            Panel::Display(DisplayPanel::new(
-                ExecutionManager::new(exec_core.clone()),
-                Resolver::new(resolver_core.clone()),
-                ThemeManager::new(theme_core.clone()),
-            )),
-        );
-        panels.insert(
-            PanelType::Terminal,
-            Panel::Terminal(TerminalPanel::new(
-                ExecutionManager::new(exec_core.clone()),
-                Resolver::new(resolver_core.clone()),
-                ThemeManager::new(theme_core.clone()),
-            )),
-        );
+        panels.insert(PanelType::Trace, Panel::Trace(TracePanel::new()));
+        panels.insert(PanelType::Code, Panel::Code(CodePanel::new()));
+        panels.insert(PanelType::Display, Panel::Display(DisplayPanel::new()));
+        panels.insert(PanelType::Terminal, Panel::Terminal(TerminalPanel::new()));
 
         Ok(Self {
             rpc_client,
@@ -207,9 +165,6 @@ impl App {
             panels,
             should_exit: false,
             compact_main_panel: PanelType::Code, // Default to Code in compact mode
-            _execution_core: exec_core,
-            _infomatino_core: resolver_core,
-            _theme_core: theme_core,
             connection_status: ConnectionStatus::new(),
             last_health_check: None,
             vertical_split: 50,   // 50% left panel width
@@ -218,28 +173,23 @@ impl App {
     }
 
     /// Render the application
-    pub fn render(&mut self, frame: &mut Frame<'_>) -> Result<()> {
+    pub fn render(&mut self, frame: &mut Frame<'_>, data_manager: &mut DataManager) {
         // Get terminal size and update layout if needed
         let area = frame.area();
         self.layout_manager.update_size(area.width, area.height);
 
         match self.layout_manager.layout_type() {
-            LayoutType::Full => self.render_full_layout(frame, area)?,
-            LayoutType::Compact => self.render_compact_layout(frame, area)?,
-            LayoutType::Mobile => self.render_mobile_layout(frame, area)?,
+            LayoutType::Full => self.render_full_layout(frame, area, data_manager),
+            LayoutType::Compact => self.render_compact_layout(frame, area, data_manager),
+            LayoutType::Mobile => self.render_mobile_layout(frame, area, data_manager),
         }
-
-        Ok(())
     }
 
     /// Update application state
     pub async fn update(&mut self) -> Result<()> {
         // Perform periodic health checks
         self.check_connection_health().await;
-        // Perform data fetching for each panel
-        for panel in self.panels.values_mut() {
-            panel.fetch_data().await?;
-        }
+
         Ok(())
     }
 
@@ -276,7 +226,12 @@ impl App {
     }
 
     /// Render the full 4-panel layout
-    fn render_full_layout(&mut self, frame: &mut Frame<'_>, area: Rect) -> Result<()> {
+    fn render_full_layout(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        data_manager: &mut DataManager,
+    ) {
         // First split for status bar
         let layout_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -319,23 +274,26 @@ impl App {
 
         // Render panels
         if let Some(panel) = self.panels.get_mut(&PanelType::Trace) {
-            panel.render(frame, top_chunks[0]);
+            panel.render(frame, top_chunks[0], data_manager);
         }
         if let Some(panel) = self.panels.get_mut(&PanelType::Code) {
-            panel.render(frame, top_chunks[1]);
+            panel.render(frame, top_chunks[1], data_manager);
         }
         if let Some(panel) = self.panels.get_mut(&PanelType::Display) {
-            panel.render(frame, bottom_chunks[0]);
+            panel.render(frame, bottom_chunks[0], data_manager);
         }
         if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-            panel.render(frame, bottom_chunks[1]);
+            panel.render(frame, bottom_chunks[1], data_manager);
         }
-
-        Ok(())
     }
 
     /// Render the compact 3-panel stacked layout
-    fn render_compact_layout(&mut self, frame: &mut Frame<'_>, area: Rect) -> Result<()> {
+    fn render_compact_layout(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        data_manager: &mut DataManager,
+    ) {
         // First split for status bar
         let layout_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -362,19 +320,22 @@ impl App {
 
         // Render main panel (cycles between Trace/Code/Display)
         if let Some(panel) = self.panels.get_mut(&self.compact_main_panel) {
-            panel.render(frame, chunks[0]);
+            panel.render(frame, chunks[0], data_manager);
         }
 
         // Always render Terminal panel in compact mode
         if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-            panel.render(frame, chunks[1]);
+            panel.render(frame, chunks[1], data_manager);
         }
-
-        Ok(())
     }
 
     /// Render the mobile single-panel layout
-    fn render_mobile_layout(&mut self, frame: &mut Frame<'_>, area: Rect) -> Result<()> {
+    fn render_mobile_layout(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        data_manager: &mut DataManager,
+    ) {
         // First split for status bar
         let layout_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -392,10 +353,8 @@ impl App {
 
         // Render only the current panel
         if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-            panel.render(frame, layout_chunks[1]);
+            panel.render(frame, layout_chunks[1], data_manager);
         }
-
-        Ok(())
     }
 
     /// Render the status bar at the top of the screen
@@ -469,7 +428,11 @@ impl App {
     }
 
     /// Handle keyboard events
-    pub async fn handle_key_event(&mut self, key: KeyEvent) -> Result<EventResponse> {
+    pub async fn handle_key_event(
+        &mut self,
+        key: KeyEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
         // Only handle key press events
         if key.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
@@ -490,7 +453,7 @@ impl App {
                 if self.current_panel == PanelType::Terminal {
                     // If we're in terminal, let the terminal handle ESC (INSERT -> VIM mode)
                     if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-                        return panel.handle_key_event(key);
+                        return panel.handle_key_event(key, data_manager);
                     }
                 } else {
                     // If we're in other panels, ESC returns to terminal
@@ -569,7 +532,7 @@ impl App {
                 if self.current_panel == PanelType::Terminal {
                     // Forward to terminal to handle double-press logic
                     if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-                        return panel.handle_key_event(key);
+                        return panel.handle_key_event(key, data_manager);
                     } else {
                         return Ok(EventResponse::NotHandled);
                     }
@@ -649,7 +612,7 @@ impl App {
                 }
                 // Otherwise, forward to current panel
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    return panel.handle_key_event(key);
+                    return panel.handle_key_event(key, data_manager);
                 }
                 return Ok(EventResponse::NotHandled);
             }
@@ -671,7 +634,7 @@ impl App {
                 }
                 // Otherwise, forward to current panel
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    return panel.handle_key_event(key);
+                    return panel.handle_key_event(key, data_manager);
                 }
                 return Ok(EventResponse::NotHandled);
             }
@@ -679,7 +642,7 @@ impl App {
             _ => {
                 // Forward to the current panel
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    return panel.handle_key_event(key);
+                    return panel.handle_key_event(key, data_manager);
                 }
                 return Ok(EventResponse::NotHandled);
             }
@@ -762,7 +725,11 @@ impl App {
     }
 
     /// Handle mouse events
-    pub async fn handle_mouse_event(&mut self, _event: MouseEvent) -> Result<()> {
+    pub async fn handle_mouse_event(
+        &mut self,
+        _event: MouseEvent,
+        _data_manager: &mut DataManager,
+    ) -> Result<()> {
         // Mouse event handling can be implemented here
         Ok(())
     }

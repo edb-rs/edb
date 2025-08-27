@@ -48,6 +48,10 @@ struct Args {
     /// Terminal refresh interval in milliseconds
     #[arg(long, default_value = "50")]
     refresh_interval: u64,
+
+    /// Data fetch interval in milliseconds
+    #[arg(long, default_value = "100")]
+    data_fetch_interval: u64,
 }
 
 #[tokio::main]
@@ -83,6 +87,7 @@ async fn main() -> Result<()> {
     let tui_config = TuiConfig {
         rpc_url: args.url.clone(),
         refresh_interval: std::time::Duration::from_millis(args.refresh_interval),
+        data_fetch_interval: std::time::Duration::from_millis(args.data_fetch_interval),
         enable_mouse: args.mouse,
     };
 

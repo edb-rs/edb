@@ -26,11 +26,8 @@
 
 use alloy_primitives::Address;
 use eyre::Result;
-use std::{
-    collections::HashSet,
-    ops::{Deref, DerefMut},
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashSet, mem, ops::Deref, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::debug;
 
 use edb_common::types::{Code, SnapshotInfo, Trace};
@@ -39,39 +36,33 @@ use crate::{managers::FetchCache, RpcClient};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PendingRequest {
-    Trace(),
     SnapshotInfo(usize),
     Code(usize),
 }
 
-#[derive(Debug, Default, Clone)]
-struct ExecutionState {
-    current_snapshot: usize,
-    display_snapshot: usize,
+#[derive(Debug, Clone)]
+pub struct ExecutionState {
     snapshot_count: usize,
     snapshot_info: FetchCache<usize, SnapshotInfo>,
     code: FetchCache<Address, Code>,
-    trace_data: Option<Trace>,
+    trace_data: Trace,
+}
+
+impl ExecutionState {
+    async fn with_rpc_client(rpc_client: Arc<RpcClient>) -> Result<Self> {
+        let snapshot_count = rpc_client.get_snapshot_count().await?;
+        let trace_data = rpc_client.get_trace().await?;
+        Ok(Self {
+            snapshot_count,
+            snapshot_info: FetchCache::new(),
+            code: FetchCache::new(),
+            trace_data,
+        })
+    }
 }
 
 impl ExecutionState {
     fn update(&mut self, other: &ExecutionState) {
-        if self.trace_data.is_none() && other.trace_data.is_some() {
-            self.trace_data = other.trace_data.clone();
-        }
-
-        if self.snapshot_count != other.snapshot_count {
-            self.snapshot_count = other.snapshot_count;
-        }
-
-        if self.current_snapshot != other.current_snapshot {
-            self.current_snapshot = other.current_snapshot;
-        }
-
-        if self.display_snapshot != other.display_snapshot {
-            self.display_snapshot = other.display_snapshot;
-        }
-
         if self.snapshot_info.need_update(&other.snapshot_info) {
             self.snapshot_info.update(&other.snapshot_info);
         }
@@ -113,86 +104,63 @@ impl ExecutionState {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ExecutionManager {
+    // User-controlled data
+    current_snapshot: usize,
+    display_snapshot: usize,
+
     /// State
     state: ExecutionState,
 
     /// Pending request
-    pending_request: HashSet<PendingRequest>,
-
+    pending_requests: HashSet<PendingRequest>,
     core: Arc<RwLock<ExecutionManagerCore>>,
 }
 
+// Data management
 impl ExecutionManager {
     /// Create new execution manager with shared core
-    pub fn new(core: Arc<RwLock<ExecutionManagerCore>>) -> Self {
-        let mut mgr =
-            Self { state: ExecutionState::default(), pending_request: HashSet::new(), core };
+    pub async fn new(core: Arc<RwLock<ExecutionManagerCore>>) -> Self {
+        let mut mgr = Self {
+            state: core.clone().read().await.state.clone(),
+            pending_requests: HashSet::new(),
+            core,
+            current_snapshot: 0,
+            display_snapshot: 0,
+        };
 
         let _ = mgr.goto_snapshot(0);
         let _ = mgr.display_snapshot(0);
         mgr
     }
 
-    pub fn display_snapshot(&mut self, id: usize) -> Result<()> {
-        if id >= self.state.snapshot_count {
-            Err(eyre::eyre!(
-                "Snapshot id {} out of bounds (total {})",
-                id,
-                self.state.snapshot_count
-            ))
-        } else {
-            self.get_snapshot_info(id);
-            self.get_code(id);
-
-            let mut core = self.core.write().unwrap();
-            self.state.display_snapshot = id;
-            core.state.display_snapshot = id;
-
-            Ok(())
+    /// Push pending requests from manager to core
+    pub async fn push_pending_to_core(&mut self) -> Result<()> {
+        if !self.pending_requests.is_empty() {
+            if let Ok(mut core) = self.core.try_write() {
+                for request in self.pending_requests.drain() {
+                    core.add_pending_request(request);
+                }
+            }
         }
-    }
-
-    pub fn goto_snapshot(&mut self, id: usize) -> Result<()> {
-        if id >= self.state.snapshot_count {
-            Err(eyre::eyre!(
-                "Snapshot id {} out of bounds (total {})",
-                id,
-                self.state.snapshot_count
-            ))
-        } else {
-            self.get_snapshot_info(id);
-            self.get_code(id);
-
-            let mut core = self.core.write().unwrap();
-            self.state.current_snapshot = id;
-            core.state.current_snapshot = id;
-
-            Ok(())
-        }
-    }
-
-    pub fn step(&mut self) -> Result<()> {
-        let next_id = if self.state.current_snapshot + 1 < self.state.snapshot_count {
-            self.state.current_snapshot + 1
-        } else {
-            self.state.current_snapshot
-        };
-        self.goto_snapshot(next_id)?;
-        self.display_snapshot(next_id)?;
-
         Ok(())
     }
 
-    pub fn reverse_step(&mut self) -> Result<()> {
-        let prev_id =
-            if self.state.current_snapshot > 0 { self.state.current_snapshot - 1 } else { 0 };
-        self.goto_snapshot(prev_id)?;
-        self.display_snapshot(prev_id)?;
-
+    /// Pull processed data from core to manager
+    pub fn pull_from_core(&mut self) -> Result<()> {
+        if let Ok(core) = self.core.try_read() {
+            self.state.update(&core.state);
+        }
         Ok(())
+    }
+
+    /// Get clone of core for background processing
+    pub fn get_core(&self) -> Arc<RwLock<ExecutionManagerCore>> {
+        self.core.clone()
     }
 
     pub fn get_snapshot_info(&mut self, id: usize) -> Option<&SnapshotInfo> {
+        let _ = self.pull_from_core();
+
         if !self.state.snapshot_info.contains_key(&id) {
             debug!("Snapshot info not found in cache, fetching...");
             self.new_fetching_request(PendingRequest::SnapshotInfo(id));
@@ -210,28 +178,20 @@ impl ExecutionManager {
     }
 
     pub fn get_current_snapshot(&self) -> usize {
-        self.state.current_snapshot
+        self.current_snapshot
     }
 
     pub fn get_display_snapshot(&self) -> usize {
-        self.state.display_snapshot
+        self.display_snapshot
     }
 
-    pub fn get_trace_ref(&self) -> Option<&Trace> {
-        self.state.trace_data.as_ref()
-    }
-
-    pub fn get_trace(&mut self) -> Option<&Trace> {
-        if self.state.trace_data.is_none() {
-            debug!("Trace not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::Trace());
-            return None;
-        }
-
-        self.state.trace_data.as_ref()
+    pub fn get_trace(&self) -> &Trace {
+        &self.state.trace_data
     }
 
     pub fn get_code(&mut self, id: usize) -> Option<&Code> {
+        let _ = self.pull_from_core();
+
         let Some(entry_id) =
             self.get_snapshot_info(id).map(|info| info.frame_id().trace_entry_id())
         else {
@@ -240,9 +200,7 @@ impl ExecutionManager {
             return None;
         };
 
-        let Some(bytecode_address) =
-            self.get_trace_ref().and_then(|trace| trace.get(entry_id).map(|e| e.code_address))
-        else {
+        let Some(bytecode_address) = self.get_trace().get(entry_id).map(|e| e.code_address) else {
             debug!("Code not found in cache, fetching...");
             self.new_fetching_request(PendingRequest::Code(id));
             return None;
@@ -261,44 +219,77 @@ impl ExecutionManager {
     }
 
     fn new_fetching_request(&mut self, request: PendingRequest) {
-        self.pending_request.insert(request);
+        if let Ok(mut core) = self.core.try_write() {
+            core.add_pending_request(request);
+        } else {
+            self.pending_requests.insert(request);
+        }
+    }
+}
+
+// Execution-related functions
+impl ExecutionManager {
+    pub fn display_snapshot(&mut self, id: usize) -> Result<()> {
+        if id >= self.state.snapshot_count {
+            Err(eyre::eyre!(
+                "Snapshot id {} out of bounds (total {})",
+                id,
+                self.state.snapshot_count
+            ))
+        } else {
+            self.get_snapshot_info(id);
+            self.get_code(id);
+
+            self.display_snapshot = id;
+
+            Ok(())
+        }
     }
 
-    /// Synchronize local execution state with the shared core
-    ///
-    /// This is the only async operation, designed to:
-    /// - Fetch latest trace data from ExecutionManagerCore
-    /// - Update all cached fields for immediate access
-    /// - Be called when execution state changes or on initialization
-    pub async fn fetch_data(&mut self) -> eyre::Result<()> {
-        let mut core = self.core.write().unwrap();
+    pub fn goto_snapshot(&mut self, id: usize) -> Result<()> {
+        if id >= self.state.snapshot_count {
+            Err(eyre::eyre!(
+                "Snapshot id {} out of bounds (total {})",
+                id,
+                self.state.snapshot_count
+            ))
+        } else {
+            self.get_snapshot_info(id);
+            self.get_code(id);
 
-        for request in self.pending_request.drain() {
-            core.fetch_data(request).await?;
+            // Use try_write instead of blocking write
+            self.current_snapshot = id;
+
+            Ok(())
         }
+    }
 
-        // Update snapshot count
-        if self.state.snapshot_count == 0 {
-            core.fetch_snapshot_count().await?;
-        }
+    pub fn step(&mut self) -> Result<()> {
+        let next_id = if self.current_snapshot + 1 < self.state.snapshot_count {
+            self.current_snapshot + 1
+        } else {
+            self.current_snapshot
+        };
+        let _ = self.goto_snapshot(next_id);
+        let _ = self.display_snapshot(next_id);
 
-        self.state.update(&core.state);
+        Ok(())
+    }
+
+    pub fn reverse_step(&mut self) -> Result<()> {
+        let prev_id = if self.current_snapshot > 0 { self.current_snapshot - 1 } else { 0 };
+        let _ = self.goto_snapshot(prev_id);
+        let _ = self.display_snapshot(prev_id);
 
         Ok(())
     }
 }
 
 impl Deref for ExecutionManager {
-    type Target = Arc<RwLock<ExecutionManagerCore>>;
+    type Target = ExecutionState;
 
     fn deref(&self) -> &Self::Target {
-        &self.core
-    }
-}
-
-impl DerefMut for ExecutionManager {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.core
+        &self.state
     }
 }
 
@@ -327,13 +318,37 @@ pub struct ExecutionManagerCore {
     rpc_client: Arc<RpcClient>,
 
     /// State
-    state: ExecutionState,
+    pub(super) state: ExecutionState,
+
+    /// Pending requests to be processed
+    pending_requests: HashSet<PendingRequest>,
 }
 
 impl ExecutionManagerCore {
     /// Create a new execution manager core with RPC client
-    pub fn new(rpc_client: Arc<RpcClient>) -> Self {
-        Self { rpc_client, state: ExecutionState::default() }
+    pub async fn new(rpc_client: Arc<RpcClient>) -> Result<Self> {
+        Ok(Self {
+            state: ExecutionState::with_rpc_client(rpc_client.clone()).await?,
+            rpc_client,
+            pending_requests: HashSet::new(),
+        })
+    }
+
+    /// Add a pending request to be processed
+    fn add_pending_request(&mut self, request: PendingRequest) {
+        self.pending_requests.insert(request);
+    }
+
+    /// Process all pending requests
+    pub async fn process_pending_requests(&mut self) -> Result<()> {
+        let requests = mem::take(&mut self.pending_requests);
+        for request in requests {
+            if let Err(e) = self.fetch_data(request).await {
+                debug!("Error processing request: {}", e);
+                // Continue processing other requests even if one fails
+            }
+        }
+        Ok(())
     }
 
     /// Fetch data per request
@@ -353,11 +368,6 @@ impl ExecutionManagerCore {
                     self.state.snapshot_info.insert(id, Some(info));
                 }
 
-                if self.state.trace_data.is_none() {
-                    let trace = self.rpc_client.get_trace().await?;
-                    self.state.trace_data = Some(trace);
-                }
-
                 let entry_id = self
                     .state
                     .snapshot_info
@@ -368,8 +378,8 @@ impl ExecutionManagerCore {
                 let bytecode_address = self
                     .state
                     .trace_data
-                    .as_ref()
-                    .and_then(|trace| trace.get(entry_id).map(|e| e.code_address))
+                    .get(entry_id)
+                    .map(|e| e.code_address)
                     .ok_or_else(|| eyre::eyre!("Trace entry with id {} not found", entry_id))?;
 
                 if self.state.code.contains_key(&bytecode_address) {
@@ -379,35 +389,8 @@ impl ExecutionManagerCore {
                 let code = self.rpc_client.get_code(id).await?;
                 self.state.code.insert(bytecode_address, Some(code));
             }
-            PendingRequest::Trace() => {
-                if self.state.trace_data.is_some() {
-                    return Ok(());
-                }
-
-                let trace = self.rpc_client.get_trace().await?;
-                self.state.trace_data = Some(trace);
-            }
         }
 
         Ok(())
-    }
-
-    /// Fetch snapshot count
-    async fn fetch_snapshot_count(&mut self) -> Result<()> {
-        if self.state.snapshot_count > 0 {
-            // We already have the snapshot count, no need to fetch
-            return Ok(());
-        }
-
-        match self.rpc_client.get_snapshot_count().await {
-            Ok(count) => {
-                self.state.snapshot_count = count;
-                Ok(())
-            }
-            Err(e) => {
-                tracing::warn!("Failed to fetch snapshot count: {}", e);
-                Err(e)
-            }
-        }
     }
 }

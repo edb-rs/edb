@@ -30,11 +30,8 @@ use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
 use edb_common::SolValueFormatter;
 use eyre::Result;
-use std::{
-    collections::HashSet,
-    ops::{Deref, DerefMut},
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashSet, mem, ops::Deref, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::debug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -47,7 +44,7 @@ enum PendingRequest {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ResolverState {
+pub struct ResolverState {
     contract_abi: FetchCache<(Address, bool), JsonAbi>,
     constructor_args: FetchCache<Address, Bytes>,
 }
@@ -93,32 +90,62 @@ pub struct Resolver {
 }
 
 impl Deref for Resolver {
-    type Target = Arc<RwLock<ResolverCore>>;
+    type Target = ResolverState;
 
     fn deref(&self) -> &Self::Target {
-        &self.core
+        &self.state
     }
 }
 
-impl DerefMut for Resolver {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.core
-    }
-}
-
+// Data management functions
 impl Resolver {
     /// Create a new info manager with a shared core
-    pub fn new(core: Arc<RwLock<ResolverCore>>) -> Self {
-        Self { pending_requests: HashSet::new(), state: ResolverState::default(), core }
+    pub async fn new(core: Arc<RwLock<ResolverCore>>) -> Self {
+        Self {
+            pending_requests: HashSet::new(),
+            state: core.clone().read().await.state.clone(),
+            core,
+        }
+    }
+
+    /// Push pending requests from resolver to core
+    pub async fn push_pending_to_core(&mut self) -> Result<()> {
+        if !self.pending_requests.is_empty() {
+            if let Ok(mut core) = self.core.try_write() {
+                for request in self.pending_requests.drain() {
+                    core.add_pending_request(request);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Pull processed data from core to resolver
+    pub fn pull_from_core(&mut self) -> Result<()> {
+        if let Ok(core) = self.core.try_read() {
+            self.state.update(&core.state);
+        }
+        Ok(())
+    }
+
+    /// Get clone of core for background processing
+    pub fn get_core(&self) -> Arc<RwLock<ResolverCore>> {
+        self.core.clone()
     }
 
     /// Add a new fetching request
     fn new_fetching_request(&mut self, request: PendingRequest) {
-        self.pending_requests.insert(request);
+        if let Ok(mut core) = self.core.try_write() {
+            core.add_pending_request(request);
+        } else {
+            self.pending_requests.insert(request);
+        }
     }
 
     /// Fetch the constructor arguments for a specific address
     pub fn get_constructor_args(&mut self, address: Address) -> Option<&Bytes> {
+        let _ = self.pull_from_core(); // Try to update cache
+
         if !self.state.constructor_args.contains_key(&address) {
             debug!("Constructor arguments not found in cache, fetching...");
             self.new_fetching_request(PendingRequest::ConstructorArgs(address));
@@ -133,6 +160,8 @@ impl Resolver {
 
     /// Fetch the contract ABI for a specific address
     pub fn get_contract_abi(&mut self, address: Address, recompiled: bool) -> Option<&JsonAbi> {
+        let _ = self.pull_from_core(); // Try to update cache
+
         if !self.state.contract_abi.contains_key(&(address, recompiled)) {
             debug!("Contract ABI not found in cache, fetching...");
             self.new_fetching_request(PendingRequest::ContractAbi(address, recompiled));
@@ -144,7 +173,10 @@ impl Resolver {
             _ => None,
         }
     }
+}
 
+// Resovling functions
+impl Resolver {
     /// Resolve function return
     pub fn resolve_function_return(
         &mut self,
@@ -351,23 +383,6 @@ impl Resolver {
             }
         }
     }
-
-    /// Synchronize local cache with the shared core
-    ///
-    /// This is the only async operation in InfoManager, designed to:
-    /// - Trigger data fetching in InfoManagerCore
-    /// - Update local caches when data is available
-    /// - Be called periodically or when fresh data is needed
-    pub async fn fetch_data(&mut self) -> Result<()> {
-        let mut core = self.core.write().unwrap();
-        for request in self.pending_requests.drain() {
-            core.fetch_data(request).await?;
-        }
-
-        self.state.update(&core.state);
-
-        Ok(())
-    }
 }
 
 /// Centralized info state manager handling RPC communication and data fetching
@@ -395,13 +410,33 @@ pub struct ResolverCore {
     rpc_client: Arc<RpcClient>,
 
     /// Cached state
-    state: ResolverState,
+    pub(super) state: ResolverState,
+
+    /// Pending requests to be processed
+    pending_requests: HashSet<PendingRequest>,
 }
 
 impl ResolverCore {
     /// Create a new info manager core with RPC client
-    pub fn new(rpc_client: Arc<RpcClient>) -> Self {
-        Self { rpc_client, state: ResolverState::default() }
+    pub async fn new(rpc_client: Arc<RpcClient>) -> Result<Self> {
+        Ok(Self { rpc_client, state: ResolverState::default(), pending_requests: HashSet::new() })
+    }
+
+    /// Add a pending request to be processed
+    fn add_pending_request(&mut self, request: PendingRequest) {
+        self.pending_requests.insert(request);
+    }
+
+    /// Process all pending requests
+    pub async fn process_pending_requests(&mut self) -> Result<()> {
+        let requests = mem::take(&mut self.pending_requests);
+        for request in requests {
+            if let Err(e) = self.fetch_data(request).await {
+                debug!("Error processing request: {}", e);
+                // Continue processing other requests even if one fails
+            }
+        }
+        Ok(())
     }
 
     /// Fetch latest data from the debug server

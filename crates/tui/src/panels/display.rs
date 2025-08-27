@@ -19,22 +19,17 @@
 //! This panel can switch between different display modes based on context.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::execution::ExecutionManager;
-use crate::managers::resolve::Resolver;
-use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
+use crate::managers::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
-use crate::ColorScheme;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
     layout::Rect,
     style::Style,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{List, ListItem, Paragraph},
     Frame,
 };
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tracing::debug;
 
 /// Display modes for the panel
@@ -117,19 +112,11 @@ pub struct DisplayPanel {
     variables: Vec<String>,
     stack: Vec<String>,
     memory: Vec<String>,
-
-    // ========== Managers ==========
-    /// Shared execution state manager
-    exec_mgr: ExecutionManager,
-    /// Shared label/abi resolver
-    resolver: Resolver,
-    /// Shared theme manager for styling
-    theme_mgr: ThemeManager,
 }
 
 impl DisplayPanel {
     /// Create a new display panel
-    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
+    pub fn new() -> Self {
         Self {
             mode: DisplayMode::Variables,
             selected_index: 0,
@@ -160,9 +147,6 @@ impl DisplayPanel {
                 "0x60: 0xa9059cbb000000000000000000000000456...def000000000000000003e8".to_string(),
             ],
             focused: false,
-            exec_mgr,
-            resolver,
-            theme_mgr,
         }
     }
 
@@ -231,18 +215,12 @@ impl PanelTr for DisplayPanel {
         PanelType::Display
     }
 
-    fn title(&self) -> String {
+    fn title(&self, _dm: &mut DataManager) -> String {
         let data = self.get_current_data();
         format!("{} ({} items)", self.mode.name(), data.len())
     }
 
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let border_color = if self.focused {
-            self.theme_mgr.color_scheme.focused_border
-        } else {
-            self.theme_mgr.color_scheme.unfocused_border
-        };
-
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Calculate context height for viewport calculations
         self.context_height = if self.focused && area.height > 10 {
             area.height.saturating_sub(4) // Account for borders and status lines
@@ -257,27 +235,25 @@ impl PanelTr for DisplayPanel {
                 Paragraph::new(format!("No {} data available", self.mode.name().to_lowercase()))
                     .block(BorderPresets::display(
                         self.focused,
-                        self.title(),
-                        self.theme_mgr.color_scheme.focused_border,
-                        self.theme_mgr.color_scheme.unfocused_border,
+                        self.title(dm),
+                        dm.theme.focused_border,
+                        dm.theme.unfocused_border,
                     ));
             frame.render_widget(paragraph, area);
             return;
         }
 
         // Create list items with selection highlighting and viewport scrolling
-        let items: Vec<ListItem> = data
+        let items: Vec<ListItem<'_>> = data
             .iter()
             .enumerate()
             .skip(self.scroll_offset) // Skip items before viewport
             .take(self.context_height) // Take only visible items
             .map(|(i, item)| {
                 let style = if i == self.selected_index && self.focused {
-                    Style::default()
-                        .bg(self.theme_mgr.color_scheme.selection_bg)
-                        .fg(self.theme_mgr.color_scheme.selection_fg)
+                    Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
                 } else if i == self.selected_index {
-                    Style::default().bg(self.theme_mgr.color_scheme.highlight_bg)
+                    Style::default().bg(dm.theme.highlight_bg)
                 } else {
                     Style::default()
                 };
@@ -288,11 +264,11 @@ impl PanelTr for DisplayPanel {
         let list = List::new(items)
             .block(BorderPresets::display(
                 self.focused,
-                self.title(),
-                self.theme_mgr.color_scheme.focused_border,
-                self.theme_mgr.color_scheme.unfocused_border,
+                self.title(dm),
+                dm.theme.focused_border,
+                dm.theme.unfocused_border,
             ))
-            .highlight_style(Style::default().bg(self.theme_mgr.color_scheme.selection_bg));
+            .highlight_style(Style::default().bg(dm.theme.selection_bg));
 
         frame.render_widget(list, area);
 
@@ -312,8 +288,8 @@ impl PanelTr for DisplayPanel {
                 .message(format!("Items: {}", self.get_current_data().len()));
 
             let status_text = status_bar.build();
-            let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_mgr.color_scheme.accent_color));
+            let status_paragraph =
+                Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             let help_area = Rect {
@@ -323,13 +299,17 @@ impl PanelTr for DisplayPanel {
                 height: 1,
             };
             let help_text = "Space: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
-            let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_mgr.color_scheme.help_text_color));
+            let help_paragraph =
+                Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
 
-    fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
+    fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        _dm: &mut DataManager,
+    ) -> Result<EventResponse> {
         if !self.focused || event.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
         }
@@ -392,12 +372,5 @@ impl PanelTr for DisplayPanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-
-    async fn fetch_data(&mut self) -> Result<()> {
-        self.theme_mgr.fetch_data().await?;
-        self.exec_mgr.fetch_data().await?;
-        self.resolver.fetch_data().await?;
-        Ok(())
     }
 }

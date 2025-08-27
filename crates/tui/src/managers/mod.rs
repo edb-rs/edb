@@ -14,9 +14,44 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Shared state managers for TUI panels
+//! Centralized state management system for TUI
 //!
-//! This module contains managers that handle shared state between panels.
+//! This module implements a unified manager architecture with the following components:
+//!
+//! - `DataManager`: Central container holding all managers, passed to all app functions
+//! - `ExecutionManager`: Manages trace and snapshot data with cached state
+//! - `Resolver`: Handles ABI resolution and address labeling with cached lookups
+//! - `Theme`: Direct theme configuration without async wrapping
+//!
+//! # Architecture
+//!
+//! The manager system follows a two-layer design:
+//!
+//! 1. **Manager Layer** (e.g., ExecutionManager, Resolver)
+//!    - Holds cached state for immediate read access
+//!    - Tracks pending requests when data is not cached
+//!    - User-controllable state (e.g., current_snapshot) lives here
+//!
+//! 2. **Core Layer** (e.g., ExecutionManagerCore, ResolverCore)
+//!    - Wrapped in Arc<tokio::sync::RwLock>
+//!    - Handles RPC communication and data fetching
+//!    - Processes pending requests from managers
+//!    - Run by background tasks spawned in TUI::run()
+//!
+//! # Data Flow
+//!
+//! 1. Panels read from managers during render (non-blocking)
+//! 2. Cache misses create pending requests
+//! 3. App::update() pushes pending requests to cores
+//! 4. Background tasks process core pending requests
+//! 5. App::update() pulls processed data back to managers
+//!
+//! # Benefits
+//!
+//! - **Non-blocking UI**: Rendering never waits on RPC calls
+//! - **Centralized state**: Single DataManager instance for all panels
+//! - **Efficient caching**: Data fetched once, used everywhere
+//! - **Clean separation**: UI logic separate from data fetching
 
 use std::{
     collections::HashMap,
@@ -116,10 +151,12 @@ where
     }
 }
 
+pub mod data_manager;
 pub mod execution;
 pub mod resolve;
 pub mod theme;
 
+pub use data_manager::DataManager;
 pub use execution::ExecutionManagerCore;
 pub use resolve::ResolverCore;
-pub use theme::ThemeManagerCore;
+pub use theme::Theme;

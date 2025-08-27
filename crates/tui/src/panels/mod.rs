@@ -18,17 +18,11 @@
 //!
 //! This module contains the panel trait and all panel implementations.
 
-use crate::{
-    managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore},
-    ColorScheme,
-};
-use crossterm::event::{Event, KeyEvent};
+use crate::managers::DataManager;
+use crossterm::event::{KeyEvent, MouseEvent};
 use eyre::Result;
 use ratatui::{layout::Rect, Frame};
-use std::{
-    fmt::Debug,
-    sync::{RwLockReadGuard, RwLockWriteGuard},
-};
+use std::fmt::Debug;
 
 /// Panel types for identification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,17 +53,27 @@ pub enum EventResponse {
 /// Trait for UI panels
 pub trait PanelTr: Debug + Send {
     /// Render the panel content
-    fn render(&mut self, frame: &mut Frame<'_>, area: Rect);
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, data_manager: &mut DataManager);
 
     /// Handle keyboard events
-    fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
+    fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
         let _ = event; // Suppress unused parameter warning
+        let _ = data_manager;
         Ok(EventResponse::NotHandled)
     }
 
-    /// Handle other events (mouse, resize, etc.)
-    fn handle_event(&mut self, event: Event) -> Result<EventResponse> {
+    /// Handle mouse events
+    fn handle_mouse_event(
+        &mut self,
+        event: MouseEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
         let _ = event; // Suppress unused parameter warning
+        let _ = data_manager;
         Ok(EventResponse::NotHandled)
     }
 
@@ -83,17 +87,12 @@ pub trait PanelTr: Debug + Send {
     fn panel_type(&self) -> PanelType;
 
     /// Get panel title for display
-    fn title(&self) -> String {
+    fn title(&self, _data_manager: &mut DataManager) -> String {
         format!("{:?} Panel", self.panel_type())
     }
 
     /// Allow downcasting to concrete types
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-
-    /// Fetch data from manager
-    async fn fetch_data(&mut self) -> Result<()> {
-        Ok(())
-    }
 }
 
 // Re-export all panel implementations
@@ -116,30 +115,38 @@ pub enum Panel {
 }
 
 impl PanelTr for Panel {
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, data_manager: &mut DataManager) {
         match self {
-            Panel::Code(panel) => panel.render(frame, area),
-            Panel::Display(panel) => panel.render(frame, area),
-            Panel::Terminal(panel) => panel.render(frame, area),
-            Panel::Trace(panel) => panel.render(frame, area),
+            Panel::Code(panel) => panel.render(frame, area, data_manager),
+            Panel::Display(panel) => panel.render(frame, area, data_manager),
+            Panel::Terminal(panel) => panel.render(frame, area, data_manager),
+            Panel::Trace(panel) => panel.render(frame, area, data_manager),
         }
     }
 
-    fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
+    fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
         match self {
-            Panel::Code(panel) => panel.handle_key_event(event),
-            Panel::Display(panel) => panel.handle_key_event(event),
-            Panel::Terminal(panel) => panel.handle_key_event(event),
-            Panel::Trace(panel) => panel.handle_key_event(event),
+            Panel::Code(panel) => panel.handle_key_event(event, data_manager),
+            Panel::Display(panel) => panel.handle_key_event(event, data_manager),
+            Panel::Terminal(panel) => panel.handle_key_event(event, data_manager),
+            Panel::Trace(panel) => panel.handle_key_event(event, data_manager),
         }
     }
 
-    fn handle_event(&mut self, event: Event) -> Result<EventResponse> {
+    fn handle_mouse_event(
+        &mut self,
+        event: MouseEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
         match self {
-            Panel::Code(panel) => panel.handle_event(event),
-            Panel::Display(panel) => panel.handle_event(event),
-            Panel::Terminal(panel) => panel.handle_event(event),
-            Panel::Trace(panel) => panel.handle_event(event),
+            Panel::Code(panel) => panel.handle_mouse_event(event, data_manager),
+            Panel::Display(panel) => panel.handle_mouse_event(event, data_manager),
+            Panel::Terminal(panel) => panel.handle_mouse_event(event, data_manager),
+            Panel::Trace(panel) => panel.handle_mouse_event(event, data_manager),
         }
     }
 
@@ -170,7 +177,7 @@ impl PanelTr for Panel {
         }
     }
 
-    fn title(&self) -> String {
+    fn title(&self, _dm: &mut DataManager) -> String {
         match self {
             Panel::Code(_) => "Code".to_string(),
             Panel::Display(_) => "Display".to_string(),
@@ -185,15 +192,6 @@ impl PanelTr for Panel {
             Panel::Display(panel) => panel.as_any_mut(),
             Panel::Terminal(panel) => panel.as_any_mut(),
             Panel::Trace(panel) => panel.as_any_mut(),
-        }
-    }
-
-    async fn fetch_data(&mut self) -> Result<()> {
-        match self {
-            Panel::Code(panel) => panel.fetch_data().await,
-            Panel::Display(panel) => panel.fetch_data().await,
-            Panel::Terminal(panel) => panel.fetch_data().await,
-            Panel::Trace(panel) => panel.fetch_data().await,
         }
     }
 }

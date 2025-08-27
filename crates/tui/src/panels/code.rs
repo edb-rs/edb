@@ -19,9 +19,7 @@
 //! This panel shows source code with syntax highlighting and current line indication.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::execution::ExecutionManager;
-use crate::managers::resolve::Resolver;
-use crate::managers::theme::ThemeManager;
+use crate::managers::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
@@ -35,10 +33,9 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem},
     Frame,
 };
-use revm::bytecode;
 use std::cmp::{max, min};
 use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Code display mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,19 +120,11 @@ pub struct CodePanel {
     opcodes: Vec<(u64, String)>,
     /// Currently selected source path index
     selected_path_index: usize,
-
-    // ========== Managers ==========
-    /// Shared execution state manager
-    exec_mgr: ExecutionManager,
-    /// Shared label/abi resolver
-    resolver: Resolver,
-    /// Shared theme manager for styling
-    theme_mgr: ThemeManager,
 }
 
 impl CodePanel {
     /// Create a new code panel
-    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
+    pub fn new() -> Self {
         let display_info = CodeDisplayInfo {
             bytecode_address: Address::default(),
             has_source_code: true, // This address has source code
@@ -164,9 +153,6 @@ impl CodePanel {
             file_selector_context_height: 0,
             file_selector_height_percent: 20,
             context_height: 0,
-            exec_mgr,
-            resolver,
-            theme_mgr,
             syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
@@ -185,6 +171,7 @@ impl CodePanel {
         line: &'a str,
         line_num: usize,
         max_line_num: usize,
+        dm: &mut DataManager,
     ) -> ratatui::text::Line<'a> {
         use ratatui::text::{Line, Span};
 
@@ -201,9 +188,7 @@ impl CodePanel {
         let line_num_text = format!("{:>width$} ", line_num, width = line_num_width);
         let line_num_span = Span::styled(
             line_num_text,
-            Style::default()
-                .fg(self.theme_mgr.color_scheme.line_number)
-                .bg(self.theme_mgr.color_scheme.line_number_bg),
+            Style::default().fg(dm.theme.line_number).bg(dm.theme.line_number_bg),
         );
 
         // Tokenize the line for syntax highlighting
@@ -224,9 +209,7 @@ impl CodePanel {
 
             // Add the highlighted token
             let token_text = &line[token.start..token.end];
-            let token_style = self
-                .syntax_highlighter
-                .get_token_style(token.token_type, &self.theme_mgr.color_scheme);
+            let token_style = self.syntax_highlighter.get_token_style(token.token_type, &dm.theme);
             spans.push(Span::styled(token_text, token_style));
 
             last_end = token.end;
@@ -318,7 +301,7 @@ impl CodePanel {
     }
 
     /// Render the file selector panel
-    fn render_file_selector(&mut self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_file_selector(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Calculate file selector context height for viewport calculations
         self.file_selector_context_height = area.height.saturating_sub(2) as usize; // Account for borders
 
@@ -343,12 +326,10 @@ impl CodePanel {
                     format!("{} ({} lines)", file_status.display(filename), file_info.line_count);
 
                 let style = if display_idx == self.file_selector_index {
-                    Style::default()
-                        .bg(self.theme_mgr.color_scheme.selection_bg)
-                        .fg(self.theme_mgr.color_scheme.selection_fg)
+                    Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
                 } else if file_info.has_execution {
                     // Highlight files with current execution
-                    Style::default().fg(self.theme_mgr.color_scheme.warning_color)
+                    Style::default().fg(dm.theme.warning_color)
                 } else {
                     Style::default()
                 };
@@ -366,15 +347,15 @@ impl CodePanel {
                         sorted_files.len()
                     ))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(self.theme_mgr.color_scheme.success_color)),
+                    .border_style(Style::default().fg(dm.theme.success_color)),
             )
-            .highlight_style(Style::default().bg(self.theme_mgr.color_scheme.selection_bg));
+            .highlight_style(Style::default().bg(dm.theme.selection_bg));
 
         frame.render_widget(file_list, area);
     }
 
     /// Render the main code content with syntax highlighting
-    fn render_code_content(&mut self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_code_content(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{List, ListItem, Paragraph};
 
@@ -390,9 +371,9 @@ impl CodePanel {
         if lines.is_empty() {
             let paragraph = Paragraph::new("No code available").block(BorderPresets::code(
                 self.focused,
-                self.title(),
-                self.theme_mgr.color_scheme.focused_border,
-                self.theme_mgr.color_scheme.unfocused_border,
+                self.title(dm),
+                dm.theme.focused_border,
+                dm.theme.unfocused_border,
             ));
             frame.render_widget(paragraph, area);
             return;
@@ -415,7 +396,7 @@ impl CodePanel {
                 let has_breakpoint = false; // TODO
 
                 // Start with syntax-highlighted line
-                let highlighted_line = self.highlight_line(line, line_num, max_line_num);
+                let highlighted_line = self.highlight_line(line, line_num, max_line_num, dm);
 
                 // Add cursor and breakpoint indicators
                 let cursor_indicator = if is_execution && is_user_cursor {
@@ -429,7 +410,7 @@ impl CodePanel {
                 };
 
                 let breakpoint_indicator = if has_breakpoint {
-                    Span::styled("●", Style::default().fg(self.theme_mgr.color_scheme.error_color))
+                    Span::styled("●", Style::default().fg(dm.theme.error_color))
                 } else {
                     Span::raw(" ")
                 };
@@ -448,9 +429,9 @@ impl CodePanel {
 
                 // Apply background highlighting for execution/cursor lines
                 let item_style = if is_execution {
-                    Style::default().bg(self.theme_mgr.color_scheme.current_line_bg)
+                    Style::default().bg(dm.theme.current_line_bg)
                 } else if is_user_cursor {
-                    Style::default().bg(self.theme_mgr.color_scheme.highlight_bg)
+                    Style::default().bg(dm.theme.highlight_bg)
                 } else {
                     Style::default()
                 };
@@ -462,9 +443,9 @@ impl CodePanel {
         // Create list with highlighted content
         let code_list = List::new(list_items).block(BorderPresets::code(
             self.focused,
-            self.title(),
-            self.theme_mgr.color_scheme.focused_border,
-            self.theme_mgr.color_scheme.unfocused_border,
+            self.title(dm),
+            dm.theme.focused_border,
+            dm.theme.unfocused_border,
         ));
 
         frame.render_widget(code_list, area);
@@ -498,8 +479,8 @@ impl CodePanel {
             }
 
             let status_text = status_bar.build();
-            let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_mgr.color_scheme.accent_color));
+            let status_paragraph =
+                Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             // Help line - updated to include file selector
@@ -518,8 +499,8 @@ impl CodePanel {
                 "↑/↓: Navigate • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • B: Breakpoint"
                     .to_string()
             };
-            let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_mgr.color_scheme.help_text_color));
+            let help_paragraph =
+                Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -541,17 +522,17 @@ impl CodePanel {
         }
     }
 
-    fn update_display_info(&mut self) -> Option<()> {
-        let id = self.exec_mgr.get_display_snapshot();
+    fn update_display_info(&mut self, dm: &mut DataManager) -> Option<()> {
+        let id = dm.execution.get_display_snapshot();
         if self.current_display_snapshot == Some(id) {
             return Some(()); // No change
         }
 
-        let exec_source_offset = self.exec_mgr.get_snapshot_info(id)?.offset();
-        let exec_opcode_pc = self.exec_mgr.get_snapshot_info(id)?.pc();
-        let execution_path = self.exec_mgr.get_snapshot_info(id)?.path().cloned();
+        let exec_source_offset = dm.execution.get_snapshot_info(id)?.offset();
+        let exec_opcode_pc = dm.execution.get_snapshot_info(id)?.pc();
+        let execution_path = dm.execution.get_snapshot_info(id)?.path().cloned();
 
-        let code = self.exec_mgr.get_code(id)?;
+        let code = dm.execution.get_code(id)?;
         let bytecode_address = code.bytecode_address();
 
         // We reset the selected path id here, and only update it as Some when we
@@ -661,18 +642,18 @@ impl CodePanel {
         Some(())
     }
 
-    fn fresh_source_code(&mut self) {
+    fn fresh_source_code(&mut self, _dm: &DataManager) -> Option<()> {
         if !self.display_info.has_source_code {
-            return; // Opcode mode
+            return Some(());
         }
 
         if self.current_selected_path_id == Some(self.selected_path_index) {
-            return; // No change
+            return Some(());
         }
 
         if self.display_info.available_files.is_empty() {
             self.source_lines.clear();
-            return;
+            return Some(());
         }
 
         let selected_file = &self.display_info.available_files[self.selected_path_index];
@@ -689,16 +670,19 @@ impl CodePanel {
         }
 
         self.current_selected_path_id = Some(self.selected_path_index);
+        Some(())
     }
 
-    fn update_execution_info(&mut self) {
-        if self.current_execution_snapshot != Some(self.exec_mgr.get_current_snapshot()) {
+    fn update_execution_info(&mut self, dm: &mut DataManager) -> Option<()> {
+        if self.current_execution_snapshot != Some(dm.execution.get_current_snapshot()) {
             // We have update the execution snapshot
-            self.current_execution_snapshot = Some(self.exec_mgr.get_current_snapshot());
+            self.current_execution_snapshot = Some(dm.execution.get_current_snapshot());
 
             // Simply sync the execution line with the user cursor
             self.current_execution_line = self.user_cursor_line;
         }
+
+        Some(())
     }
 }
 
@@ -707,7 +691,7 @@ impl PanelTr for CodePanel {
         PanelType::Code
     }
 
-    fn title(&self) -> String {
+    fn title(&self, _dm: &mut DataManager) -> String {
         let mode_str = match self.display_info.mode {
             CodeMode::Source => "Source",
             CodeMode::Opcodes => "Opcodes",
@@ -737,10 +721,15 @@ impl PanelTr for CodePanel {
         format!("{} {} - {}{}", mode_str, availability, path_str, file_count)
     }
 
-    fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        if self.update_display_info().is_some() {
-            self.fresh_source_code();
-            self.update_execution_info();
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
+        if self
+            .update_display_info(dm)
+            .and_then(|_| self.fresh_source_code(dm))
+            .and_then(|_| self.update_execution_info(dm))
+            .is_none()
+        {
+            // TODO (ZZ): Show spaner
+            error!("MDZZ DIE HERE");
         }
 
         // Split area if file selector is shown
@@ -757,14 +746,14 @@ impl PanelTr for CodePanel {
 
         // Render file selector if shown
         if let Some(selector_area) = file_selector_area {
-            self.render_file_selector(frame, selector_area);
+            self.render_file_selector(frame, selector_area, dm);
         }
 
         // Render main code content
-        self.render_code_content(frame, code_area);
+        self.render_code_content(frame, code_area, dm);
     }
 
-    fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
+    fn handle_key_event(&mut self, event: KeyEvent, dm: &mut DataManager) -> Result<EventResponse> {
         if !self.focused || event.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
         }
@@ -867,12 +856,12 @@ impl PanelTr for CodePanel {
             KeyCode::Char('s') => {
                 // Step: Move to next snapshot/instruction
                 debug!("Step (next instruction) requested from code panel");
-                self.exec_mgr.step()?;
+                dm.execution.step()?;
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('r') => {
                 debug!("Reverse step (previous instruction) requested from code panel");
-                self.exec_mgr.reverse_step()?;
+                dm.execution.reverse_step()?;
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('n') => {
@@ -880,11 +869,11 @@ impl PanelTr for CodePanel {
                 // TODO: This will send a next command to the RPC server
                 debug!("Next (step over) requested from code panel");
                 // // For now, simulate stepping over to next significant point
-                // let current = self.exec_mgr.current_snapshot;
-                // let total = self.exec_mgr.snapshot_count;
+                // let current = dm.execution.current_snapshot;
+                // let total = dm.execution.snapshot_count;
                 // let next_pos = (current + 5).min(total.saturating_sub(1));
                 // // TODO
-                // // self.exec_mgr_mut().update_state(next_pos, total, Some(next_pos + 9), None);
+                // // dm.execution_mut().update_state(next_pos, total, Some(next_pos + 9), None);
                 // debug!("Next (step over) to snapshot {}", next_pos);
 
                 Ok(EventResponse::Handled)
@@ -894,11 +883,11 @@ impl PanelTr for CodePanel {
                 // TODO: This will send a previous command to the RPC server
                 debug!("Previous (reverse step over) requested from code panel");
                 // // For now, simulate stepping back to previous significant point
-                // let current = self.exec_mgr.current_snapshot;
-                // let total = self.exec_mgr.snapshot_count;
+                // let current = dm.execution.current_snapshot;
+                // let total = dm.execution.snapshot_count;
                 // let prev_pos = current.saturating_sub(5);
                 // // TODO
-                // // self.exec_mgr_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
+                // // dm.execution_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
                 // debug!("Previous (reverse step over) to snapshot {}", prev_pos);
 
                 Ok(EventResponse::Handled)
@@ -931,12 +920,5 @@ impl PanelTr for CodePanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-
-    async fn fetch_data(&mut self) -> Result<()> {
-        self.theme_mgr.fetch_data().await?;
-        self.exec_mgr.fetch_data().await?;
-        self.resolver.fetch_data().await?;
-        Ok(())
     }
 }

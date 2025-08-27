@@ -31,7 +31,6 @@ mod ui;
 pub use app::App;
 pub use config::Config;
 pub use layout::{LayoutConfig, LayoutManager, LayoutType};
-pub use managers::ThemeManagerCore;
 pub use panels::EventResponse;
 pub use rpc::RpcClient;
 pub use ui::{
@@ -59,6 +58,8 @@ pub struct TuiConfig {
     pub rpc_url: String,
     /// Terminal refresh interval
     pub refresh_interval: Duration,
+    /// Data fetch interval
+    pub data_fetch_interval: Duration,
     /// Enable mouse support
     pub enable_mouse: bool,
 }
@@ -68,6 +69,7 @@ impl Default for TuiConfig {
         Self {
             rpc_url: "http://localhost:3030".to_string(),
             refresh_interval: Duration::from_millis(50),
+            data_fetch_interval: Duration::from_millis(200),
             enable_mouse: false,
         }
     }
@@ -111,16 +113,50 @@ impl Tui {
     pub async fn run(mut self) -> Result<()> {
         info!("Starting TUI event loop");
 
+        // Create DataManager
+        let mut data_manager =
+            crate::managers::DataManager::new(self.app.rpc_client.clone()).await?;
+
+        // Get cores for background processing
+        let exec_core = data_manager.get_execution_core();
+        let resolver_core = data_manager.get_resolver_core();
+
+        // Spawn background task for execution core processing
+        let exec_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(self.config.data_fetch_interval);
+            loop {
+                interval.tick().await;
+                let mut core = exec_core.write().await;
+                if let Err(e) = core.process_pending_requests().await {
+                    error!("Error processing execution requests: {}", e);
+                }
+            }
+        });
+
+        // Spawn background task for resolver core processing
+        let resolver_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(self.config.data_fetch_interval);
+            loop {
+                interval.tick().await;
+                let mut core = resolver_core.write().await;
+                if let Err(e) = core.process_pending_requests().await {
+                    error!("Error processing resolver requests: {}", e);
+                }
+            }
+        });
+
         let mut event_stream = EventStream::new();
         let mut ticker = interval(self.config.refresh_interval);
 
-        loop {
+        let result = loop {
             // Render current state
-            self.terminal.draw(|frame| {
-                if let Err(e) = self.app.render(frame) {
-                    error!("Render error: {}", e);
-                }
-            })?;
+            let render_result = self.terminal.draw(|frame| {
+                self.app.render(frame, &mut data_manager);
+            });
+
+            if let Err(e) = render_result {
+                break Err(e.into());
+            }
 
             // Handle events
             select! {
@@ -131,10 +167,10 @@ impl Tui {
 
                         match event {
                             Event::Key(key_event) => {
-                                match self.app.handle_key_event(key_event).await? {
+                                match self.app.handle_key_event(key_event, &mut data_manager).await? {
                                     EventResponse::Exit => {
                                         info!("Exit requested");
-                                        break;
+                                        break Ok(());
                                     }
                                     EventResponse::Handled => {},
                                     EventResponse::NotHandled => {
@@ -147,7 +183,7 @@ impl Tui {
                                 }
                             }
                             Event::Mouse(mouse_event) if self.config.enable_mouse => {
-                                if let Err(e) = self.app.handle_mouse_event(mouse_event).await {
+                                if let Err(e) = self.app.handle_mouse_event(mouse_event, &mut data_manager).await {
                                     error!("Mouse event error: {}", e);
                                 }
                             }
@@ -166,18 +202,31 @@ impl Tui {
                     if let Err(e) = self.app.update().await {
                         error!("App update error: {}", e);
                     }
+
+                    // Pull updates from cores (the first time we try to get more cached data)
+                    data_manager.process_core_updates()?;
+
+                    // Push pending requests to cores
+                    data_manager.update_pending_requests().await?;
+
+                    // Pull updates from cores
+                    data_manager.process_core_updates()?;
                 }
             }
 
             // Check if app wants to exit
             if self.app.should_exit() {
                 info!("App requested exit");
-                break;
+                break Ok(());
             }
-        }
+        };
+
+        // Abort background tasks
+        exec_handle.abort();
+        resolver_handle.abort();
 
         info!("TUI event loop ended");
-        Ok(())
+        result
     }
 }
 

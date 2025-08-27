@@ -26,7 +26,7 @@ pub mod spinner;
 pub mod status;
 pub mod syntax;
 
-pub use borders::{BorderPresets, EnhancedBorder, EnhancedBorderStyle};
+pub use borders::{BorderPresets, EnhancedBorder};
 pub use colors::{ColorScheme, Theme};
 pub use icons::Icons;
 pub use spinner::{Spinner, SpinnerAnimation, SpinnerStyles};
@@ -34,4 +34,3 @@ pub use status::{
     BreakpointStatus, ConnectionStatus, ExecutionStatus, FileStatus, PanelStatus, RpcStatus,
     StatusBar,
 };
-pub use syntax::{SyntaxHighlighter, SyntaxToken, SyntaxType, TokenType};

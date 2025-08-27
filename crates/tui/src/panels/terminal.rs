@@ -19,25 +19,20 @@
 //! This panel provides a command-line interface for debugging commands.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::execution::ExecutionManager;
-use crate::managers::resolve::Resolver;
-use crate::managers::theme::ThemeManager;
-use crate::managers::{ExecutionManagerCore, ResolverCore, ThemeManagerCore};
+use crate::managers::DataManager;
 use crate::ui::borders::BorderPresets;
-use crate::ui::colors::ColorScheme;
 use crate::ui::icons::Icons;
 use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
 use std::collections::VecDeque;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Instant;
 use tracing::debug;
 
@@ -110,19 +105,11 @@ pub struct TerminalPanel {
     vim_number_prefix: String,
     /// VIM mode cursor absolute line number in terminal history (1-based, like code panel)
     vim_cursor_line: usize,
-
-    // ========== Managers ==========
-    /// Shared execution state manager
-    exec_mgr: ExecutionManager,
-    /// Shared label/abi resolver
-    resolver: Resolver,
-    /// Shared theme manager for styling
-    theme_mgr: ThemeManager,
 }
 
 impl TerminalPanel {
     /// Create a new terminal panel
-    pub fn new(exec_mgr: ExecutionManager, resolver: Resolver, theme_mgr: ThemeManager) -> Self {
+    pub fn new() -> Self {
         let mut panel = Self {
             lines: Vec::new(),
             mode: TerminalMode::Insert,
@@ -138,9 +125,6 @@ impl TerminalPanel {
             last_ctrl_c: None,
             vim_number_prefix: String::new(),
             vim_cursor_line: 1, // Start at first line (1-based like code panel)
-            exec_mgr,
-            resolver,
-            theme_mgr,
         };
 
         // Add welcome message with fancy styling
@@ -181,7 +165,7 @@ impl TerminalPanel {
     }
 
     /// Execute a command
-    fn execute_command(&mut self, command: &str) -> Result<EventResponse> {
+    fn execute_command(&mut self, command: &str, dm: &mut DataManager) -> Result<EventResponse> {
         debug!("Executing command: {}", command);
 
         // Add command to history
@@ -218,10 +202,10 @@ impl TerminalPanel {
                 self.show_history();
             }
             "theme" => {
-                self.show_themes();
+                self.show_themes(dm);
             }
             cmd if cmd.starts_with("theme ") => {
-                self.handle_theme_command(&cmd[6..]);
+                self.handle_theme_command(&cmd[6..], dm);
             }
             cmd if cmd.starts_with('$') => {
                 // Solidity expression evaluation
@@ -230,7 +214,7 @@ impl TerminalPanel {
             }
             cmd => {
                 // Debug commands
-                if let Err(e) = self.handle_debug_command(cmd) {
+                if let Err(e) = self.handle_debug_command(cmd, dm) {
                     let error_msg = format!("Error: {}", e);
                     self.add_output(&error_msg);
                 }
@@ -241,7 +225,7 @@ impl TerminalPanel {
     }
 
     /// Handle debug commands
-    fn handle_debug_command(&mut self, command: &str) -> Result<()> {
+    fn handle_debug_command(&mut self, command: &str, dm: &mut DataManager) -> Result<()> {
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
             return Ok(());
@@ -254,7 +238,7 @@ impl TerminalPanel {
                 let total = 10usize;
                 if current < total.saturating_sub(1) {
                     // TODO
-                    // self.exec_mgr.update_state(current + 1, total, Some(current + 10), None);
+                    // dm.execution.update_state(current + 1, total, Some(current + 10), None);
                     self.add_output(&format!("✅ Stepped to snapshot {}/{}", current + 1, total));
                 } else {
                     self.add_output("⚠️ Already at last snapshot");
@@ -266,7 +250,7 @@ impl TerminalPanel {
                 let total = 10usize;
                 if current > 0 {
                     // TODO
-                    // self.exec_mgr.update_state(current - 1, total, Some(current + 8), None);
+                    // dm.execution.update_state(current - 1, total, Some(current + 8), None);
                     self.add_output(&format!("✅ Stepped to snapshot {}/{}", current - 1, total));
                 } else {
                     self.add_output("⚠️ Already at first snapshot");
@@ -307,7 +291,7 @@ impl TerminalPanel {
                 // Simulate jumping to next significant call (larger step)
                 let new_pos = (current + 10).min(total.saturating_sub(1));
                 // TODO
-                // self.exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                // dm.execution.update_state(new_pos, total, Some(new_pos + 9), None);
                 self.add_output(&format!(
                     "✅ Stepped to next call at snapshot {}/{}",
                     new_pos, total
@@ -320,7 +304,7 @@ impl TerminalPanel {
                 // Simulate jumping back to previous significant call
                 let new_pos = current.saturating_sub(10);
                 // TODO
-                // self.exec_mgr.update_state(new_pos, total, Some(new_pos + 9), None);
+                // dm.execution.update_state(new_pos, total, Some(new_pos + 9), None);
                 self.add_output(&format!(
                     "✅ Stepped back to previous call at snapshot {}/{}",
                     new_pos, total
@@ -330,10 +314,10 @@ impl TerminalPanel {
                 if parts.len() > 1 {
                     if let Ok(index) = parts[1].parse::<usize>() {
                         self.add_output(&format!("Jumping to snapshot {}...", index));
-                        let total = self.exec_mgr.get_snapshot_count();
+                        let total = dm.execution.get_snapshot_count();
                         if index < total {
                             // TODO
-                            // self.exec_mgr.update_state(index, total, Some(index + 9), None);
+                            // dm.execution.update_state(index, total, Some(index + 9), None);
                             self.add_output(&format!("✅ Jumped to snapshot {}/{}", index, total));
                         } else {
                             self.add_output(&format!(
@@ -448,9 +432,9 @@ impl TerminalPanel {
     }
 
     /// Show available themes
-    fn show_themes(&mut self) {
-        let themes = self.theme_mgr.read().unwrap().list_themes();
-        let active_theme = self.theme_mgr.read().unwrap().get_active_theme_name();
+    fn show_themes(&mut self, dm: &mut DataManager) {
+        let themes = dm.theme.list_themes();
+        let active_theme = dm.theme.get_active_theme_name();
 
         self.add_output("Available themes:");
         for (name, _display_name, description) in themes {
@@ -464,16 +448,16 @@ impl TerminalPanel {
     }
 
     /// Handle theme switching command
-    fn handle_theme_command(&mut self, theme_name: &str) {
+    fn handle_theme_command(&mut self, theme_name: &str, dm: &mut DataManager) {
         let theme_name = theme_name.to_lowercase();
         let theme_name = theme_name.trim();
 
         if theme_name.is_empty() {
-            self.show_themes();
+            self.show_themes(dm);
             return;
         }
 
-        let theme = self.theme_mgr.write().unwrap().switch_theme(theme_name);
+        let theme = dm.theme.switch_theme(theme_name);
         match theme {
             Ok(_) => {
                 self.add_system(&format!(
@@ -485,7 +469,7 @@ impl TerminalPanel {
             Err(e) => {
                 self.add_error(&format!("Failed to switch theme: {}", e));
                 self.add_output("Available themes:");
-                let themes = self.theme_mgr.read().unwrap().list_themes();
+                let themes = dm.theme.list_themes();
                 for (_name, display_name, description) in themes {
                     self.add_output(&format!("  {} - {}", display_name, description));
                 }
@@ -551,7 +535,7 @@ impl TerminalPanel {
     }
 
     /// Render enhanced status line with comprehensive status information    
-    fn render_status_line(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn render_status_line(&self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Build comprehensive status using StatusBar
         let connection_status = if self.connected {
             ConnectionStatus::Connected
@@ -588,26 +572,30 @@ impl TerminalPanel {
 
         let status_paragraph = Paragraph::new(Line::from(vec![Span::styled(
             status_text,
-            Style::default().fg(self.theme_mgr.color_scheme.info_color),
+            Style::default().fg(dm.theme.info_color),
         )]))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
-                .border_style(Style::default().fg(self.theme_mgr.color_scheme.unfocused_border)),
+                .border_style(Style::default().fg(dm.theme.unfocused_border)),
         );
 
         frame.render_widget(status_paragraph, area);
     }
 
     /// Handle keys in INSERT mode (normal typing)
-    fn handle_insert_mode_key(&mut self, event: KeyEvent) -> Result<EventResponse> {
+    fn handle_insert_mode_key(
+        &mut self,
+        event: KeyEvent,
+        dm: &mut DataManager,
+    ) -> Result<EventResponse> {
         match event.code {
             KeyCode::Enter => {
                 let command = self.input_buffer.clone();
                 self.input_buffer.clear();
                 self.cursor_position = 0;
                 self.history_position = None;
-                let response = self.execute_command(&command)?;
+                let response = self.execute_command(&command, dm)?;
                 Ok(response)
             }
             KeyCode::Backspace => {
@@ -662,7 +650,11 @@ impl TerminalPanel {
     }
 
     /// Handle keys in VIM mode (navigation)
-    fn handle_vim_mode_key(&mut self, event: KeyEvent) -> Result<EventResponse> {
+    fn handle_vim_mode_key(
+        &mut self,
+        event: KeyEvent,
+        _dm: &mut DataManager,
+    ) -> Result<EventResponse> {
         match event.code {
             // Return to INSERT mode
             KeyCode::Char('i') | KeyCode::Enter => {
@@ -788,7 +780,7 @@ impl TerminalPanel {
     }
 
     /// Render the unified bash-like terminal view
-    fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, _border_color: Color) {
+    fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Start with all terminal history
         let mut all_content = self.lines.clone();
 
@@ -831,14 +823,10 @@ impl TerminalPanel {
             .enumerate()
             .map(|(display_row, terminal_line)| {
                 let base_style = match terminal_line.line_type {
-                    LineType::Command => {
-                        Style::default().fg(self.theme_mgr.color_scheme.info_color)
-                    }
+                    LineType::Command => Style::default().fg(dm.theme.info_color),
                     LineType::Output => Style::default(),
-                    LineType::Error => Style::default().fg(self.theme_mgr.color_scheme.error_color),
-                    LineType::System => {
-                        Style::default().fg(self.theme_mgr.color_scheme.success_color)
-                    }
+                    LineType::Error => Style::default().fg(dm.theme.error_color),
+                    LineType::System => Style::default().fg(dm.theme.success_color),
                 };
 
                 // Create the line content with base style, handling block cursor highlighting
@@ -871,18 +859,14 @@ impl TerminalPanel {
                             // This is where the cursor should be - show as block
                             spans.push(Span::styled(
                                 ch.to_string(),
-                                Style::default()
-                                    .bg(self.theme_mgr.color_scheme.cursor_color)
-                                    .fg(self.theme_mgr.color_scheme.panel_bg), // Invert colors for block cursor
+                                Style::default().bg(dm.theme.cursor_color).fg(dm.theme.panel_bg), // Invert colors for block cursor
                             ));
                         } else if i == chars.len() - 1 && cursor_pos_in_line >= chars.len() {
                             // Cursor at end of line - add the character normally then add block
                             spans.push(Span::styled(ch.to_string(), base_style));
                             spans.push(Span::styled(
                                 " ", // Block cursor on empty space at end
-                                Style::default()
-                                    .bg(self.theme_mgr.color_scheme.cursor_color)
-                                    .fg(self.theme_mgr.color_scheme.panel_bg),
+                                Style::default().bg(dm.theme.cursor_color).fg(dm.theme.panel_bg),
                             ));
                         } else {
                             // Normal character
@@ -918,11 +902,8 @@ impl TerminalPanel {
                     && Some(display_row) == cursor_display_row
                 {
                     // Apply highlighting to entire ListItem (full width like code panel)
-                    list_item.style(
-                        Style::default()
-                            .bg(self.theme_mgr.color_scheme.highlight_bg)
-                            .fg(self.theme_mgr.color_scheme.highlight_fg),
-                    )
+                    list_item
+                        .style(Style::default().bg(dm.theme.highlight_bg).fg(dm.theme.highlight_fg))
                 } else {
                     list_item
                 }
@@ -951,8 +932,8 @@ impl TerminalPanel {
         let terminal_block = BorderPresets::terminal(
             self.focused,
             terminal_title,
-            self.theme_mgr.color_scheme.focused_border,
-            self.theme_mgr.color_scheme.unfocused_border,
+            dm.theme.focused_border,
+            dm.theme.unfocused_border,
         );
 
         // Use the full area since status/help are handled separately
@@ -976,8 +957,8 @@ impl TerminalPanel {
                 .message(format!("Mode: {:?}", self.mode));
 
             let status_text = status_bar.build();
-            let status_paragraph = Paragraph::new(status_text)
-                .style(Style::default().fg(self.theme_mgr.color_scheme.accent_color));
+            let status_paragraph =
+                Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             // Help text
@@ -993,8 +974,8 @@ impl TerminalPanel {
                 TerminalMode::Vim => "VIM mode: j/k/↑/↓: Navigate • gg/G: Top/Bottom • {/}: Commands • i/Enter: INSERT"
             };
 
-            let help_paragraph = Paragraph::new(help_text)
-                .style(Style::default().fg(self.theme_mgr.color_scheme.help_text_color));
+            let help_paragraph =
+                Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -1005,7 +986,7 @@ impl PanelTr for TerminalPanel {
         PanelType::Terminal
     }
 
-    fn title(&self) -> String {
+    fn title(&self, _dm: &mut DataManager) -> String {
         let status = if let Some((current, total)) = self.snapshot_info {
             format!(" [{}/{}]", current, total)
         } else {
@@ -1020,13 +1001,7 @@ impl PanelTr for TerminalPanel {
         format!("{} Debug Terminal{}{}", Icons::PROCESSING, status, mode_info)
     }
 
-    fn render(&mut self, frame: &mut Frame<'_>, area: Rect) {
-        let border_color = if self.focused {
-            self.theme_mgr.color_scheme.focused_border
-        } else {
-            self.theme_mgr.color_scheme.unfocused_border
-        };
-
+    fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Add status line if there's enough space
         let (main_area, status_area) = if area.height > 8 {
             let chunks = Layout::default()
@@ -1043,14 +1018,14 @@ impl PanelTr for TerminalPanel {
 
         // Render status line if available
         if let Some(status_rect) = status_area {
-            self.render_status_line(frame, status_rect);
+            self.render_status_line(frame, status_rect, dm);
         }
 
         // Unified terminal rendering (bash-style)
-        self.render_unified_terminal(frame, main_area, border_color);
+        self.render_unified_terminal(frame, main_area, dm);
     }
 
-    fn handle_key_event(&mut self, event: KeyEvent) -> Result<EventResponse> {
+    fn handle_key_event(&mut self, event: KeyEvent, dm: &mut DataManager) -> Result<EventResponse> {
         if !self.focused || event.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
         }
@@ -1108,8 +1083,8 @@ impl PanelTr for TerminalPanel {
 
         // Mode-specific key handlers
         match self.mode {
-            TerminalMode::Insert => self.handle_insert_mode_key(event),
-            TerminalMode::Vim => self.handle_vim_mode_key(event),
+            TerminalMode::Insert => self.handle_insert_mode_key(event, dm),
+            TerminalMode::Vim => self.handle_vim_mode_key(event, dm),
         }
     }
 
@@ -1125,12 +1100,5 @@ impl PanelTr for TerminalPanel {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
-    }
-
-    async fn fetch_data(&mut self) -> Result<()> {
-        self.exec_mgr.fetch_data().await?;
-        self.resolver.fetch_data().await?;
-        self.theme_mgr.fetch_data().await?;
-        Ok(())
     }
 }
