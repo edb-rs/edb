@@ -19,7 +19,7 @@
 //! This panel can switch between different display modes based on context.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::DataManager;
+use crate::data::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};

@@ -14,43 +14,61 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Unified data manager for TUI
+//! Centralized state management system for TUI
 //!
-//! The `DataManager` is the central hub for all state management in the TUI.
-//! It contains all managers and coordinates data flow between them.
+//! This module implements a unified manager architecture with the following components:
 //!
-//! # Usage
+//! - `DataManager`: Central container holding all managers, passed to all app functions
+//! - `ExecutionManager`: Manages trace and snapshot data with cached state
+//! - `Resolver`: Handles ABI resolution and address labeling with cached lookups
+//! - `Theme`: Direct theme configuration without async wrapping
 //!
-//! ```ignore
-//! let mut data_manager = DataManager::new(rpc_client).await?;
+//! # Architecture
 //!
-//! // In render functions - direct read access
-//! let trace = data_manager.execution.get_trace();
-//! let theme = &data_manager.theme;
+//! The manager system follows a two-layer design:
 //!
-//! // In update loop - coordinate data flow
-//! data_manager.update_pending_requests().await?;  // Push to cores
-//! data_manager.process_core_updates()?;           // Pull from cores
-//! ```
+//! 1. **Manager Layer** (e.g., ExecutionManager, Resolver)
+//!    - Holds cached state for immediate read access
+//!    - Tracks pending requests when data is not cached
+//!    - User-controllable state (e.g., current_snapshot) lives here
 //!
-//! # Design Rationale
+//! 2. **Core Layer** (e.g., ExecutionManagerCore, ResolverCore)
+//!    - Wrapped in Arc<tokio::sync::RwLock>
+//!    - Handles RPC communication and data fetching
+//!    - Processes pending requests from managers
+//!    - Run by background tasks spawned in TUI::run()
 //!
-//! Having a single DataManager instance passed as a mutable reference ensures:
-//! - No duplicate manager instances across panels
-//! - Consistent state across the entire application
-//! - Clear data flow and update patterns
-//! - Easy access to all managers from any component
+//! # Data Flow
+//!
+//! 1. Panels read from managers during render (non-blocking)
+//! 2. Cache misses create pending requests
+//! 3. App::update() pushes pending requests to cores
+//! 4. Background tasks process core pending requests
+//! 5. App::update() pulls processed data back to managers
+//!
+//! # Benefits
+//!
+//! - **Non-blocking UI**: Rendering never waits on RPC calls
+//! - **Centralized state**: Single DataManager instance for all panels
+//! - **Efficient caching**: Data fetched once, used everywhere
+//! - **Clean separation**: UI logic separate from data fetching
 
 use eyre::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::{
-    execution::{ExecutionManager, ExecutionManagerCore},
-    resolve::{Resolver, ResolverCore},
-    Theme,
+pub mod manager;
+pub mod theme;
+pub use theme::Theme;
+
+use crate::{
+    data::manager::{
+        core::{ManagerCore, ManagerTr},
+        execution::{ExecutionManager, ExecutionRequest, ExecutionState},
+        resolve::{Resolver, ResolverRequest, ResolverState},
+    },
+    RpcClient,
 };
-use crate::rpc::RpcClient;
 
 /// Central data manager containing all state managers
 ///
@@ -69,8 +87,8 @@ impl DataManager {
     /// Create a new DataManager with all managers initialized
     pub async fn new(rpc_client: Arc<RpcClient>) -> Result<Self> {
         // Initialize cores with tokio::sync::RwLock
-        let exec_core = Arc::new(RwLock::new(ExecutionManagerCore::new(rpc_client.clone()).await?));
-        let resolver_core = Arc::new(RwLock::new(ResolverCore::new(rpc_client.clone()).await?));
+        let exec_core = Arc::new(RwLock::new(ManagerCore::new(rpc_client.clone()).await?));
+        let resolver_core = Arc::new(RwLock::new(ManagerCore::new(rpc_client.clone()).await?));
 
         Ok(Self {
             execution: ExecutionManager::new(exec_core).await,
@@ -98,12 +116,12 @@ impl DataManager {
     }
 
     /// Get clone of execution core for background processing
-    pub fn get_execution_core(&self) -> Arc<RwLock<ExecutionManagerCore>> {
+    pub fn get_execution_core(&self) -> Arc<RwLock<ManagerCore<ExecutionState, ExecutionRequest>>> {
         self.execution.get_core()
     }
 
     /// Get clone of resolver core for background processing
-    pub fn get_resolver_core(&self) -> Arc<RwLock<ResolverCore>> {
+    pub fn get_resolver_core(&self) -> Arc<RwLock<ManagerCore<ResolverState, ResolverRequest>>> {
         self.resolver.get_core()
     }
 }

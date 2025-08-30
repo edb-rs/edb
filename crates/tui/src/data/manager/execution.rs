@@ -26,19 +26,18 @@
 
 use alloy_primitives::Address;
 use eyre::Result;
-use std::{collections::HashSet, mem, ops::Deref, sync::Arc};
+use std::{collections::HashSet, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::debug;
 
 use edb_common::types::{Code, SnapshotInfo, Trace};
 
-use crate::{managers::FetchCache, RpcClient};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum PendingRequest {
-    SnapshotInfo(usize),
-    Code(usize),
-}
+use crate::{
+    data::manager::core::{
+        FetchCache, ManagerCore, ManagerInner, ManagerRequestTr, ManagerStateTr, ManagerTr,
+    },
+    RpcClient,
+};
 
 #[derive(Debug, Clone)]
 pub struct ExecutionState {
@@ -48,7 +47,7 @@ pub struct ExecutionState {
     trace_data: Trace,
 }
 
-impl ExecutionState {
+impl ManagerStateTr for ExecutionState {
     async fn with_rpc_client(rpc_client: Arc<RpcClient>) -> Result<Self> {
         let snapshot_count = rpc_client.get_snapshot_count().await?;
         let trace_data = rpc_client.get_trace().await?;
@@ -59,9 +58,7 @@ impl ExecutionState {
             trace_data,
         })
     }
-}
 
-impl ExecutionState {
     fn update(&mut self, other: &ExecutionState) {
         if self.snapshot_info.need_update(&other.snapshot_info) {
             self.snapshot_info.update(&other.snapshot_info);
@@ -70,6 +67,58 @@ impl ExecutionState {
         if self.code.need_update(&other.code) {
             self.code.update(&other.code);
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ExecutionRequest {
+    SnapshotInfo(usize),
+    Code(usize),
+}
+
+impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
+    async fn fetch_data(
+        self,
+        rpc_client: Arc<RpcClient>,
+        state: &mut ExecutionState,
+    ) -> Result<()> {
+        match self {
+            ExecutionRequest::SnapshotInfo(id) => {
+                if state.snapshot_info.contains_key(&id) {
+                    return Ok(());
+                }
+
+                let info = rpc_client.get_snapshot_info(id).await?;
+                state.snapshot_info.insert(id, Some(info));
+            }
+            ExecutionRequest::Code(id) => {
+                if state.snapshot_info.get(&id).is_none() {
+                    let info = rpc_client.get_snapshot_info(id).await?;
+                    state.snapshot_info.insert(id, Some(info));
+                }
+
+                let entry_id = state
+                    .snapshot_info
+                    .get(&id)
+                    .and_then(|info| info.as_ref().map(|i| i.frame_id()))
+                    .ok_or_else(|| eyre::eyre!("Snapshot info for id {} not found", id))?
+                    .trace_entry_id();
+                let bytecode_address = state
+                    .trace_data
+                    .get(entry_id)
+                    .map(|e| e.code_address)
+                    .ok_or_else(|| eyre::eyre!("Trace entry with id {} not found", entry_id))?;
+
+                if state.code.contains_key(&bytecode_address) {
+                    return Ok(());
+                }
+
+                let code = rpc_client.get_code(id).await?;
+                state.code.insert(bytecode_address, Some(code));
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -112,14 +161,28 @@ pub struct ExecutionManager {
     state: ExecutionState,
 
     /// Pending request
-    pending_requests: HashSet<PendingRequest>,
-    core: Arc<RwLock<ExecutionManagerCore>>,
+    pending_requests: HashSet<ExecutionRequest>,
+    core: Arc<RwLock<ManagerCore<ExecutionState, ExecutionRequest>>>,
 }
 
 // Data management
+impl ManagerTr<ExecutionState, ExecutionRequest> for ExecutionManager {
+    fn get_inner<'a>(&'a mut self) -> ManagerInner<'a, ExecutionState, ExecutionRequest> {
+        ManagerInner {
+            core: &mut self.core,
+            state: &mut self.state,
+            pending_requests: &mut self.pending_requests,
+        }
+    }
+
+    fn get_core(&self) -> Arc<RwLock<ManagerCore<ExecutionState, ExecutionRequest>>> {
+        self.core.clone()
+    }
+}
+
 impl ExecutionManager {
     /// Create new execution manager with shared core
-    pub async fn new(core: Arc<RwLock<ExecutionManagerCore>>) -> Self {
+    pub async fn new(core: Arc<RwLock<ManagerCore<ExecutionState, ExecutionRequest>>>) -> Self {
         let mut mgr = Self {
             state: core.clone().read().await.state.clone(),
             pending_requests: HashSet::new(),
@@ -133,37 +196,12 @@ impl ExecutionManager {
         mgr
     }
 
-    /// Push pending requests from manager to core
-    pub async fn push_pending_to_core(&mut self) -> Result<()> {
-        if !self.pending_requests.is_empty() {
-            if let Ok(mut core) = self.core.try_write() {
-                for request in self.pending_requests.drain() {
-                    core.add_pending_request(request);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Pull processed data from core to manager
-    pub fn pull_from_core(&mut self) -> Result<()> {
-        if let Ok(core) = self.core.try_read() {
-            self.state.update(&core.state);
-        }
-        Ok(())
-    }
-
-    /// Get clone of core for background processing
-    pub fn get_core(&self) -> Arc<RwLock<ExecutionManagerCore>> {
-        self.core.clone()
-    }
-
     pub fn get_snapshot_info(&mut self, id: usize) -> Option<&SnapshotInfo> {
         let _ = self.pull_from_core();
 
         if !self.state.snapshot_info.contains_key(&id) {
             debug!("Snapshot info not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::SnapshotInfo(id));
+            self.new_fetching_request(ExecutionRequest::SnapshotInfo(id));
             return None;
         }
 
@@ -196,19 +234,19 @@ impl ExecutionManager {
             self.get_snapshot_info(id).map(|info| info.frame_id().trace_entry_id())
         else {
             debug!("Code not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::Code(id));
+            self.new_fetching_request(ExecutionRequest::Code(id));
             return None;
         };
 
         let Some(bytecode_address) = self.get_trace().get(entry_id).map(|e| e.code_address) else {
             debug!("Code not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::Code(id));
+            self.new_fetching_request(ExecutionRequest::Code(id));
             return None;
         };
 
         if !self.state.code.contains_key(&bytecode_address) {
             debug!("Code not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::Code(id));
+            self.new_fetching_request(ExecutionRequest::Code(id));
             return None;
         }
 
@@ -218,17 +256,6 @@ impl ExecutionManager {
         }
     }
 
-    fn new_fetching_request(&mut self, request: PendingRequest) {
-        if let Ok(mut core) = self.core.try_write() {
-            core.add_pending_request(request);
-        } else {
-            self.pending_requests.insert(request);
-        }
-    }
-}
-
-// Execution-related functions
-impl ExecutionManager {
     pub fn display_snapshot(&mut self, id: usize) -> Result<()> {
         if id >= self.state.snapshot_count {
             Err(eyre::eyre!(
@@ -290,107 +317,5 @@ impl Deref for ExecutionManager {
 
     fn deref(&self) -> &Self::Target {
         &self.state
-    }
-}
-
-/// Centralized execution state manager handling trace data and debugging operations
-///
-/// # Design Philosophy
-///
-/// `ExecutionManagerCore` is the single source of truth for execution state:
-/// - Handles all RPC communication for trace data
-/// - Manages complex trace processing and analysis
-/// - Provides thread-safe access to execution state
-/// - Caches expensive operations for efficiency
-///
-/// All complex debugging operations and RPC calls happen here,
-/// keeping ExecutionManager instances lightweight.
-///
-/// # Architecture Benefits
-///
-/// - **Non-blocking UI**: Rendering never waits on trace fetching
-/// - **Centralized Logic**: All debugging logic in one place
-/// - **Shared State**: Multiple panels share the same execution state
-/// - **Efficient Caching**: Trace data fetched once, used everywhere
-#[derive(Debug)]
-pub struct ExecutionManagerCore {
-    /// RPC client for server communication
-    rpc_client: Arc<RpcClient>,
-
-    /// State
-    pub(super) state: ExecutionState,
-
-    /// Pending requests to be processed
-    pending_requests: HashSet<PendingRequest>,
-}
-
-impl ExecutionManagerCore {
-    /// Create a new execution manager core with RPC client
-    pub async fn new(rpc_client: Arc<RpcClient>) -> Result<Self> {
-        Ok(Self {
-            state: ExecutionState::with_rpc_client(rpc_client.clone()).await?,
-            rpc_client,
-            pending_requests: HashSet::new(),
-        })
-    }
-
-    /// Add a pending request to be processed
-    fn add_pending_request(&mut self, request: PendingRequest) {
-        self.pending_requests.insert(request);
-    }
-
-    /// Process all pending requests
-    pub async fn process_pending_requests(&mut self) -> Result<()> {
-        let requests = mem::take(&mut self.pending_requests);
-        for request in requests {
-            if let Err(e) = self.fetch_data(request).await {
-                debug!("Error processing request: {}", e);
-                // Continue processing other requests even if one fails
-            }
-        }
-        Ok(())
-    }
-
-    /// Fetch data per request
-    async fn fetch_data(&mut self, request: PendingRequest) -> Result<()> {
-        match request {
-            PendingRequest::SnapshotInfo(id) => {
-                if self.state.snapshot_info.contains_key(&id) {
-                    return Ok(());
-                }
-
-                let info = self.rpc_client.get_snapshot_info(id).await?;
-                self.state.snapshot_info.insert(id, Some(info));
-            }
-            PendingRequest::Code(id) => {
-                if self.state.snapshot_info.get(&id).is_none() {
-                    let info = self.rpc_client.get_snapshot_info(id).await?;
-                    self.state.snapshot_info.insert(id, Some(info));
-                }
-
-                let entry_id = self
-                    .state
-                    .snapshot_info
-                    .get(&id)
-                    .and_then(|info| info.as_ref().map(|i| i.frame_id()))
-                    .ok_or_else(|| eyre::eyre!("Snapshot info for id {} not found", id))?
-                    .trace_entry_id();
-                let bytecode_address = self
-                    .state
-                    .trace_data
-                    .get(entry_id)
-                    .map(|e| e.code_address)
-                    .ok_or_else(|| eyre::eyre!("Trace entry with id {} not found", entry_id))?;
-
-                if self.state.code.contains_key(&bytecode_address) {
-                    return Ok(());
-                }
-
-                let code = self.rpc_client.get_code(id).await?;
-                self.state.code.insert(bytecode_address, Some(code));
-            }
-        }
-
-        Ok(())
     }
 }

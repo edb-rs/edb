@@ -19,7 +19,7 @@
 //! This panel shows source code with syntax highlighting and current line indication.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::DataManager;
+use crate::data::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
@@ -96,6 +96,8 @@ pub struct CodePanel {
     file_selector_height_percent: u16,
     /// Content height for the current panel
     context_height: usize,
+    /// Content width for the current panel
+    content_width: usize,
     /// Syntax highlighter for code
     syntax_highlighter: SyntaxHighlighter,
 
@@ -153,6 +155,7 @@ impl CodePanel {
             file_selector_context_height: 0,
             file_selector_height_percent: 20,
             context_height: 0,
+            content_width: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
@@ -359,12 +362,13 @@ impl CodePanel {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{List, ListItem, Paragraph};
 
-        // Calculate viewport height
+        // Calculate viewport height and width
         self.context_height = if self.focused && area.height > 10 {
             area.height.saturating_sub(4) // Account for borders and status lines
         } else {
             area.height.saturating_sub(2) // Just borders
         } as usize;
+        self.content_width = area.width.saturating_sub(2) as usize; // Account for borders
 
         let lines = self.get_display_lines();
 

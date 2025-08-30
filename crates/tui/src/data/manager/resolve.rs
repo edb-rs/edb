@@ -24,24 +24,20 @@
 //! This design ensures rendering threads never block on network I/O while
 //! maintaining consistency across the application.
 
-use crate::{managers::FetchCache, rpc::RpcClient};
+use crate::{
+    data::manager::core::{
+        FetchCache, ManagerCore, ManagerInner, ManagerRequestTr, ManagerStateTr, ManagerTr,
+    },
+    rpc::RpcClient,
+};
 use alloy_dyn_abi::{DynSolValue, EventExt, FunctionExt, JsonAbiExt};
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
 use edb_common::SolValueFormatter;
 use eyre::Result;
-use std::{collections::HashSet, mem, ops::Deref, sync::Arc};
+use std::{collections::HashSet, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::debug;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum PendingRequest {
-    /// Request for contract ABI
-    ContractAbi(Address, bool),
-
-    /// Request for contract constructor arguments
-    ConstructorArgs(Address),
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct ResolverState {
@@ -49,8 +45,11 @@ pub struct ResolverState {
     constructor_args: FetchCache<Address, Bytes>,
 }
 
-impl ResolverState {
-    /// Update the state with another state's data
+impl ManagerStateTr for ResolverState {
+    async fn with_rpc_client(_rpc_client: Arc<RpcClient>) -> Result<Self> {
+        Ok(Self::default())
+    }
+
     fn update(&mut self, other: &ResolverState) {
         if self.contract_abi.need_update(&other.contract_abi) {
             self.contract_abi.update(&other.contract_abi);
@@ -59,6 +58,37 @@ impl ResolverState {
         if self.constructor_args.need_update(&other.constructor_args) {
             self.constructor_args.update(&other.constructor_args);
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ResolverRequest {
+    /// Request for contract ABI
+    ContractAbi(Address, bool),
+
+    /// Request for contract constructor arguments
+    ConstructorArgs(Address),
+}
+
+impl ManagerRequestTr<ResolverState> for ResolverRequest {
+    async fn fetch_data(self, rpc_client: Arc<RpcClient>, state: &mut ResolverState) -> Result<()> {
+        match self {
+            ResolverRequest::ContractAbi(address, recompiled) => {
+                if state.contract_abi.has_cached(&(address, recompiled)) {
+                    return Ok(());
+                }
+                let abi = rpc_client.get_contract_abi(address, recompiled).await?;
+                state.contract_abi.insert((address, recompiled), abi);
+            }
+            ResolverRequest::ConstructorArgs(address) => {
+                if state.constructor_args.has_cached(&address) {
+                    return Ok(());
+                }
+                let args = rpc_client.get_constructor_args(address).await?;
+                state.constructor_args.insert(address, args);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -83,10 +113,10 @@ impl ResolverState {
 #[derive(Debug, Clone)]
 pub struct Resolver {
     /// Pending requests
-    pending_requests: HashSet<PendingRequest>,
+    pending_requests: HashSet<ResolverRequest>,
     state: ResolverState,
 
-    core: Arc<RwLock<ResolverCore>>,
+    core: Arc<RwLock<ManagerCore<ResolverState, ResolverRequest>>>,
 }
 
 impl Deref for Resolver {
@@ -98,47 +128,28 @@ impl Deref for Resolver {
 }
 
 // Data management functions
+impl ManagerTr<ResolverState, ResolverRequest> for Resolver {
+    fn get_core(&self) -> Arc<RwLock<ManagerCore<ResolverState, ResolverRequest>>> {
+        self.core.clone()
+    }
+
+    fn get_inner<'a>(&'a mut self) -> ManagerInner<'a, ResolverState, ResolverRequest> {
+        ManagerInner {
+            core: &mut self.core,
+            state: &mut self.state,
+            pending_requests: &mut self.pending_requests,
+        }
+    }
+}
+
+// Resolving functions
 impl Resolver {
     /// Create a new info manager with a shared core
-    pub async fn new(core: Arc<RwLock<ResolverCore>>) -> Self {
+    pub async fn new(core: Arc<RwLock<ManagerCore<ResolverState, ResolverRequest>>>) -> Self {
         Self {
             pending_requests: HashSet::new(),
             state: core.clone().read().await.state.clone(),
             core,
-        }
-    }
-
-    /// Push pending requests from resolver to core
-    pub async fn push_pending_to_core(&mut self) -> Result<()> {
-        if !self.pending_requests.is_empty() {
-            if let Ok(mut core) = self.core.try_write() {
-                for request in self.pending_requests.drain() {
-                    core.add_pending_request(request);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Pull processed data from core to resolver
-    pub fn pull_from_core(&mut self) -> Result<()> {
-        if let Ok(core) = self.core.try_read() {
-            self.state.update(&core.state);
-        }
-        Ok(())
-    }
-
-    /// Get clone of core for background processing
-    pub fn get_core(&self) -> Arc<RwLock<ResolverCore>> {
-        self.core.clone()
-    }
-
-    /// Add a new fetching request
-    fn new_fetching_request(&mut self, request: PendingRequest) {
-        if let Ok(mut core) = self.core.try_write() {
-            core.add_pending_request(request);
-        } else {
-            self.pending_requests.insert(request);
         }
     }
 
@@ -148,7 +159,7 @@ impl Resolver {
 
         if !self.state.constructor_args.contains_key(&address) {
             debug!("Constructor arguments not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::ConstructorArgs(address));
+            self.new_fetching_request(ResolverRequest::ConstructorArgs(address));
             return None;
         }
 
@@ -164,7 +175,7 @@ impl Resolver {
 
         if !self.state.contract_abi.contains_key(&(address, recompiled)) {
             debug!("Contract ABI not found in cache, fetching...");
-            self.new_fetching_request(PendingRequest::ContractAbi(address, recompiled));
+            self.new_fetching_request(ResolverRequest::ContractAbi(address, recompiled));
             return None;
         }
 
@@ -173,10 +184,7 @@ impl Resolver {
             _ => None,
         }
     }
-}
 
-// Resovling functions
-impl Resolver {
     /// Resolve function return
     pub fn resolve_function_return(
         &mut self,
@@ -382,85 +390,5 @@ impl Resolver {
                 format!("{}.{}", whole, decimal_trimmed)
             }
         }
-    }
-}
-
-/// Centralized info state manager handling RPC communication and data fetching
-///
-/// # Design Philosophy
-///
-/// `InfoManagerCore` is responsible for:
-/// - All RPC communication with the debug server
-/// - Complex data fetching and processing
-/// - Caching fetched data for distribution to InfoManager instances
-/// - Thread-safe state updates via `Arc<RwLock<>>`
-///
-/// All network I/O and complex operations happen here, keeping
-/// InfoManager instances lightweight for rendering.
-///
-/// # Architecture Benefits
-///
-/// - **Non-blocking UI**: Rendering threads never wait on RPC calls
-/// - **Centralized I/O**: All network operations in one place
-/// - **Consistent State**: Single source of truth for fetched data
-/// - **Resource Efficiency**: Shared RPC client and cached data
-#[derive(Debug, Clone)]
-pub struct ResolverCore {
-    /// RPC client for server communication
-    rpc_client: Arc<RpcClient>,
-
-    /// Cached state
-    pub(super) state: ResolverState,
-
-    /// Pending requests to be processed
-    pending_requests: HashSet<PendingRequest>,
-}
-
-impl ResolverCore {
-    /// Create a new info manager core with RPC client
-    pub async fn new(rpc_client: Arc<RpcClient>) -> Result<Self> {
-        Ok(Self { rpc_client, state: ResolverState::default(), pending_requests: HashSet::new() })
-    }
-
-    /// Add a pending request to be processed
-    fn add_pending_request(&mut self, request: PendingRequest) {
-        self.pending_requests.insert(request);
-    }
-
-    /// Process all pending requests
-    pub async fn process_pending_requests(&mut self) -> Result<()> {
-        let requests = mem::take(&mut self.pending_requests);
-        for request in requests {
-            if let Err(e) = self.fetch_data(request).await {
-                debug!("Error processing request: {}", e);
-                // Continue processing other requests even if one fails
-            }
-        }
-        Ok(())
-    }
-
-    /// Fetch latest data from the debug server
-    ///
-    /// This method handles all RPC communication and updates
-    /// internal caches that InfoManager instances can read
-    async fn fetch_data(&mut self, request: PendingRequest) -> Result<()> {
-        match request {
-            PendingRequest::ContractAbi(address, recompiled) => {
-                if self.state.contract_abi.has_cached(&(address, recompiled)) {
-                    return Ok(());
-                }
-                let abi = self.rpc_client.get_contract_abi(address, recompiled).await?;
-                self.state.contract_abi.insert((address, recompiled), abi);
-            }
-            PendingRequest::ConstructorArgs(address) => {
-                if self.state.constructor_args.has_cached(&address) {
-                    return Ok(());
-                }
-                let args = self.rpc_client.get_constructor_args(address).await?;
-                self.state.constructor_args.insert(address, args);
-            }
-        }
-
-        Ok(())
     }
 }

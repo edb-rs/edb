@@ -18,8 +18,8 @@
 //!
 //! This module contains the core application state management and event handling.
 
+use crate::data::DataManager;
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
-use crate::managers::DataManager;
 use crate::panels::{
     CodePanel, DisplayPanel, EventResponse, Panel, PanelTr, PanelType, TerminalPanel, TracePanel,
 };

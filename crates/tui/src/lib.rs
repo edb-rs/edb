@@ -22,8 +22,8 @@
 
 mod app;
 mod config;
+mod data;
 mod layout;
-mod managers;
 mod panels;
 mod rpc;
 mod ui;
@@ -114,8 +114,7 @@ impl Tui {
         info!("Starting TUI event loop");
 
         // Create DataManager
-        let mut data_manager =
-            crate::managers::DataManager::new(self.app.rpc_client.clone()).await?;
+        let mut data_manager = crate::data::DataManager::new(self.app.rpc_client.clone()).await?;
 
         // Get cores for background processing
         let exec_core = data_manager.get_execution_core();

@@ -19,7 +19,7 @@
 //! This panel shows the call trace and allows navigation through trace entries.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::DataManager;
+use crate::data::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::status::StatusBar;
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};

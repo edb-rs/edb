@@ -18,7 +18,7 @@
 //!
 //! This module contains the panel trait and all panel implementations.
 
-use crate::managers::DataManager;
+use crate::data::DataManager;
 use crossterm::event::{KeyEvent, MouseEvent};
 use eyre::Result;
 use ratatui::{layout::Rect, Frame};

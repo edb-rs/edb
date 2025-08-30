@@ -19,7 +19,7 @@
 //! This panel provides a command-line interface for debugging commands.
 
 use super::{EventResponse, PanelTr, PanelType};
-use crate::managers::DataManager;
+use crate::data::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::icons::Icons;
 use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
