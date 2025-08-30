@@ -91,6 +91,12 @@ pub struct TracePanelInner {
     scroll_offset: usize,
     /// Current content height
     context_height: usize,
+    /// Current content width
+    content_width: usize,
+    /// Horizontal scroll offset
+    horizontal_offset: usize,
+    /// Maximum line width for horizontal scrolling
+    max_line_width: usize,
     /// Whether this panel is focused
     focused: bool,
     /// Syntax highlighter for Solidity values
@@ -107,9 +113,68 @@ impl TracePanelInner {
             focused: false,
             scroll_offset: 0,
             context_height: 0,
+            content_width: 0,
+            horizontal_offset: 0,
+            max_line_width: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
             collapsed_entries: HashSet::new(),
         }
+    }
+
+    /// Calculate the maximum line width for horizontal scrolling
+    fn calculate_max_line_width(&mut self, trace: &Trace, dm: &mut DataManager) {
+        let display_lines = self.generate_display_lines(trace);
+
+        self.max_line_width = display_lines
+            .iter()
+            .map(|line_type| {
+                let formatted_line = self.format_display_line(line_type, trace, dm);
+                // Calculate the visual width of the line
+                formatted_line.spans.iter().map(|span| span.content.chars().count()).sum()
+            })
+            .max()
+            .unwrap_or(0);
+    }
+
+    /// Apply horizontal offset to a line for horizontal scrolling
+    fn apply_horizontal_offset<'a>(
+        &self,
+        line: ratatui::text::Line<'a>,
+    ) -> ratatui::text::Line<'a> {
+        use ratatui::text::{Line, Span};
+
+        if self.horizontal_offset == 0 {
+            return line;
+        }
+
+        let mut accumulated_width = 0;
+        let mut new_spans = Vec::new();
+        let mut started_content = false;
+
+        for span in line.spans {
+            let span_width = span.content.chars().count();
+
+            if accumulated_width + span_width <= self.horizontal_offset {
+                accumulated_width += span_width;
+            } else if accumulated_width >= self.horizontal_offset {
+                new_spans.push(span);
+                started_content = true;
+            } else {
+                let skip_chars = self.horizontal_offset - accumulated_width;
+                let visible_content: String = span.content.chars().skip(skip_chars).collect();
+                if !visible_content.is_empty() {
+                    new_spans.push(Span::styled(visible_content, span.style));
+                    started_content = true;
+                }
+                accumulated_width += span_width;
+            }
+        }
+
+        if !started_content {
+            new_spans.push(Span::raw(""));
+        }
+
+        Line::from(new_spans)
     }
 
     /// Move selection up
@@ -772,12 +837,13 @@ impl PanelTr for TracePanel {
     }
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        // Update context height for viewport calculations
+        // Update context height and width for viewport calculations
         self.context_height = if self.focused && area.height > 10 {
             area.height.saturating_sub(4) // Account for borders and status lines
         } else {
             area.height.saturating_sub(2) // Just borders
         } as usize;
+        self.content_width = area.width.saturating_sub(2) as usize; // Account for borders
 
         if self.trace.is_none() {
             self.trace = Some(dm.execution.get_trace().clone());
@@ -798,13 +864,19 @@ impl PanelTr for TracePanel {
         // Generate display lines with expansion/collapse support
         let display_lines = self.generate_display_lines(&trace);
 
+        // Calculate max line width for horizontal scrolling
+        self.inner.calculate_max_line_width(&trace, dm);
+
         let items: Vec<ListItem<'_>> = display_lines
             .iter()
             .enumerate()
             .skip(self.scroll_offset)
             .take(self.context_height)
             .map(|(global_index, line_type)| {
-                let formatted_line = self.inner.format_display_line(line_type, &trace, dm);
+                let mut formatted_line = self.inner.format_display_line(line_type, &trace, dm);
+
+                // Apply horizontal scrolling offset
+                formatted_line = self.inner.apply_horizontal_offset(formatted_line);
 
                 let style = if global_index == self.inner.selected_index && self.inner.focused {
                     Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
@@ -851,8 +923,37 @@ impl PanelTr for TracePanel {
             ));
 
             let status_text = status_bar.build();
+
+            // Add horizontal scroll indicator if content is scrollable
+            let final_status_text = if self.inner.max_line_width > self.inner.content_width {
+                let scrollable_width =
+                    self.inner.max_line_width.saturating_sub(self.inner.content_width);
+                let scroll_percentage = if scrollable_width > 0 {
+                    (self.inner.horizontal_offset as f32 / scrollable_width as f32).min(1.0)
+                } else {
+                    0.0
+                };
+
+                let indicator_width = 15;
+                let thumb_position = (scroll_percentage * (indicator_width - 3) as f32) as usize;
+
+                let mut indicator = String::from(" [");
+                for i in 0..indicator_width {
+                    if i >= thumb_position && i < thumb_position + 3 {
+                        indicator.push('█');
+                    } else {
+                        indicator.push('─');
+                    }
+                }
+                indicator.push(']');
+
+                format!("{}{}", status_text, indicator)
+            } else {
+                status_text
+            };
+
             let status_paragraph =
-                Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
+                Paragraph::new(final_status_text).style(Style::default().fg(dm.theme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             let help_area = Rect {
@@ -861,10 +962,14 @@ impl PanelTr for TracePanel {
                 width: area.width - 2,
                 height: 1,
             };
-            let help_text =
-                "↑/↓: Navigate • Space: Toggle expand/collapse • Enter: Jump to snapshot";
+            let mut help = String::from("↑/↓: Navigate");
+            if self.inner.max_line_width > self.inner.content_width {
+                help.push_str(" • ←/→: Scroll");
+            }
+            help.push_str(" • Space: Toggle expand/collapse • Enter: Jump to snapshot");
+
             let help_paragraph =
-                Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
+                Paragraph::new(help).style(Style::default().fg(dm.theme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -886,6 +991,27 @@ impl PanelTr for TracePanel {
             }
             KeyCode::Down => {
                 self.inner.move_down(trace);
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Left => {
+                // Scroll left
+                if self.inner.horizontal_offset > 0 {
+                    self.inner.horizontal_offset = self.inner.horizontal_offset.saturating_sub(5);
+                    debug!("Scrolled left to offset {}", self.inner.horizontal_offset);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Right => {
+                // Scroll right
+                if self.inner.max_line_width > self.inner.content_width {
+                    let max_scroll =
+                        self.inner.max_line_width.saturating_sub(self.inner.content_width);
+                    if self.inner.horizontal_offset < max_scroll {
+                        self.inner.horizontal_offset =
+                            (self.inner.horizontal_offset + 5).min(max_scroll);
+                        debug!("Scrolled right to offset {}", self.inner.horizontal_offset);
+                    }
+                }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char(' ') => {

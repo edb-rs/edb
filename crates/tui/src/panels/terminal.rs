@@ -93,6 +93,12 @@ pub struct TerminalPanel {
     scroll_offset: usize,
     /// Content height for the current area
     content_height: usize,
+    /// Content width for the current area
+    content_width: usize,
+    /// Horizontal scroll offset (vim mode only)
+    horizontal_offset: usize,
+    /// Maximum line width for horizontal scrolling
+    max_line_width: usize,
     /// Whether this panel is focused
     focused: bool,
     /// Whether we're connected to the RPC server
@@ -119,6 +125,9 @@ impl TerminalPanel {
             history_position: None,
             scroll_offset: 0,
             content_height: 0,
+            content_width: 0,
+            horizontal_offset: 0,
+            max_line_width: 0,
             focused: false,
             connected: true,
             snapshot_info: Some((127, 348)),
@@ -134,6 +143,38 @@ impl TerminalPanel {
         panel.add_output("");
 
         panel
+    }
+
+    /// Calculate the maximum line width for horizontal scrolling
+    fn calculate_max_line_width(&mut self) {
+        self.max_line_width = self
+            .lines
+            .iter()
+            .map(|line| {
+                // Account for line type prefix ("> " for commands, "⚡ " for system)
+                let prefix_len = match line.line_type {
+                    LineType::Command => 2, // "> "
+                    LineType::System => 2,  // "⚡ " counts as 2 width
+                    _ => 0,
+                };
+                line.content.len() + prefix_len
+            })
+            .max()
+            .unwrap_or(0);
+    }
+
+    /// Apply horizontal offset to a string for horizontal scrolling (vim mode only)
+    fn apply_horizontal_offset(&self, text: String) -> String {
+        if self.mode != TerminalMode::Vim || self.horizontal_offset == 0 {
+            return text;
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+        if self.horizontal_offset >= chars.len() {
+            String::new()
+        } else {
+            chars[self.horizontal_offset..].iter().collect()
+        }
     }
 
     /// Add a line to the terminal with specified type
@@ -661,6 +702,7 @@ impl TerminalPanel {
                 // Update cursor position to bottom
                 self.vim_goto_bottom();
                 self.vim_number_prefix.clear();
+                self.horizontal_offset = 0; // Reset horizontal scroll when leaving vim mode
                 self.mode = TerminalMode::Insert;
                 Ok(EventResponse::Handled)
             }
@@ -672,6 +714,24 @@ impl TerminalPanel {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.vim_move_cursor_up(1);
+                Ok(EventResponse::Handled)
+            }
+            // Horizontal scrolling in vim mode
+            KeyCode::Char('h') | KeyCode::Left => {
+                if self.horizontal_offset > 0 {
+                    self.horizontal_offset = self.horizontal_offset.saturating_sub(5);
+                    debug!("VIM mode: scrolled left to offset {}", self.horizontal_offset);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if self.max_line_width > self.content_width {
+                    let max_scroll = self.max_line_width.saturating_sub(self.content_width);
+                    if self.horizontal_offset < max_scroll {
+                        self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
+                        debug!("VIM mode: scrolled right to offset {}", self.horizontal_offset);
+                    }
+                }
                 Ok(EventResponse::Handled)
             }
 
@@ -796,6 +856,12 @@ impl TerminalPanel {
         // Calculate visible area (leave space for status and help text if needed)
         let status_help_height = if self.focused && area.height > 10 { 2 } else { 0 };
         self.content_height = area.height.saturating_sub(2 + status_help_height) as usize; // Account for borders + status/help
+        self.content_width = area.width.saturating_sub(2) as usize; // Account for borders
+
+        // Calculate max line width for vim mode
+        if self.mode == TerminalMode::Vim {
+            self.calculate_max_line_width();
+        }
 
         // In INSERT mode, always stay at bottom to show most recent content
         // In VIM mode, respect user's scroll position
@@ -879,8 +945,20 @@ impl TerminalPanel {
                     Line::from(Span::styled(&terminal_line.content, base_style))
                 };
 
+                // Apply horizontal scrolling in vim mode
+                let scrolled_line = if self.mode == TerminalMode::Vim && self.horizontal_offset > 0
+                {
+                    // Apply offset to the line
+                    let text =
+                        styled_line.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
+                    let scrolled_text = self.apply_horizontal_offset(text);
+                    Line::from(Span::styled(scrolled_text, base_style))
+                } else {
+                    styled_line
+                };
+
                 // Apply full-width highlighting to the ListItem if this is the current VIM cursor line
-                let list_item = ListItem::new(styled_line);
+                let list_item = ListItem::new(scrolled_line);
 
                 // Convert absolute vim_cursor_line to display row (EXACTLY like code panel)
                 let cursor_display_row =
@@ -957,8 +1035,38 @@ impl TerminalPanel {
                 .message(format!("Mode: {:?}", self.mode));
 
             let status_text = status_bar.build();
+
+            // Add horizontal scroll indicator if content is scrollable (vim mode only)
+            let final_status_text = if self.mode == TerminalMode::Vim
+                && self.max_line_width > self.content_width
+            {
+                let scrollable_width = self.max_line_width.saturating_sub(self.content_width);
+                let scroll_percentage = if scrollable_width > 0 {
+                    (self.horizontal_offset as f32 / scrollable_width as f32).min(1.0)
+                } else {
+                    0.0
+                };
+
+                let indicator_width = 15;
+                let thumb_position = (scroll_percentage * (indicator_width - 3) as f32) as usize;
+
+                let mut indicator = String::from(" [");
+                for i in 0..indicator_width {
+                    if i >= thumb_position && i < thumb_position + 3 {
+                        indicator.push('█');
+                    } else {
+                        indicator.push('─');
+                    }
+                }
+                indicator.push(']');
+
+                format!("{}{}", status_text, indicator)
+            } else {
+                status_text
+            };
+
             let status_paragraph =
-                Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
+                Paragraph::new(final_status_text).style(Style::default().fg(dm.theme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             // Help text
@@ -970,8 +1078,17 @@ impl TerminalPanel {
             };
 
             let help_text = match self.mode {
-                TerminalMode::Insert => "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode",
-                TerminalMode::Vim => "VIM mode: j/k/↑/↓: Navigate • gg/G: Top/Bottom • {/}: Commands • i/Enter: INSERT"
+                TerminalMode::Insert => {
+                    "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode".to_string()
+                }
+                TerminalMode::Vim => {
+                    let mut help = String::from("VIM: j/k/↑/↓: Navigate");
+                    if self.max_line_width > self.content_width {
+                        help.push_str(" • h/l/←/→: Scroll");
+                    }
+                    help.push_str(" • gg/G: Top/Bottom • i/Enter: INSERT");
+                    help
+                }
             };
 
             let help_paragraph =

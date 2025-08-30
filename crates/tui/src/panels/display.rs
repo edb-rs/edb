@@ -104,6 +104,12 @@ pub struct DisplayPanel {
     scroll_offset: usize,
     /// Content height for viewport calculations
     context_height: usize,
+    /// Content width for viewport calculations
+    content_width: usize,
+    /// Horizontal scroll offset
+    horizontal_offset: usize,
+    /// Maximum line width for horizontal scrolling
+    max_line_width: usize,
     /// Whether this panel is focused
     focused: bool,
 
@@ -122,6 +128,9 @@ impl DisplayPanel {
             selected_index: 0,
             scroll_offset: 0,
             context_height: 0,
+            content_width: 0,
+            horizontal_offset: 0,
+            max_line_width: 0,
             variables: vec![
                 "totalSupply: uint256 = 1000000".to_string(),
                 "balances[msg.sender]: uint256 = 500000".to_string(),
@@ -150,11 +159,37 @@ impl DisplayPanel {
         }
     }
 
+    /// Calculate the maximum line width for horizontal scrolling
+    fn calculate_max_line_width(&mut self) {
+        let data = self.get_current_data();
+        // Include some padding for list item formatting
+        self.max_line_width = data
+            .iter()
+            .map(|item| item.len() + 4) // Add padding for list formatting
+            .max()
+            .unwrap_or(0);
+    }
+
+    /// Apply horizontal offset to a string for horizontal scrolling
+    fn apply_horizontal_offset(&self, text: String) -> String {
+        if self.horizontal_offset == 0 {
+            return text;
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+        if self.horizontal_offset >= chars.len() {
+            String::new()
+        } else {
+            chars[self.horizontal_offset..].iter().collect()
+        }
+    }
+
     /// Switch to next display mode
     fn next_mode(&mut self) {
         self.mode = self.mode.next();
         self.selected_index = 0; // Reset selection when changing modes
         self.scroll_offset = 0; // Reset scroll when changing modes
+        self.horizontal_offset = 0; // Reset horizontal scroll when changing modes
         debug!("Switched to display mode: {:?}", self.mode);
     }
 
@@ -163,6 +198,7 @@ impl DisplayPanel {
         self.mode = self.mode.prev();
         self.selected_index = 0; // Reset selection when changing modes
         self.scroll_offset = 0; // Reset scroll when changing modes
+        self.horizontal_offset = 0; // Reset horizontal scroll when changing modes
         debug!("Switched to display mode: {:?}", self.mode);
     }
 
@@ -221,14 +257,16 @@ impl PanelTr for DisplayPanel {
     }
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        // Calculate context height for viewport calculations
+        // Calculate context height and width for viewport calculations
         self.context_height = if self.focused && area.height > 10 {
             area.height.saturating_sub(4) // Account for borders and status lines
         } else {
             area.height.saturating_sub(2) // Just borders
         } as usize;
+        self.content_width = area.width.saturating_sub(2) as usize; // Account for borders
 
         let data = self.get_current_data();
+        self.calculate_max_line_width();
 
         if data.is_empty() {
             let paragraph =
@@ -257,7 +295,8 @@ impl PanelTr for DisplayPanel {
                 } else {
                     Style::default()
                 };
-                ListItem::new(item.as_str()).style(style)
+                let scrolled_text = self.apply_horizontal_offset(item.clone());
+                ListItem::new(scrolled_text).style(style)
             })
             .collect();
 
@@ -288,8 +327,36 @@ impl PanelTr for DisplayPanel {
                 .message(format!("Items: {}", self.get_current_data().len()));
 
             let status_text = status_bar.build();
+
+            // Add horizontal scroll indicator if content is scrollable
+            let final_status_text = if self.max_line_width > self.content_width {
+                let scrollable_width = self.max_line_width.saturating_sub(self.content_width);
+                let scroll_percentage = if scrollable_width > 0 {
+                    (self.horizontal_offset as f32 / scrollable_width as f32).min(1.0)
+                } else {
+                    0.0
+                };
+
+                let indicator_width = 15;
+                let thumb_position = (scroll_percentage * (indicator_width - 3) as f32) as usize;
+
+                let mut indicator = String::from(" [");
+                for i in 0..indicator_width {
+                    if i >= thumb_position && i < thumb_position + 3 {
+                        indicator.push('█');
+                    } else {
+                        indicator.push('─');
+                    }
+                }
+                indicator.push(']');
+
+                format!("{}{}", status_text, indicator)
+            } else {
+                status_text
+            };
+
             let status_paragraph =
-                Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
+                Paragraph::new(final_status_text).style(Style::default().fg(dm.theme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             let help_area = Rect {
@@ -298,9 +365,14 @@ impl PanelTr for DisplayPanel {
                 width: area.width - 2,
                 height: 1,
             };
-            let help_text = "Space: Switch mode • ↑/↓: Navigate • Enter: Expand/Collapse";
+            let mut help = String::from("↑/↓: Navigate");
+            if self.max_line_width > self.content_width {
+                help.push_str(" • ←/→: Scroll");
+            }
+            help.push_str(" • Space: Switch mode • Enter: Expand/Collapse");
+
             let help_paragraph =
-                Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
+                Paragraph::new(help).style(Style::default().fg(dm.theme.help_text_color));
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -325,6 +397,25 @@ impl PanelTr for DisplayPanel {
             }
             KeyCode::Down => {
                 self.move_down();
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Left => {
+                // Scroll left
+                if self.horizontal_offset > 0 {
+                    self.horizontal_offset = self.horizontal_offset.saturating_sub(5);
+                    debug!("Scrolled left to offset {}", self.horizontal_offset);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Right => {
+                // Scroll right
+                if self.max_line_width > self.content_width {
+                    let max_scroll = self.max_line_width.saturating_sub(self.content_width);
+                    if self.horizontal_offset < max_scroll {
+                        self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
+                        debug!("Scrolled right to offset {}", self.horizontal_offset);
+                    }
+                }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Enter => {

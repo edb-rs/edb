@@ -98,6 +98,10 @@ pub struct CodePanel {
     context_height: usize,
     /// Content width for the current panel
     content_width: usize,
+    /// Horizontal scroll offset
+    horizontal_offset: usize,
+    /// Maximum line width (including line numbers and indicators)
+    max_line_width: usize,
     /// Syntax highlighter for code
     syntax_highlighter: SyntaxHighlighter,
 
@@ -156,6 +160,8 @@ impl CodePanel {
             file_selector_height_percent: 20,
             context_height: 0,
             content_width: 0,
+            horizontal_offset: 0,
+            max_line_width: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
@@ -166,6 +172,22 @@ impl CodePanel {
             CodeMode::Source => &self.source_lines,
             CodeMode::Opcodes => &self.opcode_lines,
         }
+    }
+
+    /// Calculate the maximum line width including line numbers and indicators
+    fn calculate_max_line_width(&mut self) {
+        let lines = self.get_display_lines();
+        if lines.is_empty() {
+            self.max_line_width = 0;
+            return;
+        }
+
+        let max_line_num = lines.len();
+        let line_num_width = max_line_num.to_string().len().max(3);
+        // Line number + space + breakpoint + cursor + " │ " separator
+        let prefix_width = line_num_width + 1 + 1 + 1 + 3;
+
+        self.max_line_width = lines.iter().map(|line| prefix_width + line.len()).max().unwrap_or(0);
     }
 
     /// Apply syntax highlighting to a line and return styled text
@@ -357,6 +379,52 @@ impl CodePanel {
         frame.render_widget(file_list, area);
     }
 
+    /// Apply horizontal offset to a line for horizontal scrolling
+    fn apply_horizontal_offset<'a>(
+        &self,
+        line: ratatui::text::Line<'a>,
+    ) -> ratatui::text::Line<'a> {
+        use ratatui::text::{Line, Span};
+
+        if self.horizontal_offset == 0 {
+            return line;
+        }
+
+        // Calculate the visual width of each span
+        let mut accumulated_width = 0;
+        let mut new_spans = Vec::new();
+        let mut started_content = false;
+
+        for span in line.spans {
+            let span_width = span.content.chars().count();
+
+            if accumulated_width + span_width <= self.horizontal_offset {
+                // This span is completely before the viewport
+                accumulated_width += span_width;
+            } else if accumulated_width >= self.horizontal_offset {
+                // This span is completely within the viewport
+                new_spans.push(span);
+                started_content = true;
+            } else {
+                // This span is partially visible - need to trim the beginning
+                let skip_chars = self.horizontal_offset - accumulated_width;
+                let visible_content: String = span.content.chars().skip(skip_chars).collect();
+                if !visible_content.is_empty() {
+                    new_spans.push(Span::styled(visible_content, span.style));
+                    started_content = true;
+                }
+                accumulated_width += span_width;
+            }
+        }
+
+        // If we've scrolled past all content, show empty line
+        if !started_content {
+            new_spans.push(Span::raw(""));
+        }
+
+        Line::from(new_spans)
+    }
+
     /// Render the main code content with syntax highlighting
     fn render_code_content(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         use ratatui::text::{Line, Span};
@@ -429,7 +497,10 @@ impl CodePanel {
                     new_spans.extend_from_slice(&highlighted_line.spans[1..]);
                 }
 
-                let content_line = Line::from(new_spans);
+                let mut content_line = Line::from(new_spans);
+
+                // Apply horizontal scrolling offset
+                content_line = self.apply_horizontal_offset(content_line);
 
                 // Apply background highlighting for execution/cursor lines
                 let item_style = if is_execution {
@@ -483,8 +554,38 @@ impl CodePanel {
             }
 
             let status_text = status_bar.build();
+
+            // Add horizontal scroll indicator if content is scrollable
+            let final_status_text = if self.max_line_width > self.content_width {
+                let scrollable_width = self.max_line_width.saturating_sub(self.content_width);
+                let scroll_percentage = if scrollable_width > 0 {
+                    (self.horizontal_offset as f32 / scrollable_width as f32).min(1.0)
+                } else {
+                    0.0
+                };
+
+                // Create scroll indicator with nice UTF-8 characters
+                // Using box drawing characters for a clean look
+                let indicator_width = 15; // Width of the scroll indicator
+                let thumb_position = (scroll_percentage * (indicator_width - 3) as f32) as usize;
+
+                let mut indicator = String::from(" [");
+                for i in 0..indicator_width {
+                    if i >= thumb_position && i < thumb_position + 3 {
+                        indicator.push('█'); // Solid block for thumb
+                    } else {
+                        indicator.push('─'); // Horizontal line for track
+                    }
+                }
+                indicator.push(']');
+
+                format!("{}{}", status_text, indicator)
+            } else {
+                status_text
+            };
+
             let status_paragraph =
-                Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
+                Paragraph::new(final_status_text).style(Style::default().fg(dm.theme.accent_color));
             frame.render_widget(status_paragraph, status_area);
 
             // Help line - updated to include file selector
@@ -496,12 +597,17 @@ impl CodePanel {
             };
             let help_text = if self.show_file_selector {
                 "↑/↓: Navigate • Enter: Select • F: Close".to_string()
-            } else if self.display_info.mode == CodeMode::Source {
-                "↑/↓: Navigate • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • F: Files • B: Breakpoint"
-                    .to_string()
             } else {
-                "↑/↓: Navigate • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call • B: Breakpoint"
-                    .to_string()
+                let mut help = String::from("↑/↓: Navigate");
+                if self.max_line_width > self.content_width {
+                    help.push_str(" • ←/→: Scroll");
+                }
+                help.push_str(" • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call");
+                if self.display_info.mode == CodeMode::Source {
+                    help.push_str(" • F: Files");
+                }
+                help.push_str(" • B: Breakpoint");
+                help
             };
             let help_paragraph =
                 Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
@@ -594,6 +700,10 @@ impl CodePanel {
                         .get(&self.display_info.available_files[self.selected_path_index])
                         .map_or(vec![], |source| source.lines().map(|l| l.to_string()).collect());
                     self.opcode_lines.clear();
+
+                    // Calculate max line width for horizontal scrolling
+                    self.calculate_max_line_width();
+                    self.horizontal_offset = 0; // Reset horizontal scroll when content changes
                 }
 
                 // move user cursor
@@ -629,6 +739,10 @@ impl CodePanel {
                         .map(|(pc, insn)| format!("{:05}: {}", pc, insn))
                         .collect();
                     self.source_lines.clear();
+
+                    // Calculate max line width for horizontal scrolling
+                    self.calculate_max_line_width();
+                    self.horizontal_offset = 0; // Reset horizontal scroll when content changes
                 }
 
                 // move user cursor
@@ -664,6 +778,8 @@ impl CodePanel {
 
         if let Some(source) = self.sources.get(selected_file) {
             self.source_lines = source.lines().map(|l| l.to_string()).collect();
+            // Recalculate max line width when switching files
+            self.calculate_max_line_width();
         }
 
         if self.current_selected_path_id.is_some() {
@@ -671,6 +787,7 @@ impl CodePanel {
             // to display.
             self.scroll_offset = 0;
             self.user_cursor_line = Some(1);
+            self.horizontal_offset = 0; // Reset horizontal scroll when switching files
         }
 
         self.current_selected_path_id = Some(self.selected_path_index);
@@ -839,6 +956,27 @@ impl PanelTr for CodePanel {
                 } else {
                     // If no user cursor, start at current view position
                     self.user_cursor_line = Some(self.scroll_offset + 1);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Left => {
+                // Scroll left
+                if self.horizontal_offset > 0 {
+                    // Scroll by 5 characters for smoother navigation
+                    self.horizontal_offset = self.horizontal_offset.saturating_sub(5);
+                    debug!("Scrolled left to offset {}", self.horizontal_offset);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Right => {
+                // Scroll right
+                if self.max_line_width > self.content_width {
+                    let max_scroll = self.max_line_width.saturating_sub(self.content_width);
+                    if self.horizontal_offset < max_scroll {
+                        // Scroll by 5 characters for smoother navigation
+                        self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
+                        debug!("Scrolled right to offset {}", self.horizontal_offset);
+                    }
                 }
                 Ok(EventResponse::Handled)
             }
