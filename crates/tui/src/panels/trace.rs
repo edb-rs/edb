@@ -966,7 +966,7 @@ impl PanelTr for TracePanel {
             if self.inner.max_line_width > self.inner.content_width {
                 help.push_str(" • ←/→: Scroll");
             }
-            help.push_str(" • Space: Toggle expand/collapse • Enter: Jump to snapshot");
+            help.push_str(" • Enter: Toggle expand/collapse • V: View Code");
 
             let help_paragraph =
                 Paragraph::new(help).style(Style::default().fg(dm.theme.help_text_color));
@@ -1014,11 +1014,11 @@ impl PanelTr for TracePanel {
                 }
                 Ok(EventResponse::Handled)
             }
-            KeyCode::Char(' ') => {
+            KeyCode::Enter => {
                 self.inner.toggle_expansion(trace);
                 Ok(EventResponse::Handled)
             }
-            KeyCode::Enter => {
+            KeyCode::Char('v') | KeyCode::Char('V') => {
                 if let Some(entry) = self.inner.selected_entry(trace) {
                     debug!("Selected trace entry ID: {} at depth: {}", entry.id, entry.depth);
 
@@ -1032,7 +1032,7 @@ impl PanelTr for TracePanel {
                 } else {
                     error!("No trace entry selected");
                 }
-                Ok(EventResponse::Handled)
+                Ok(EventResponse::ChangeFocus(PanelType::Code))
             }
             _ => Ok(EventResponse::NotHandled),
         }

@@ -225,8 +225,12 @@ impl TerminalPanel {
         // Handle built-in commands
         match command.trim() {
             "" => {
-                self.add_output("Empty command");
-                self.add_output("Type 'help' for available commands");
+                if let Some(cmd) = self.command_history.back().cloned() {
+                    return self.execute_command(cmd.as_str(), dm);
+                } else {
+                    self.add_output("Empty command");
+                    self.add_output("Type 'help' for available commands");
+                }
             }
             "quit" | "q" | "exit" => {
                 self.add_system("🚪 Exiting debugger...");

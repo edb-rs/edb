@@ -49,7 +49,7 @@ use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, sync::Arc, time::Duration};
 use tokio::{select, time::interval};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Configuration for the TUI
 #[derive(Debug, Clone)]
@@ -173,11 +173,12 @@ impl Tui {
                                     }
                                     EventResponse::Handled => {},
                                     EventResponse::NotHandled => {
-                                        debug!("Unhandled key event: {:?}", key_event);
+                                        warn!("Unhandled key event: {:?}", key_event);
                                     }
-                                    EventResponse::ChangeFocus(_panel_type) => {
-                                        // Handle panel focus changes if needed
-                                        debug!("Focus change requested");
+                                    EventResponse::ChangeFocus(panel_type) => {
+                                        // Handle panel focus changes
+                                        debug!("Focus change requested to {:?}", panel_type);
+                                        self.app.change_focus(panel_type);
                                     }
                                 }
                             }

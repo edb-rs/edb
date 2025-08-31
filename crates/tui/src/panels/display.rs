@@ -369,7 +369,7 @@ impl PanelTr for DisplayPanel {
             if self.max_line_width > self.content_width {
                 help.push_str(" • ←/→: Scroll");
             }
-            help.push_str(" • Space: Switch mode • Enter: Expand/Collapse");
+            help.push_str(" • Enter/Backspace: Switch mode");
 
             let help_paragraph =
                 Paragraph::new(help).style(Style::default().fg(dm.theme.help_text_color));
@@ -387,8 +387,12 @@ impl PanelTr for DisplayPanel {
         }
 
         match event.code {
-            KeyCode::Char(' ') => {
+            KeyCode::Enter => {
                 self.next_mode();
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::Backspace => {
+                self.prev_mode();
                 Ok(EventResponse::Handled)
             }
             KeyCode::Up => {
@@ -415,14 +419,6 @@ impl PanelTr for DisplayPanel {
                         self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
                         debug!("Scrolled right to offset {}", self.horizontal_offset);
                     }
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Enter => {
-                let data = self.get_current_data();
-                if let Some(item) = data.get(self.selected_index) {
-                    debug!("Selected {} item: {}", self.mode.name().to_lowercase(), item);
-                    // TODO: Expand/collapse complex variables or perform mode-specific action
                 }
                 Ok(EventResponse::Handled)
             }

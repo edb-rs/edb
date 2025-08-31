@@ -604,7 +604,10 @@ impl CodePanel {
                 width: area.width - 2,
                 height: 1,
             };
-            let help_text = if self.show_file_selector {
+            let help_text = if self.vim_command_mode {
+                // Show VIM command mode prompt
+                format!(":{}", self.vim_command_buffer)
+            } else if self.show_file_selector {
                 "↑/↓: Navigate • Enter: Select • F: Close".to_string()
             } else {
                 let mut help = String::from("↑/↓: Navigate");
@@ -618,8 +621,15 @@ impl CodePanel {
                 help.push_str(" • B: Breakpoint");
                 help
             };
-            let help_paragraph =
-                Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
+
+            let help_style = if self.vim_command_mode {
+                // Use a different style for VIM command mode to make it more prominent
+                Style::default().fg(dm.theme.help_text_color).bg(dm.theme.highlight_bg)
+            } else {
+                Style::default().fg(dm.theme.help_text_color)
+            };
+
+            let help_paragraph = Paragraph::new(help_text).style(help_style);
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -639,7 +649,7 @@ impl CodePanel {
     }
 
     /// Move cursor up by specified number of lines (VIM j command)
-    fn vim_move_up(&mut self, count: usize) {
+    fn move_up(&mut self, count: usize) {
         if let Some(current_line) = self.user_cursor_line {
             let new_line = current_line.saturating_sub(count).max(1);
             self.move_to(new_line);
@@ -647,7 +657,7 @@ impl CodePanel {
     }
 
     /// Move cursor down by specified number of lines (VIM k command)
-    fn vim_move_down(&mut self, count: usize) {
+    fn move_down(&mut self, count: usize) {
         let max_lines = self.get_display_lines().len();
         if let Some(current_line) = self.user_cursor_line {
             let new_line = (current_line + count).min(max_lines);
@@ -656,12 +666,12 @@ impl CodePanel {
     }
 
     /// Move to first line (VIM gg command)
-    fn vim_goto_top(&mut self) {
+    fn goto_top(&mut self) {
         self.move_to(1);
     }
 
     /// Move to last line (VIM G command)
-    fn vim_goto_bottom(&mut self) {
+    fn goto_bottom(&mut self) {
         let max_lines = self.get_display_lines().len();
         self.move_to(max_lines);
     }
@@ -712,18 +722,11 @@ impl CodePanel {
         }
     }
 
-    /// Jump to specific line number (VIM :n command)
-    fn vim_jump_to_line(&mut self, line: usize) {
-        let max_lines = self.get_display_lines().len();
-        let target_line = line.max(1).min(max_lines);
-        self.move_to(target_line);
-    }
-
     /// Execute VIM command from command buffer
     fn execute_vim_command(&mut self) {
         let command = self.vim_command_buffer.trim();
         if let Ok(line_number) = command.parse::<usize>() {
-            self.vim_jump_to_line(line_number);
+            self.move_to(line_number);
         }
         // Clear command mode
         self.vim_command_buffer.clear();
@@ -732,15 +735,17 @@ impl CodePanel {
 
     fn move_to(&mut self, line: usize) {
         let max_line = self.get_display_lines().len();
+        let line = line.max(1).min(max_line);
+
         let viewport_height = self.context_height;
         let half_viewport = viewport_height / 2;
 
         if line <= half_viewport || max_line <= viewport_height {
             self.scroll_offset = 0;
-            self.user_cursor_line = Some(max(line, 1));
+            self.user_cursor_line = Some(line);
         } else if line > max_line - viewport_height {
             self.scroll_offset = max_line.saturating_sub(viewport_height);
-            self.user_cursor_line = Some(min(line, max_line));
+            self.user_cursor_line = Some(line);
         } else {
             self.scroll_offset = line.saturating_sub(half_viewport);
             self.user_cursor_line = Some(line);
@@ -964,8 +969,7 @@ impl PanelTr for CodePanel {
             .and_then(|_| self.update_execution_info(dm))
             .is_none()
         {
-            // TODO (ZZ): Show spaner
-            error!("MDZZ DIE HERE");
+            // Do nothing;
         }
 
         // Split area if file selector is shown
@@ -1067,38 +1071,22 @@ impl PanelTr for CodePanel {
                         _ => Ok(EventResponse::NotHandled),
                     }
                 }
-                KeyCode::Up => {
-                    // Move user cursor up with automatic scrolling
-                    if let Some(line) = self.user_cursor_line {
-                        if line > 1 {
-                            self.user_cursor_line = Some(line - 1);
-                            // Auto-scroll if cursor moves out of view
-                            if line - 1 < self.scroll_offset + 1 {
-                                self.scroll_offset = self.scroll_offset.saturating_sub(1);
-                            }
-                        }
-                    } else {
-                        // If no user cursor, start at current view position
-                        self.user_cursor_line = Some(self.scroll_offset + 1);
-                    }
-                    Ok(EventResponse::Handled)
-                }
                 // VIM-like navigation: k (up)
-                KeyCode::Char('k') => {
+                KeyCode::Up | KeyCode::Char('k') => {
                     let count = self.get_vim_repetition();
-                    self.vim_move_up(count);
+                    self.move_up(count);
                     self.clear_vim_state();
                     Ok(EventResponse::Handled)
                 }
                 // VIM-like navigation: j (down)
-                KeyCode::Char('j') => {
+                KeyCode::Down | KeyCode::Char('j') => {
                     let count = self.get_vim_repetition();
-                    self.vim_move_down(count);
+                    self.move_down(count);
                     self.clear_vim_state();
                     Ok(EventResponse::Handled)
                 }
                 // VIM-like navigation: h (left scroll)
-                KeyCode::Char('h') => {
+                KeyCode::Left | KeyCode::Char('h') => {
                     let count = self.get_vim_repetition();
                     if self.horizontal_offset > 0 {
                         self.horizontal_offset = self.horizontal_offset.saturating_sub(count * 5);
@@ -1107,7 +1095,7 @@ impl PanelTr for CodePanel {
                     Ok(EventResponse::Handled)
                 }
                 // VIM-like navigation: l (right scroll)
-                KeyCode::Char('l') => {
+                KeyCode::Right | KeyCode::Char('l') => {
                     let count = self.get_vim_repetition();
                     if self.max_line_width > self.content_width {
                         let max_scroll = self.max_line_width.saturating_sub(self.content_width);
@@ -1117,46 +1105,6 @@ impl PanelTr for CodePanel {
                         }
                     }
                     self.clear_vim_state();
-                    Ok(EventResponse::Handled)
-                }
-                KeyCode::Down => {
-                    // Move user cursor down with automatic scrolling
-                    let max_lines = self.get_display_lines().len();
-                    if let Some(line) = self.user_cursor_line {
-                        if line < max_lines {
-                            self.user_cursor_line = Some(line + 1);
-                            // Auto-scroll if cursor moves out of view
-                            // We need to ensure cursor stays visible in the viewport
-                            let viewport_height = self.context_height;
-                            if line + 1 > self.scroll_offset + viewport_height {
-                                self.scroll_offset = (line + 1).saturating_sub(viewport_height);
-                            }
-                        }
-                    } else {
-                        // If no user cursor, start at current view position
-                        self.user_cursor_line = Some(self.scroll_offset + 1);
-                    }
-                    Ok(EventResponse::Handled)
-                }
-                KeyCode::Left => {
-                    // Scroll left
-                    if self.horizontal_offset > 0 {
-                        // Scroll by 5 characters for smoother navigation
-                        self.horizontal_offset = self.horizontal_offset.saturating_sub(5);
-                        debug!("Scrolled left to offset {}", self.horizontal_offset);
-                    }
-                    Ok(EventResponse::Handled)
-                }
-                KeyCode::Right => {
-                    // Scroll right
-                    if self.max_line_width > self.content_width {
-                        let max_scroll = self.max_line_width.saturating_sub(self.content_width);
-                        if self.horizontal_offset < max_scroll {
-                            // Scroll by 5 characters for smoother navigation
-                            self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
-                            debug!("Scrolled right to offset {}", self.horizontal_offset);
-                        }
-                    }
                     Ok(EventResponse::Handled)
                 }
                 // VIM-like navigation: { (previous blank line)
@@ -1175,40 +1123,24 @@ impl PanelTr for CodePanel {
                 }
                 // VIM-like navigation: g (might be gg)
                 KeyCode::Char('g') => {
-                    // Check if this is part of 'gg' command
-                    static mut LAST_G_TIME: std::time::Instant = unsafe { std::mem::zeroed() };
-                    let now = std::time::Instant::now();
-                    let is_double_g = unsafe {
-                        if LAST_G_TIME.elapsed().as_millis() < 500 {
-                            true
-                        } else {
-                            LAST_G_TIME = now;
-                            false
-                        }
-                    };
-
-                    if is_double_g {
-                        // gg command - go to top
-                        self.vim_goto_top();
-                        self.clear_vim_state();
-                        Ok(EventResponse::Handled)
+                    // Handle 'gg' sequence
+                    if self.vim_number_prefix == "g" {
+                        self.goto_top();
+                        self.vim_number_prefix.clear();
                     } else {
-                        // First 'g', wait for second
-                        unsafe {
-                            LAST_G_TIME = now;
-                        }
-                        Ok(EventResponse::Handled)
+                        self.vim_number_prefix = String::from("g");
                     }
+                    Ok(EventResponse::Handled)
                 }
                 // VIM-like navigation: G (go to bottom or specific line)
                 KeyCode::Char('G') => {
                     if self.vim_number_prefix.is_empty() {
                         // G without number - go to bottom
-                        self.vim_goto_bottom();
+                        self.goto_bottom();
                     } else {
                         // nG - go to line n
                         let line = self.get_vim_repetition();
-                        self.vim_jump_to_line(line);
+                        self.move_to(line);
                     }
                     self.clear_vim_state();
                     Ok(EventResponse::Handled)

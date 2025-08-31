@@ -136,6 +136,8 @@ pub struct App {
     should_exit: bool,
     /// Main panel type for compact layout (Trace/Code/Display cycle)
     compact_main_panel: PanelType,
+    /// Left panel type for full layout (Code/Trace toggle)
+    full_left_panel: PanelType,
     /// RPC connection status and health monitoring
     connection_status: ConnectionStatus,
     /// Last health check time for periodic monitoring
@@ -164,7 +166,8 @@ impl App {
             current_panel,
             panels,
             should_exit: false,
-            compact_main_panel: PanelType::Code, // Default to Code in compact mode
+            compact_main_panel: PanelType::Trace, // Default to Trace in compact mode
+            full_left_panel: PanelType::Trace,    // Default to Trace in full layout left side
             connection_status: ConnectionStatus::new(),
             last_health_check: None,
             vertical_split: 50,   // 50% left panel width
@@ -225,7 +228,7 @@ impl App {
         }
     }
 
-    /// Render the full 4-panel layout
+    /// Render the full 3-panel layout (Code/Trace toggle on left, Display and Terminal on right)
     fn render_full_layout(
         &mut self,
         frame: &mut Frame<'_>,
@@ -244,46 +247,38 @@ impl App {
         // Render status bar
         self.render_status_bar(frame, layout_chunks[0]);
 
-        // Split main content area for 4-panel layout using dynamic ratios
+        // Split main content area horizontally: left (Code/Trace) | right (Display/Terminal)
         let main_chunks = Layout::default()
-            .direction(Direction::Vertical)
+            .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(self.horizontal_split), // Top row (Trace | Code)
-                Constraint::Percentage(100 - self.horizontal_split), // Bottom row (Display | Terminal)
+                Constraint::Percentage(self.vertical_split), // Left: Code/Trace (toggles)
+                Constraint::Percentage(100 - self.vertical_split), // Right: Display + Terminal
             ])
             .split(layout_chunks[1]);
 
-        let top_chunks = Layout::default()
-            .direction(Direction::Horizontal)
+        // Split right side vertically for Display and Terminal
+        let right_chunks = Layout::default()
+            .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(self.vertical_split), // Trace panel
-                Constraint::Percentage(100 - self.vertical_split), // Code panel
-            ])
-            .split(main_chunks[0]);
-
-        let bottom_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(self.vertical_split), // Display panel
-                Constraint::Percentage(100 - self.vertical_split), // Terminal panel
+                Constraint::Percentage(self.horizontal_split), // Display panel
+                Constraint::Percentage(100 - self.horizontal_split), // Terminal panel
             ])
             .split(main_chunks[1]);
 
         // Set focus for panels
         self.update_panel_focus();
 
-        // Render panels
-        if let Some(panel) = self.panels.get_mut(&PanelType::Trace) {
-            panel.render(frame, top_chunks[0], data_manager);
+        // Render left panel (Code or Trace based on full_left_panel)
+        if let Some(panel) = self.panels.get_mut(&self.full_left_panel) {
+            panel.render(frame, main_chunks[0], data_manager);
         }
-        if let Some(panel) = self.panels.get_mut(&PanelType::Code) {
-            panel.render(frame, top_chunks[1], data_manager);
-        }
+
+        // Render right panels (Display and Terminal)
         if let Some(panel) = self.panels.get_mut(&PanelType::Display) {
-            panel.render(frame, bottom_chunks[0], data_manager);
+            panel.render(frame, right_chunks[0], data_manager);
         }
         if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-            panel.render(frame, bottom_chunks[1], data_manager);
+            panel.render(frame, right_chunks[1], data_manager);
         }
     }
 
@@ -462,39 +457,63 @@ impl App {
                 }
                 return Ok(EventResponse::NotHandled);
             }
-            KeyCode::Tab => {
+            KeyCode::Char(' ') => {
                 match self.layout_manager.layout_type() {
+                    LayoutType::Full => {
+                        // In full layout, Space toggles between Code and Trace only when focused on the left panel
+                        if self.current_panel == PanelType::Code
+                            || self.current_panel == PanelType::Trace
+                        {
+                            self.full_left_panel = match self.full_left_panel {
+                                PanelType::Code => PanelType::Trace,
+                                PanelType::Trace => PanelType::Code,
+                                _ => PanelType::Code, // Fallback (shouldn't happen)
+                            };
+                            self.current_panel = self.full_left_panel;
+                            return Ok(EventResponse::Handled);
+                        } else {
+                            // Forward to current panel if not on Code/Trace
+                            if let Some(panel) = self.panels.get_mut(&self.current_panel) {
+                                return panel.handle_key_event(key, data_manager);
+                            }
+                            return Ok(EventResponse::NotHandled);
+                        }
+                    }
                     LayoutType::Compact => {
-                        // In compact mode, Tab switches main panel between Trace/Code
-                        self.current_panel = match self.current_panel {
-                            PanelType::Terminal => self.compact_main_panel,
-                            _ => PanelType::Terminal,
-                        };
-                        return Ok(EventResponse::Handled);
+                        // In compact mode, Space cycles through Trace → Code → Display only when focused on main panel
+                        if self.current_panel != PanelType::Terminal {
+                            self.compact_main_panel = match self.compact_main_panel {
+                                PanelType::Trace => PanelType::Code,
+                                PanelType::Code => PanelType::Display,
+                                PanelType::Display => PanelType::Trace,
+                                _ => PanelType::Code, // Fallback
+                            };
+                            self.current_panel = self.compact_main_panel;
+                            return Ok(EventResponse::Handled);
+                        } else {
+                            // Forward to terminal if focused on terminal
+                            if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
+                                return panel.handle_key_event(key, data_manager);
+                            }
+                            return Ok(EventResponse::NotHandled);
+                        }
                     }
                     _ => {
-                        // In full/mobile mode, Tab cycles through panels
-                        self.cycle_panels(false);
-                        return Ok(EventResponse::Handled);
+                        // In mobile mode, forward to current panel
+                        if let Some(panel) = self.panels.get_mut(&self.current_panel) {
+                            return panel.handle_key_event(key, data_manager);
+                        }
+                        return Ok(EventResponse::NotHandled);
                     }
                 }
             }
-            KeyCode::Char('`') | KeyCode::Char('~') => {
-                match self.layout_manager.layout_type() {
-                    LayoutType::Compact => {
-                        // In compact mode, `/~ switches main panel between Trace/Code
-                        self.current_panel = match self.current_panel {
-                            PanelType::Terminal => self.compact_main_panel,
-                            _ => PanelType::Terminal,
-                        };
-                        return Ok(EventResponse::Handled);
-                    }
-                    _ => {
-                        // In full/mobile mode, Tab cycles through panels
-                        self.cycle_panels(true);
-                        return Ok(EventResponse::Handled);
-                    }
-                }
+            KeyCode::Tab => {
+                self.cycle_panels(false);
+                return Ok(EventResponse::Handled);
+            }
+            KeyCode::BackTab => {
+                self.cycle_panels(true);
+                return Ok(EventResponse::Handled);
             }
 
             // Function keys for mobile layout
@@ -595,50 +614,6 @@ impl App {
                 return Ok(EventResponse::Handled);
             }
 
-            KeyCode::Right => {
-                // Right arrow key cycles main panel in compact mode (Trace → Code → Display → Trace)
-                if matches!(self.layout_manager.layout_type(), LayoutType::Compact) {
-                    self.compact_main_panel = match self.compact_main_panel {
-                        PanelType::Trace => PanelType::Code,
-                        PanelType::Code => PanelType::Display,
-                        PanelType::Display => PanelType::Trace,
-                        _ => PanelType::Trace, // Default fallback
-                    };
-                    debug!("Cycled compact main panel to: {:?}", self.compact_main_panel);
-                    if self.current_panel != PanelType::Terminal {
-                        self.current_panel = self.compact_main_panel;
-                    }
-                    return Ok(EventResponse::Handled);
-                }
-                // Otherwise, forward to current panel
-                if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    return panel.handle_key_event(key, data_manager);
-                }
-                return Ok(EventResponse::NotHandled);
-            }
-
-            KeyCode::Left => {
-                // Left arrow key cycles main panel in compact mode (Trace → Code → Display → Trace)
-                if matches!(self.layout_manager.layout_type(), LayoutType::Compact) {
-                    self.compact_main_panel = match self.compact_main_panel {
-                        PanelType::Trace => PanelType::Display,
-                        PanelType::Code => PanelType::Trace,
-                        PanelType::Display => PanelType::Code,
-                        _ => PanelType::Trace, // Default fallback
-                    };
-                    debug!("Cycled compact main panel to: {:?}", self.compact_main_panel);
-                    if self.current_panel != PanelType::Terminal {
-                        self.current_panel = self.compact_main_panel;
-                    }
-                    return Ok(EventResponse::Handled);
-                }
-                // Otherwise, forward to current panel
-                if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    return panel.handle_key_event(key, data_manager);
-                }
-                return Ok(EventResponse::NotHandled);
-            }
-
             _ => {
                 // Forward to the current panel
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
@@ -651,20 +626,48 @@ impl App {
 
     /// Cycle through panels (Tab key)
     fn cycle_panels(&mut self, reversed: bool) {
-        if !reversed {
-            self.current_panel = match self.current_panel {
-                PanelType::Trace => PanelType::Code,
-                PanelType::Code => PanelType::Display,
-                PanelType::Display => PanelType::Terminal,
-                PanelType::Terminal => PanelType::Trace,
-            };
-        } else {
-            self.current_panel = match self.current_panel {
-                PanelType::Trace => PanelType::Terminal,
-                PanelType::Code => PanelType::Trace,
-                PanelType::Display => PanelType::Code,
-                PanelType::Terminal => PanelType::Display,
-            };
+        match self.layout_manager.layout_type() {
+            LayoutType::Full => {
+                // In Full layout, cycle through the 3 visible panels
+                // The left panel shows either Code or Trace (based on full_left_panel)
+                if !reversed {
+                    self.current_panel = match self.current_panel {
+                        PanelType::Code | PanelType::Trace => PanelType::Display,
+                        PanelType::Display => PanelType::Terminal,
+                        PanelType::Terminal => self.full_left_panel,
+                    };
+                } else {
+                    self.current_panel = match self.current_panel {
+                        PanelType::Code | PanelType::Trace => PanelType::Terminal,
+                        PanelType::Display => self.full_left_panel,
+                        PanelType::Terminal => PanelType::Display,
+                    };
+                }
+            }
+            LayoutType::Compact => {
+                self.current_panel = match self.current_panel {
+                    PanelType::Terminal => self.compact_main_panel,
+                    _ => PanelType::Terminal,
+                };
+            }
+            LayoutType::Mobile => {
+                // Mobile and other layouts cycle through all 4 panels
+                if !reversed {
+                    self.current_panel = match self.current_panel {
+                        PanelType::Trace => PanelType::Code,
+                        PanelType::Code => PanelType::Display,
+                        PanelType::Display => PanelType::Terminal,
+                        PanelType::Terminal => PanelType::Trace,
+                    };
+                } else {
+                    self.current_panel = match self.current_panel {
+                        PanelType::Trace => PanelType::Terminal,
+                        PanelType::Code => PanelType::Trace,
+                        PanelType::Display => PanelType::Code,
+                        PanelType::Terminal => PanelType::Display,
+                    };
+                }
+            }
         }
         debug!("Switched to panel: {:?}", self.current_panel);
     }
@@ -747,5 +750,49 @@ impl App {
     /// Get current connection status for display
     pub fn connection_status(&self) -> &ConnectionStatus {
         &self.connection_status
+    }
+
+    /// Change focus to a specific panel
+    /// Handles layout-specific logic to ensure the panel is visible
+    pub fn change_focus(&mut self, target_panel: PanelType) {
+        match self.layout_manager.layout_type() {
+            LayoutType::Full => {
+                // In Full layout, handle Code/Trace visibility
+                match target_panel {
+                    PanelType::Code | PanelType::Trace => {
+                        // Make sure the target panel is visible on the left
+                        self.full_left_panel = target_panel;
+                        self.current_panel = target_panel;
+                    }
+                    PanelType::Display | PanelType::Terminal => {
+                        // These are always visible in Full layout
+                        self.current_panel = target_panel;
+                    }
+                }
+            }
+            LayoutType::Compact => {
+                // In Compact layout, handle main panel visibility
+                match target_panel {
+                    PanelType::Terminal => {
+                        // Terminal is always visible
+                        self.current_panel = PanelType::Terminal;
+                    }
+                    PanelType::Trace | PanelType::Code | PanelType::Display => {
+                        // Switch the main panel to show the target
+                        self.compact_main_panel = target_panel;
+                        self.current_panel = target_panel;
+                    }
+                }
+            }
+            LayoutType::Mobile => {
+                // In Mobile layout, just switch to the target panel
+                self.current_panel = target_panel;
+            }
+        }
+
+        // Update panel focus states
+        self.update_panel_focus();
+
+        debug!("Changed focus to {:?} panel", target_panel);
     }
 }
