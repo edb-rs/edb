@@ -1,12 +1,13 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use alloy_primitives::Address;
+use derive_more::From;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, From)]
 pub enum Code {
-    Opcode(OpcodeInfo),
-    Source(SourceInfo),
+    Opcode(#[from] OpcodeInfo),
+    Source(#[from] SourceInfo),
 }
 
 impl Code {

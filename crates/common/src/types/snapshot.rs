@@ -1,15 +1,16 @@
 use std::path::PathBuf;
 
 use alloy_primitives::{Address, Bytes, U256};
+use derive_more::From;
 use revm::state::TransientStorage;
 use serde::{Deserialize, Serialize};
 
 use crate::types::ExecutionFrameId;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, From)]
 pub enum SnapshotInfo {
-    Opcode(OpcodeSnapshotInfo),
-    Hook(HookSnapshotInfo),
+    Opcode(#[from] OpcodeSnapshotInfo),
+    Hook(#[from] HookSnapshotInfo),
 }
 
 impl SnapshotInfo {
