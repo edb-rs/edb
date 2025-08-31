@@ -103,6 +103,12 @@ pub struct TracePanelInner {
     syntax_highlighter: SyntaxHighlighter,
     /// Set of collapsed trace entry IDs (when collapsed, we hide children)
     collapsed_entries: HashSet<usize>,
+
+    // ========== Execution Tracking ==========
+    /// Currently executing trace entry ID (from execution snapshot)
+    current_execution_entry: Option<usize>,
+    /// Current execution snapshot ID for tracking changes
+    current_execution_snapshot: Option<usize>,
 }
 
 impl TracePanelInner {
@@ -118,6 +124,8 @@ impl TracePanelInner {
             max_line_width: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
             collapsed_entries: HashSet::new(),
+            current_execution_entry: None,
+            current_execution_snapshot: None,
         }
     }
 
@@ -129,7 +137,8 @@ impl TracePanelInner {
             .iter()
             .map(|line_type| {
                 let formatted_line = self.format_display_line(line_type, trace, dm);
-                // Calculate the visual width of the line
+                // Calculate the visual width of the line including cursor indicators
+                // Note: format_display_line already adds the cursor indicators, so we just sum all spans
                 formatted_line.spans.iter().map(|span| span.content.chars().count()).sum()
             })
             .max()
@@ -332,6 +341,7 @@ impl TracePanelInner {
         trace: &Trace,
         dm: &mut DataManager,
     ) -> Line<'static> {
+        // Get the base formatted line
         match line_type {
             TraceLineType::Call(entry_id) => {
                 if let Some(entry) = trace.iter().find(|e| e.id == *entry_id) {
@@ -441,13 +451,9 @@ impl TracePanelInner {
         let line_prefix = if depth == 0 {
             // Root level: collapse indicator at start, then tree structure if has siblings
             let collapse_char = if has_children {
-                if self.collapsed_entries.contains(&entry.id) {
-                    "▶ "
-                } else {
-                    "▼ "
-                }
+                self.get_enhanced_collapse_indicator(entry.id, trace)
             } else {
-                "  " // spaces for alignment when no children
+                "  ".to_string() // spaces for alignment when no children
             };
 
             // For root level, check if this is the last root entry
@@ -463,8 +469,7 @@ impl TracePanelInner {
 
             // Add collapse indicator if has children, otherwise just a space
             if has_children {
-                let collapse_char =
-                    if self.collapsed_entries.contains(&entry.id) { "▶ " } else { "▼ " };
+                let collapse_char = self.get_enhanced_collapse_indicator(entry.id, trace);
                 format!("  {}{}{}", tree_indent, connector, collapse_char)
             } else {
                 format!("  {}{}  ", tree_indent, connector)
@@ -821,6 +826,155 @@ impl TracePanelInner {
 
         spans
     }
+
+    /// Update execution info from DataManager
+    fn update_execution_info(&mut self, dm: &mut DataManager) -> Option<()> {
+        let snapshot_id = dm.execution.get_current_snapshot();
+
+        // Check if snapshot changed
+        if self.current_execution_snapshot == Some(snapshot_id) {
+            return Some(());
+        }
+
+        // Get the trace entry ID from snapshot
+        let snapshot_info = dm.execution.get_snapshot_info(snapshot_id)?;
+        let trace_entry_id = snapshot_info.frame_id().trace_entry_id();
+
+        self.current_execution_entry = Some(trace_entry_id);
+        self.current_execution_snapshot = Some(snapshot_id);
+
+        Some(())
+    }
+
+    /// Calculate the depth of execution relative to a given entry
+    /// Returns None if execution is not within this entry's subtree
+    fn calculate_execution_depth(&self, entry_id: usize, trace: &Trace) -> Option<usize> {
+        if let Some(current_exec_entry) = self.current_execution_entry {
+            // If this is the executing entry itself, depth is 0
+            if entry_id == current_exec_entry {
+                return Some(0);
+            }
+
+            // If execution is a descendant, calculate the depth
+            if self.is_descendant_of(current_exec_entry, entry_id, trace) {
+                let entry_depth = trace.get(entry_id)?.depth;
+                let exec_depth = trace.get(current_exec_entry)?.depth;
+                Some(exec_depth - entry_depth)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Check if child_id is a descendant of parent_id in the trace tree
+    fn is_descendant_of(&self, child_id: usize, parent_id: usize, trace: &Trace) -> bool {
+        if let Some(child_entry) = trace.get(child_id) {
+            let mut current_parent = child_entry.parent_id;
+
+            while let Some(parent) = current_parent {
+                if parent == parent_id {
+                    return true;
+                }
+
+                // Move up the tree
+                if let Some(parent_entry) = trace.get(parent) {
+                    current_parent = parent_entry.parent_id;
+                } else {
+                    break;
+                }
+            }
+        }
+        false
+    }
+
+    /// Generate enhanced collapse indicator with numeric depth for execution
+    fn get_enhanced_collapse_indicator(&self, entry_id: usize, trace: &Trace) -> String {
+        let is_collapsed = self.collapsed_entries.contains(&entry_id);
+        let base_indicator = if is_collapsed { "▶" } else { "▼" };
+
+        // Check if we should add numeric depth indicator
+        if let Some(depth) = self.calculate_execution_depth(entry_id, trace) {
+            if depth == 0 {
+                // This entry is currently executing
+                format!("{} ", base_indicator)
+            } else if depth > 0 {
+                // Entry with execution inside - show subtle superscript numeric indicator
+                let superscript = self.number_to_superscript(depth);
+                format!("{}{} ", base_indicator, superscript)
+            } else {
+                // Standard indicator
+                format!("{} ", base_indicator)
+            }
+        } else {
+            // No execution involvement - standard indicator
+            format!("{} ", base_indicator)
+        }
+    }
+
+    /// Convert a number to Unicode superscript characters
+    fn number_to_superscript(&self, num: usize) -> String {
+        const SUPERSCRIPT_DIGITS: [&str; 10] = ["⁰", "¹", "²", "³", "⁴", "⁵", "⁶", "⁷", "⁸", "⁹"];
+
+        if num == 0 {
+            return SUPERSCRIPT_DIGITS[0].to_string();
+        }
+
+        let mut result = String::new();
+        let mut n = num;
+
+        // Handle multi-digit numbers by building from right to left
+        let mut digits = Vec::new();
+        while n > 0 {
+            digits.push(n % 10);
+            n /= 10;
+        }
+
+        // Reverse to get correct order and convert to superscript
+        for digit in digits.iter().rev() {
+            if *digit < 10 {
+                result.push_str(SUPERSCRIPT_DIGITS[*digit]);
+            }
+        }
+
+        result
+    }
+
+    /// Move to a specific trace entry ID and center it in view
+    #[allow(dead_code)]
+    pub fn move_to(&mut self, trace_entry_id: usize, trace: &Trace) {
+        let display_lines = self.generate_display_lines(trace);
+
+        // Find the display line index for this trace entry
+        for (idx, line_type) in display_lines.iter().enumerate() {
+            let entry_id = match line_type {
+                TraceLineType::Call(id)
+                | TraceLineType::Return(id)
+                | TraceLineType::Event(id, _) => *id,
+            };
+
+            if entry_id == trace_entry_id {
+                // Set the selected index to this line
+                self.selected_index = idx;
+
+                // Center the view on this line
+                let viewport_height = self.context_height;
+                let half_viewport = viewport_height / 2;
+
+                // Scroll logic similar to code panel
+                if idx <= half_viewport || display_lines.len() <= viewport_height {
+                    self.scroll_offset = 0;
+                } else if idx > display_lines.len().saturating_sub(viewport_height) {
+                    self.scroll_offset = display_lines.len().saturating_sub(viewport_height);
+                } else {
+                    self.scroll_offset = idx.saturating_sub(half_viewport);
+                }
+
+                break;
+            }
+        }
+    }
 }
 
 impl PanelTr for TracePanel {
@@ -844,6 +998,9 @@ impl PanelTr for TracePanel {
             area.height.saturating_sub(2) // Just borders
         } as usize;
         self.content_width = area.width.saturating_sub(2) as usize; // Account for borders
+
+        // Update execution info from DataManager
+        self.inner.update_execution_info(dm);
 
         if self.trace.is_none() {
             self.trace = Some(dm.execution.get_trace().clone());
@@ -873,14 +1030,33 @@ impl PanelTr for TracePanel {
             .skip(self.scroll_offset)
             .take(self.context_height)
             .map(|(global_index, line_type)| {
+                // Check if this line is the current execution
+                let entry_id = match line_type {
+                    TraceLineType::Call(id)
+                    | TraceLineType::Return(id)
+                    | TraceLineType::Event(id, _) => *id,
+                };
+                let is_execution =
+                    self.inner.current_execution_entry.map_or(false, |exec_id| exec_id == entry_id);
+                let is_selected = global_index == self.inner.selected_index;
+
                 let mut formatted_line = self.inner.format_display_line(line_type, &trace, dm);
 
                 // Apply horizontal scrolling offset
                 formatted_line = self.inner.apply_horizontal_offset(formatted_line);
 
-                let style = if global_index == self.inner.selected_index && self.inner.focused {
+                // Determine style based on execution and selection state
+                let style = if is_execution && is_selected && self.inner.focused {
+                    // Both execution and selection on same line
+                    Style::default().bg(dm.theme.current_line_bg).fg(dm.theme.selection_fg)
+                } else if is_execution && matches!(line_type, TraceLineType::Call(_)) {
+                    // Execution line (only for the call line)
+                    Style::default().bg(dm.theme.current_line_bg)
+                } else if is_selected && self.inner.focused {
+                    // Selected line (focused)
                     Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
-                } else if global_index == self.inner.selected_index {
+                } else if is_selected {
+                    // Selected line (unfocused)
                     Style::default().bg(dm.theme.highlight_bg)
                 } else {
                     Style::default()
@@ -914,13 +1090,20 @@ impl PanelTr for TracePanel {
             let selected_entry_id =
                 self.inner.selected_entry(trace).map(|e| e.id).unwrap_or_default();
 
-            let status_bar = StatusBar::new().current_panel("Trace".to_string()).message(format!(
-                "Line: {}/{} | Trace: {}/{}",
-                self.selected_index + 1,
-                display_lines.len(),
-                selected_entry_id + 1,
-                trace.len()
-            ));
+            let exec_entry = self
+                .inner
+                .current_execution_entry
+                .map_or("None".to_string(), |id| format!("{}", id + 1));
+
+            let status_bar = StatusBar::new()
+                .current_panel("Trace".to_string())
+                .message(format!(
+                    "Exec: {} | Sel: {}/{}",
+                    exec_entry,
+                    self.selected_index + 1,
+                    display_lines.len()
+                ))
+                .message(format!("Trace: {}/{}", selected_entry_id + 1, trace.len()));
 
             let status_text = status_bar.build();
 
@@ -966,7 +1149,9 @@ impl PanelTr for TracePanel {
             if self.inner.max_line_width > self.inner.content_width {
                 help.push_str(" • ←/→: Scroll");
             }
-            help.push_str(" • Enter: Toggle expand/collapse • V: View Code");
+            help.push_str(" • Enter: Toggle expand/collapse");
+            help.push_str(" • V: View code");
+            help.push_str(" • C: Goto code");
 
             let help_paragraph =
                 Paragraph::new(help).style(Style::default().fg(dm.theme.help_text_color));
@@ -1017,6 +1202,23 @@ impl PanelTr for TracePanel {
             KeyCode::Enter => {
                 self.inner.toggle_expansion(trace);
                 Ok(EventResponse::Handled)
+            }
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                if let Some(entry) = self.inner.selected_entry(trace) {
+                    debug!("Selected trace entry ID: {} at depth: {}", entry.id, entry.depth);
+
+                    // Jump to the first snapshot of this trace entry if available
+                    if let Some(snapshot_id) = entry.first_snapshot_id {
+                        debug!("Jumping to snapshot: {}", snapshot_id);
+                        dm.execution.goto_snapshot(snapshot_id)?;
+                        dm.execution.display_snapshot(snapshot_id)?;
+                    } else {
+                        error!("No snapshot available for trace entry");
+                    }
+                } else {
+                    error!("No trace entry selected");
+                }
+                Ok(EventResponse::ChangeFocus(PanelType::Code))
             }
             KeyCode::Char('v') | KeyCode::Char('V') => {
                 if let Some(entry) = self.inner.selected_entry(trace) {

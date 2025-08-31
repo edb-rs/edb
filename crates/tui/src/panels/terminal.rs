@@ -219,18 +219,22 @@ impl TerminalPanel {
             self.command_history.push_back(command.to_string());
         }
 
+        // Empty command will be treated as the previous command
+        if command.trim().is_empty() {
+            if let Some(cmd) = self.command_history.back().cloned() {
+                return self.execute_command(cmd.as_str(), dm);
+            }
+        }
+
         // Add command to terminal history
         self.add_command(command);
 
         // Handle built-in commands
         match command.trim() {
             "" => {
-                if let Some(cmd) = self.command_history.back().cloned() {
-                    return self.execute_command(cmd.as_str(), dm);
-                } else {
-                    self.add_output("Empty command");
-                    self.add_output("Type 'help' for available commands");
-                }
+                // We do not have any previous command
+                self.add_output("Empty command");
+                self.add_output("Type 'help' for available commands");
             }
             "quit" | "q" | "exit" => {
                 self.add_system("🚪 Exiting debugger...");

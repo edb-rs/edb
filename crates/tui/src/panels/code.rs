@@ -33,9 +33,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem},
     Frame,
 };
-use std::cmp::{max, min};
 use std::collections::HashMap;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// Code display mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
