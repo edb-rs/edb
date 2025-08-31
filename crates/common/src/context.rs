@@ -25,7 +25,7 @@ use revm::{
     state::{Account, AccountInfo, Bytecode},
     Context, Database, DatabaseCommit, DatabaseRef,
 };
-use std::fmt;
+use std::{fmt, usize};
 
 /// Type alias for the EDB context
 pub type EdbContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, CacheDB<DB>>;
@@ -38,13 +38,13 @@ pub fn relax_context_constraints<DB: Database + DatabaseRef>(
     let cfg = &mut context.cfg;
     cfg.disable_base_fee = true;
     cfg.disable_block_gas_limit = true;
-    cfg.tx_gas_limit_cap = None;
-    cfg.limit_contract_initcode_size = None;
-    cfg.limit_contract_code_size = None;
+    cfg.tx_gas_limit_cap = Some(u64::MAX);
+    cfg.limit_contract_initcode_size = Some(usize::MAX);
+    cfg.limit_contract_code_size = Some(usize::MAX);
 
     tx.gas_limit = u64::MAX; // Relax gas limit for execution
     tx.gas_price = 0; // Relax gas price for execution
-    tx.gas_priority_fee = None; // Relax gas priority fee for execution
+    tx.gas_priority_fee = Some(0); // Relax gas priority fee for execution
 }
 
 /// A cloneable error type for EdbDB
