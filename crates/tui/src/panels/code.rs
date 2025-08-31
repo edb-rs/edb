@@ -104,6 +104,12 @@ pub struct CodePanel {
     max_line_width: usize,
     /// Syntax highlighter for code
     syntax_highlighter: SyntaxHighlighter,
+    /// VIM mode number prefix for repetition (e.g., "10" in "10j")
+    vim_number_prefix: String,
+    /// VIM command buffer for commands like ":n"
+    vim_command_buffer: String,
+    /// Whether we're in VIM command mode (after pressing :)
+    vim_command_mode: bool,
 
     // ========== Data (Flag) ==========
     /// Current execution snapshot
@@ -163,6 +169,9 @@ impl CodePanel {
             horizontal_offset: 0,
             max_line_width: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
+            vim_number_prefix: String::new(),
+            vim_command_buffer: String::new(),
+            vim_command_mode: false,
         }
     }
 
@@ -615,6 +624,112 @@ impl CodePanel {
         }
     }
 
+    /// Get repetition count from vim_number_prefix, defaulting to 1
+    fn get_vim_repetition(&self) -> usize {
+        if self.vim_number_prefix.is_empty() {
+            1
+        } else {
+            self.vim_number_prefix.parse().unwrap_or(1).max(1)
+        }
+    }
+
+    /// Clear vim state after executing a command
+    fn clear_vim_state(&mut self) {
+        self.vim_number_prefix.clear();
+    }
+
+    /// Move cursor up by specified number of lines (VIM j command)
+    fn vim_move_up(&mut self, count: usize) {
+        if let Some(current_line) = self.user_cursor_line {
+            let new_line = current_line.saturating_sub(count).max(1);
+            self.move_to(new_line);
+        }
+    }
+
+    /// Move cursor down by specified number of lines (VIM k command)
+    fn vim_move_down(&mut self, count: usize) {
+        let max_lines = self.get_display_lines().len();
+        if let Some(current_line) = self.user_cursor_line {
+            let new_line = (current_line + count).min(max_lines);
+            self.move_to(new_line);
+        }
+    }
+
+    /// Move to first line (VIM gg command)
+    fn vim_goto_top(&mut self) {
+        self.move_to(1);
+    }
+
+    /// Move to last line (VIM G command)
+    fn vim_goto_bottom(&mut self) {
+        let max_lines = self.get_display_lines().len();
+        self.move_to(max_lines);
+    }
+
+    /// Find next blank line (VIM } command)
+    fn vim_next_blank_line(&mut self, count: usize) {
+        let lines = self.get_display_lines();
+        if let Some(current_line) = self.user_cursor_line {
+            let mut target_line = current_line;
+            let mut blank_lines_found = 0;
+
+            for line_num in (current_line + 1)..=lines.len() {
+                if line_num <= lines.len() && lines[line_num - 1].trim().is_empty() {
+                    blank_lines_found += 1;
+                    if blank_lines_found == count {
+                        target_line = line_num;
+                        break;
+                    }
+                }
+            }
+
+            if blank_lines_found > 0 {
+                self.move_to(target_line);
+            }
+        }
+    }
+
+    /// Find previous blank line (VIM { command)
+    fn vim_prev_blank_line(&mut self, count: usize) {
+        let lines = self.get_display_lines();
+        if let Some(current_line) = self.user_cursor_line {
+            let mut target_line = current_line;
+            let mut blank_lines_found = 0;
+
+            for line_num in (1..current_line).rev() {
+                if lines[line_num - 1].trim().is_empty() {
+                    blank_lines_found += 1;
+                    if blank_lines_found == count {
+                        target_line = line_num;
+                        break;
+                    }
+                }
+            }
+
+            if blank_lines_found > 0 {
+                self.move_to(target_line);
+            }
+        }
+    }
+
+    /// Jump to specific line number (VIM :n command)
+    fn vim_jump_to_line(&mut self, line: usize) {
+        let max_lines = self.get_display_lines().len();
+        let target_line = line.max(1).min(max_lines);
+        self.move_to(target_line);
+    }
+
+    /// Execute VIM command from command buffer
+    fn execute_vim_command(&mut self) {
+        let command = self.vim_command_buffer.trim();
+        if let Ok(line_number) = command.parse::<usize>() {
+            self.vim_jump_to_line(line_number);
+        }
+        // Clear command mode
+        self.vim_command_buffer.clear();
+        self.vim_command_mode = false;
+    }
+
     fn move_to(&mut self, line: usize) {
         let max_line = self.get_display_lines().len();
         let viewport_height = self.context_height;
@@ -879,174 +994,299 @@ impl PanelTr for CodePanel {
             return Ok(EventResponse::NotHandled);
         }
 
-        match event.code {
-            // 'F' key toggles file selector
-            KeyCode::Char('f') | KeyCode::Char('F') => {
-                self.toggle_file_selector();
-                Ok(EventResponse::Handled)
+        // Handle VIM command mode first
+        if self.vim_command_mode {
+            match event.code {
+                KeyCode::Char(c) => {
+                    self.vim_command_buffer.push(c);
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Backspace => {
+                    self.vim_command_buffer.pop();
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Enter => {
+                    self.execute_vim_command();
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Esc => {
+                    self.vim_command_buffer.clear();
+                    self.vim_command_mode = false;
+                    Ok(EventResponse::Handled)
+                }
+                _ => Ok(EventResponse::Handled),
             }
-            // Handle file selector navigation when it's open
-            _ if self.show_file_selector => {
-                match event.code {
-                    KeyCode::Up => {
-                        self.file_selector_up();
-                        Ok(EventResponse::Handled)
+        } else {
+            match event.code {
+                // Handle numeric input for VIM repetition
+                KeyCode::Char(c) if c.is_ascii_digit() && !self.show_file_selector => {
+                    self.vim_number_prefix.push(c);
+                    Ok(EventResponse::Handled)
+                }
+                // 'F' key toggles file selector
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    self.toggle_file_selector();
+                    Ok(EventResponse::Handled)
+                }
+                // Handle file selector navigation when it's open
+                _ if self.show_file_selector => {
+                    match event.code {
+                        KeyCode::Up => {
+                            self.file_selector_up();
+                            Ok(EventResponse::Handled)
+                        }
+                        KeyCode::Down => {
+                            self.file_selector_down();
+                            Ok(EventResponse::Handled)
+                        }
+                        KeyCode::Enter => {
+                            self.select_file_from_selector();
+                            Ok(EventResponse::Handled)
+                        }
+                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                            self.show_file_selector = false;
+                            debug!("File selector closed with F");
+                            Ok(EventResponse::Handled)
+                        }
+                        // Allow breakpoints to work in file selector mode
+                        KeyCode::Char('b') | KeyCode::Char('B') => {
+                            if let Some(line) = self.user_cursor_line {
+                                // TODO
+                                let added = false;
+                                if added {
+                                    debug!("Added breakpoint at line {}", line);
+                                } else {
+                                    debug!("Removed breakpoint at line {}", line);
+                                }
+                            }
+                            {
+                                debug!("No user cursor position for breakpoint");
+                            }
+                            Ok(EventResponse::Handled)
+                        }
+                        _ => Ok(EventResponse::NotHandled),
                     }
-                    KeyCode::Down => {
-                        self.file_selector_down();
-                        Ok(EventResponse::Handled)
-                    }
-                    KeyCode::Enter => {
-                        self.select_file_from_selector();
-                        Ok(EventResponse::Handled)
-                    }
-                    KeyCode::Char('f') | KeyCode::Char('F') => {
-                        self.show_file_selector = false;
-                        debug!("File selector closed with F");
-                        Ok(EventResponse::Handled)
-                    }
-                    // Allow breakpoints to work in file selector mode
-                    KeyCode::Char('b') | KeyCode::Char('B') => {
-                        if let Some(line) = self.user_cursor_line {
-                            // TODO
-                            let added = false;
-                            if added {
-                                debug!("Added breakpoint at line {}", line);
-                            } else {
-                                debug!("Removed breakpoint at line {}", line);
+                }
+                KeyCode::Up => {
+                    // Move user cursor up with automatic scrolling
+                    if let Some(line) = self.user_cursor_line {
+                        if line > 1 {
+                            self.user_cursor_line = Some(line - 1);
+                            // Auto-scroll if cursor moves out of view
+                            if line - 1 < self.scroll_offset + 1 {
+                                self.scroll_offset = self.scroll_offset.saturating_sub(1);
                             }
                         }
-                        {
-                            debug!("No user cursor position for breakpoint");
+                    } else {
+                        // If no user cursor, start at current view position
+                        self.user_cursor_line = Some(self.scroll_offset + 1);
+                    }
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: k (up)
+                KeyCode::Char('k') => {
+                    let count = self.get_vim_repetition();
+                    self.vim_move_up(count);
+                    self.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: j (down)
+                KeyCode::Char('j') => {
+                    let count = self.get_vim_repetition();
+                    self.vim_move_down(count);
+                    self.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: h (left scroll)
+                KeyCode::Char('h') => {
+                    let count = self.get_vim_repetition();
+                    if self.horizontal_offset > 0 {
+                        self.horizontal_offset = self.horizontal_offset.saturating_sub(count * 5);
+                    }
+                    self.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: l (right scroll)
+                KeyCode::Char('l') => {
+                    let count = self.get_vim_repetition();
+                    if self.max_line_width > self.content_width {
+                        let max_scroll = self.max_line_width.saturating_sub(self.content_width);
+                        if self.horizontal_offset < max_scroll {
+                            self.horizontal_offset =
+                                (self.horizontal_offset + count * 5).min(max_scroll);
+                        }
+                    }
+                    self.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Down => {
+                    // Move user cursor down with automatic scrolling
+                    let max_lines = self.get_display_lines().len();
+                    if let Some(line) = self.user_cursor_line {
+                        if line < max_lines {
+                            self.user_cursor_line = Some(line + 1);
+                            // Auto-scroll if cursor moves out of view
+                            // We need to ensure cursor stays visible in the viewport
+                            let viewport_height = self.context_height;
+                            if line + 1 > self.scroll_offset + viewport_height {
+                                self.scroll_offset = (line + 1).saturating_sub(viewport_height);
+                            }
+                        }
+                    } else {
+                        // If no user cursor, start at current view position
+                        self.user_cursor_line = Some(self.scroll_offset + 1);
+                    }
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Left => {
+                    // Scroll left
+                    if self.horizontal_offset > 0 {
+                        // Scroll by 5 characters for smoother navigation
+                        self.horizontal_offset = self.horizontal_offset.saturating_sub(5);
+                        debug!("Scrolled left to offset {}", self.horizontal_offset);
+                    }
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Right => {
+                    // Scroll right
+                    if self.max_line_width > self.content_width {
+                        let max_scroll = self.max_line_width.saturating_sub(self.content_width);
+                        if self.horizontal_offset < max_scroll {
+                            // Scroll by 5 characters for smoother navigation
+                            self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
+                            debug!("Scrolled right to offset {}", self.horizontal_offset);
+                        }
+                    }
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: { (previous blank line)
+                KeyCode::Char('{') => {
+                    let count = self.get_vim_repetition();
+                    self.vim_prev_blank_line(count);
+                    self.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: } (next blank line)
+                KeyCode::Char('}') => {
+                    let count = self.get_vim_repetition();
+                    self.vim_next_blank_line(count);
+                    self.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: g (might be gg)
+                KeyCode::Char('g') => {
+                    // Check if this is part of 'gg' command
+                    static mut LAST_G_TIME: std::time::Instant = unsafe { std::mem::zeroed() };
+                    let now = std::time::Instant::now();
+                    let is_double_g = unsafe {
+                        if LAST_G_TIME.elapsed().as_millis() < 500 {
+                            true
+                        } else {
+                            LAST_G_TIME = now;
+                            false
+                        }
+                    };
+
+                    if is_double_g {
+                        // gg command - go to top
+                        self.vim_goto_top();
+                        self.clear_vim_state();
+                        Ok(EventResponse::Handled)
+                    } else {
+                        // First 'g', wait for second
+                        unsafe {
+                            LAST_G_TIME = now;
                         }
                         Ok(EventResponse::Handled)
                     }
-                    _ => Ok(EventResponse::NotHandled),
                 }
-            }
-            KeyCode::Up => {
-                // Move user cursor up with automatic scrolling
-                if let Some(line) = self.user_cursor_line {
-                    if line > 1 {
-                        self.user_cursor_line = Some(line - 1);
-                        // Auto-scroll if cursor moves out of view
-                        if line - 1 < self.scroll_offset + 1 {
-                            self.scroll_offset = self.scroll_offset.saturating_sub(1);
-                        }
-                    }
-                } else {
-                    // If no user cursor, start at current view position
-                    self.user_cursor_line = Some(self.scroll_offset + 1);
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Down => {
-                // Move user cursor down with automatic scrolling
-                let max_lines = self.get_display_lines().len();
-                if let Some(line) = self.user_cursor_line {
-                    if line < max_lines {
-                        self.user_cursor_line = Some(line + 1);
-                        // Auto-scroll if cursor moves out of view
-                        // We need to ensure cursor stays visible in the viewport
-                        let viewport_height = self.context_height;
-                        if line + 1 > self.scroll_offset + viewport_height {
-                            self.scroll_offset = (line + 1).saturating_sub(viewport_height);
-                        }
-                    }
-                } else {
-                    // If no user cursor, start at current view position
-                    self.user_cursor_line = Some(self.scroll_offset + 1);
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Left => {
-                // Scroll left
-                if self.horizontal_offset > 0 {
-                    // Scroll by 5 characters for smoother navigation
-                    self.horizontal_offset = self.horizontal_offset.saturating_sub(5);
-                    debug!("Scrolled left to offset {}", self.horizontal_offset);
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Right => {
-                // Scroll right
-                if self.max_line_width > self.content_width {
-                    let max_scroll = self.max_line_width.saturating_sub(self.content_width);
-                    if self.horizontal_offset < max_scroll {
-                        // Scroll by 5 characters for smoother navigation
-                        self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
-                        debug!("Scrolled right to offset {}", self.horizontal_offset);
-                    }
-                }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('b') | KeyCode::Char('B') => {
-                // Toggle breakpoint at user cursor position
-                if let Some(line) = self.user_cursor_line {
-                    // TODO
-                    let added = false;
-                    if added {
-                        debug!("Added breakpoint at line {}", line);
+                // VIM-like navigation: G (go to bottom or specific line)
+                KeyCode::Char('G') => {
+                    if self.vim_number_prefix.is_empty() {
+                        // G without number - go to bottom
+                        self.vim_goto_bottom();
                     } else {
-                        debug!("Removed breakpoint at line {}", line);
+                        // nG - go to line n
+                        let line = self.get_vim_repetition();
+                        self.vim_jump_to_line(line);
                     }
-                } else {
-                    debug!("No user cursor position for breakpoint");
+                    self.clear_vim_state();
+                    Ok(EventResponse::Handled)
                 }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('s') => {
-                // Step: Move to next snapshot/instruction
-                debug!("Step (next instruction) requested from code panel");
-                dm.execution.step()?;
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('r') => {
-                debug!("Reverse step (previous instruction) requested from code panel");
-                dm.execution.reverse_step()?;
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('n') => {
-                // Next: Step over function calls (skip internal calls)
-                // TODO: This will send a next command to the RPC server
-                debug!("Next (step over) requested from code panel");
-                // // For now, simulate stepping over to next significant point
-                // let current = dm.execution.current_snapshot;
-                // let total = dm.execution.snapshot_count;
-                // let next_pos = (current + 5).min(total.saturating_sub(1));
-                // // TODO
-                // // dm.execution_mut().update_state(next_pos, total, Some(next_pos + 9), None);
-                // debug!("Next (step over) to snapshot {}", next_pos);
+                // VIM command mode
+                KeyCode::Char(':') => {
+                    self.vim_command_mode = true;
+                    self.vim_command_buffer.clear();
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('b') | KeyCode::Char('B') => {
+                    // Toggle breakpoint at user cursor position
+                    if let Some(line) = self.user_cursor_line {
+                        // TODO
+                        let added = false;
+                        if added {
+                            debug!("Added breakpoint at line {}", line);
+                        } else {
+                            debug!("Removed breakpoint at line {}", line);
+                        }
+                    } else {
+                        debug!("No user cursor position for breakpoint");
+                    }
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('s') => {
+                    // Step: Move to next snapshot/instruction
+                    debug!("Step (next instruction) requested from code panel");
+                    dm.execution.step()?;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('r') => {
+                    debug!("Reverse step (previous instruction) requested from code panel");
+                    dm.execution.reverse_step()?;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('n') => {
+                    // Next: Step over function calls (skip internal calls)
+                    // TODO: This will send a next command to the RPC server
+                    debug!("Next (step over) requested from code panel");
+                    // // For now, simulate stepping over to next significant point
+                    // let current = dm.execution.current_snapshot;
+                    // let total = dm.execution.snapshot_count;
+                    // let next_pos = (current + 5).min(total.saturating_sub(1));
+                    // // TODO
+                    // // dm.execution_mut().update_state(next_pos, total, Some(next_pos + 9), None);
+                    // debug!("Next (step over) to snapshot {}", next_pos);
 
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('p') => {
-                // Previous: Step back over function calls (reverse step over)
-                // TODO: This will send a previous command to the RPC server
-                debug!("Previous (reverse step over) requested from code panel");
-                // // For now, simulate stepping back to previous significant point
-                // let current = dm.execution.current_snapshot;
-                // let total = dm.execution.snapshot_count;
-                // let prev_pos = current.saturating_sub(5);
-                // // TODO
-                // // dm.execution_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
-                // debug!("Previous (reverse step over) to snapshot {}", prev_pos);
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('p') => {
+                    // Previous: Step back over function calls (reverse step over)
+                    // TODO: This will send a previous command to the RPC server
+                    debug!("Previous (reverse step over) requested from code panel");
+                    // // For now, simulate stepping back to previous significant point
+                    // let current = dm.execution.current_snapshot;
+                    // let total = dm.execution.snapshot_count;
+                    // let prev_pos = current.saturating_sub(5);
+                    // // TODO
+                    // // dm.execution_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
+                    // debug!("Previous (reverse step over) to snapshot {}", prev_pos);
 
-                Ok(EventResponse::Handled)
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('c') => {
+                    // TODO: Step into next call (forward call navigation)
+                    // This will send a command to the RPC server to step into the next function call
+                    debug!("Next call navigation requested");
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('C') => {
+                    // TODO: Step back from call (reverse call navigation)
+                    // This will send a command to the RPC server to step back from the current call
+                    debug!("Previous call navigation requested");
+                    Ok(EventResponse::Handled)
+                }
+                _ => Ok(EventResponse::NotHandled),
             }
-            KeyCode::Char('c') => {
-                // TODO: Step into next call (forward call navigation)
-                // This will send a command to the RPC server to step into the next function call
-                debug!("Next call navigation requested");
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('C') => {
-                // TODO: Step back from call (reverse call navigation)
-                // This will send a command to the RPC server to step back from the current call
-                debug!("Previous call navigation requested");
-                Ok(EventResponse::Handled)
-            }
-            _ => Ok(EventResponse::NotHandled),
         }
     }
 
