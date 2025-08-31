@@ -978,9 +978,14 @@ pub enum AnalysisError {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use foundry_compilers::{
+        artifacts::{Severity, Sources},
+        solc::{SolcCompiler, SolcLanguage, SolcSettings, SolcVersionedInput},
+        CompilationError, Compiler, CompilerInput,
+    };
     use semver::Version;
 
-    use crate::compile_contract_source_to_source_unit;
+    use crate::{compile_contract_source_to_source_unit, ASTPruner};
 
     use super::*;
 
@@ -1241,5 +1246,70 @@ contract TestContract {
         // Assert that we have one modifier step, and two statement steps
         assert!(count_step_by_variant!(analysis, ModifierEntry()) == 1);
         assert!(count_step_by_variant!(analysis, Statement()) == 2);
+    }
+
+    #[test]
+    fn test_type_casting_multi_files() {
+        let interface_file0 = "interface.sol";
+        let source0 = r#"
+interface ITestContract {
+    function getValue() external view returns (uint256);
+}
+"#;
+        let source1 = r#"
+import { ITestContract } from "interface.sol";
+
+contract TestContract {
+    function foo() public {
+        ITestContract I = ITestContract(msg.sender);
+    }
+}
+"#;
+        let version = Version::parse("0.8.19").unwrap();
+        let sources = Sources::from_iter([
+            (PathBuf::from(interface_file0), Source::new(source0)),
+            (PathBuf::from(TEST_CONTRACT_SOURCE_PATH), Source::new(source1)),
+        ]);
+        let settings = SolcSettings::default();
+        let solc_input =
+            SolcVersionedInput::build(sources, settings, SolcLanguage::Solidity, version);
+        let compiler = SolcCompiler::AutoDetect;
+        let output = compiler.compile(&solc_input).unwrap();
+
+        // return error if compiler error
+        let errors = output
+            .errors
+            .iter()
+            .filter(|e| e.severity() == Severity::Error)
+            .map(|e| format!("{e}"))
+            .collect::<Vec<_>>();
+        if !errors.is_empty() {
+            panic!("Compiler error: {}", errors.join("\n"));
+        }
+
+        let mut ast = output
+            .sources
+            .get(&PathBuf::from(TEST_CONTRACT_SOURCE_PATH))
+            .unwrap()
+            .ast
+            .clone()
+            .unwrap();
+        let source_unit = ASTPruner::convert(&mut ast, false).unwrap();
+
+        let sources = BTreeMap::from([(TEST_CONTRACT_SOURCE_ID, Source::new(source1))]);
+        let analyzer = Analyzer::new();
+        let analysis = analyzer
+            .analyze(
+                TEST_CONTRACT_SOURCE_ID,
+                &PathBuf::from(TEST_CONTRACT_SOURCE_PATH),
+                &source_unit,
+            )
+            .unwrap();
+
+        let mut function_calls = 0;
+        for step in analysis.steps {
+            function_calls += step.read().function_calls.len();
+        }
+        assert_eq!(function_calls, 0);
     }
 }
