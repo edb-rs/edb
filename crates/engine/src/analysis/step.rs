@@ -40,6 +40,7 @@ use foundry_compilers::artifacts::{
     WhileStatement, // SourceUnit,
 };
 use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
@@ -111,6 +112,10 @@ pub fn new_usid() -> USID {
 #[derive(Debug, Clone)]
 pub struct StepRef {
     inner: Arc<RwLock<Step>>,
+    /* cached readonly fields*/
+    usid: OnceCell<USID>,
+    variant: OnceCell<StepVariant>,
+    function_calls: OnceCell<usize>,
 }
 
 impl From<Step> for StepRef {
@@ -142,7 +147,12 @@ impl<'de> Deserialize<'de> for StepRef {
 
 impl StepRef {
     pub fn new(inner: Step) -> Self {
-        Self { inner: Arc::new(RwLock::new(inner)) }
+        Self {
+            inner: Arc::new(RwLock::new(inner)),
+            usid: OnceCell::new(),
+            variant: OnceCell::new(),
+            function_calls: OnceCell::new(),
+        }
     }
 
     pub(crate) fn read(&self) -> RwLockReadGuard<'_, Step> {
@@ -151,6 +161,21 @@ impl StepRef {
 
     pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Step> {
         self.inner.write()
+    }
+
+    /// Returns the USID of this step.
+    pub fn usid(&self) -> USID {
+        *self.usid.get_or_init(|| self.inner.read().usid)
+    }
+
+    /// Returns the variant of this step.
+    pub fn variant(&self) -> &StepVariant {
+        self.variant.get_or_init(|| self.inner.read().variant.clone())
+    }
+
+    /// Returns the number of function calls made in this step.
+    pub fn function_calls(&self) -> usize {
+        *self.function_calls.get_or_init(|| self.inner.read().function_calls.len())
     }
 }
 

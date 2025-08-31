@@ -536,6 +536,17 @@ impl Analyzer {
                 // the step is the `while(...)`
                 let loc = sloc_rdiff(do_while_statement.src, do_while_statement.body.src);
                 step!(DoWhileLoop, *do_while_statement.clone(), loc);
+
+                // we take over the walk of the sub ast tree in the do-while statement step.
+                let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
+                do_while_statement.condition.walk(&mut single_step_walker)?;
+
+                // end the do-while statement step early and then walk the body of the do-while statement.
+                self.exit_current_statement_step(statement)?;
+                do_while_statement.body.walk(self)?;
+
+                // skip the subtree of the do-while statement since we have already walked it
+                return Ok(VisitorAction::SkipSubtree);
             }
             Statement::EmitStatement(emit_statement) => simple_stmt_to_step!(emit_statement),
             Statement::ExpressionStatement(expr_stmt) => simple_stmt_to_step!(expr_stmt),

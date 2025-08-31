@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Display};
 
 use crate::{
     analysis::{stmt_src, SourceAnalysis},
@@ -63,14 +63,14 @@ impl SourceModifications {
                     if act.priority >= modification.as_instrument_action().priority {
                         act.content = InstrumentContent::Plain(format!(
                             "{} {}",
-                            act.content.as_str(),
-                            modification.as_instrument_action().content.as_str(),
+                            act.content.to_string(),
+                            modification.as_instrument_action().content.to_string(),
                         ))
                     } else {
                         act.content = InstrumentContent::Plain(format!(
                             "{} {}",
-                            modification.as_instrument_action().content.as_str(),
-                            act.content.as_str(),
+                            modification.as_instrument_action().content.to_string(),
+                            act.content.to_string(),
                         ))
                     }
                 });
@@ -93,8 +93,10 @@ impl SourceModifications {
         for (_, modification) in self.modifications.iter().rev() {
             match modification {
                 Modification::Instrument(instrument_action) => {
-                    modified_source
-                        .insert_str(instrument_action.loc, instrument_action.content.as_str());
+                    modified_source.insert_str(
+                        instrument_action.loc,
+                        format!("\n{}\n", instrument_action.content.to_string()).as_str(),
+                    );
                 }
                 Modification::Remove(remove_action) => {
                     modified_source.replace_range(remove_action.start()..remove_action.end(), "");
@@ -222,17 +224,26 @@ pub enum InstrumentContent {
     /// The code to instrument. The plain code can be directly inserted into the source code as a string.
     Plain(String),
     /// A `before_step` hook. The debugger will pause here during step-by-step execution.
-    BeforeStepHook(USID),
+    BeforeStepHook {
+        /// The USID of the step.
+        usid: USID,
+        /// The number of function calls made in the step.
+        function_calls: usize,
+    },
     /// A `variable_update` hook. The debugger will record the value of the variable when it is updated.
     VariableUpdateHook(UVID),
 }
 
-impl InstrumentContent {
-    /// Gets the string representation of the instrument content.
-    pub fn as_str(&self) -> &str {
+impl Display for InstrumentContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Plain(content) => content,
-            Self::BeforeStepHook(_sid) => todo!(),
+            Self::Plain(content) => write!(f, "{content}"),
+            Self::BeforeStepHook { usid, function_calls } => write!(
+                f,
+                "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode({}, {}));",
+                u64::from(*usid),
+                function_calls
+            ),
             Self::VariableUpdateHook(_vid) => todo!(),
         }
     }
@@ -390,7 +401,7 @@ impl SourceModifications {
         };
 
         for step in &analysis.steps {
-            match &step.read().variant {
+            match &step.variant() {
                 crate::analysis::StepVariant::IfCondition(if_stmt) => {
                     // modify the true body if needed
                     if let BlockOrStatement::Statement(stmt) = &if_stmt.true_body {
@@ -423,11 +434,75 @@ impl SourceModifications {
         }
         Ok(())
     }
+
+    fn collect_before_step_hook_modifications(
+        &mut self,
+        _source: &str,
+        analysis: &SourceAnalysis,
+    ) -> Result<()> {
+        let source_id = self.source_id;
+        for step in &analysis.steps {
+            let usid = step.usid();
+            let variant = step.variant();
+            let function_calls = step.function_calls();
+            let loc = match variant {
+                crate::analysis::StepVariant::FunctionEntry(function_definition) => {
+                    // the before step hook should be instrumented before the first statement of the function
+                    let Some(body) = &function_definition.body else {
+                        // skip the step if the function has no body
+                        continue;
+                    };
+                    // the first char of function body is the '{', so we insert after that.
+                    body.src.start.expect("function body start location not found") + 1
+                }
+                crate::analysis::StepVariant::Statement(statement) => {
+                    // the before step hook should be instrumented before the statement
+                    stmt_src(statement).start.expect("statement start location not found")
+                }
+                crate::analysis::StepVariant::Statements(statements) => {
+                    // the before step hook should be instrumented before the first statement
+                    stmt_src(&statements[0]).start.expect("statement start location not found")
+                }
+                crate::analysis::StepVariant::IfCondition(if_statement) => {
+                    // the before step hook should be instrumented before the if statement
+                    if_statement.src.start.expect("if statement start location not found")
+                }
+                crate::analysis::StepVariant::ForLoop(for_statement) => {
+                    // the before step hook should be instrumented before the for statement
+                    for_statement.src.start.expect("for statement start location not found")
+                }
+                crate::analysis::StepVariant::WhileLoop(while_statement) => {
+                    // the before step hook should be instrumented before the while statement
+                    while_statement.src.start.expect("while statement start location not found")
+                }
+                crate::analysis::StepVariant::DoWhileLoop(do_while_statement) => {
+                    // the before step hook should be instrumented before the do-while statement
+                    do_while_statement
+                        .src
+                        .start
+                        .expect("do-while statement start location not found")
+                }
+                crate::analysis::StepVariant::Try(try_statement) => {
+                    // the before step hook should be instrumented before the try statement
+                    try_statement.src.start.expect("try statement start location not found")
+                }
+            };
+            let instrument_action = InstrumentAction {
+                source_id,
+                loc,
+                content: InstrumentContent::BeforeStepHook { usid, function_calls },
+                priority: NORMAL_PRIORITY,
+            };
+            self.add_modification(instrument_action.into());
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{analysis, compile_contract_source_to_source_unit};
+    use crate::analysis;
 
     use super::*;
 
@@ -523,6 +598,64 @@ mod tests {
         modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 10);
         let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
+
+    #[test]
+    fn test_collect_function_entry_step_hook_modifications() {
+        let source = r#"
+        abstract contract C {
+            function v() public virtual returns (uint256);
+
+            function a() public returns (uint256) {}
+        }
+        "#;
+
+        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 1);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
+
+    #[test]
+    fn test_collect_before_step_hook_modifications() {
+        let source = r#"
+        abstract contract C {
+            function a() public returns (uint256) {
+                if (false) {return 0;}
+                else    {return 1;}
+                for (uint256 i = 0; i < 10; i++) {
+                    return 0;
+                }
+                while (true) {
+                    return 0;
+                }
+                do {
+                    return 0;
+                } while (false);
+                try this.a() {
+                    return 0;
+                }
+                catch {}
+                return 0;
+            }
+        }
+        "#;
+
+        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 13);
+        let modified_source = modifications.modify_source(source);
+        println!("{}", modified_source);
 
         // The modified source should be able to be compiled and analyzed.
         let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
