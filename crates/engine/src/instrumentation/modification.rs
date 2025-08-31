@@ -95,7 +95,7 @@ impl SourceModifications {
                 Modification::Instrument(instrument_action) => {
                     modified_source.insert_str(
                         instrument_action.loc,
-                        format!("\n{}\n", instrument_action.content.to_string()).as_str(),
+                        format!("\n{}\n", instrument_action.content).as_str(),
                     );
                 }
                 Modification::Remove(remove_action) => {
@@ -403,31 +403,59 @@ impl SourceModifications {
             vec![left_bracket.into(), right_bracket.into()]
         };
 
+        fn indeed_statement(block_or_stmt: &BlockOrStatement) -> Option<&Statement> {
+            match block_or_stmt {
+                BlockOrStatement::Statement(stmt) => match stmt {
+                    Statement::Block(_) => None,
+                    _ => Some(stmt),
+                },
+                BlockOrStatement::Block(_) => None,
+            }
+        }
+
         for step in &analysis.steps {
             match &step.variant() {
                 crate::analysis::StepVariant::IfCondition(if_stmt) => {
                     // modify the true body if needed
-                    if let BlockOrStatement::Statement(stmt) = &if_stmt.true_body {
+                    if let Some(stmt) = indeed_statement(&if_stmt.true_body) {
+                        println!(
+                            "true body: \n{}",
+                            source_string_at_location(source_id, source, &stmt_src(stmt))
+                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
 
                     // modify the false body if needed
-                    if let Some(BlockOrStatement::Statement(stmt)) = &if_stmt.false_body {
+                    if let Some(stmt) =
+                        if_stmt.false_body.as_ref().and_then(|body| indeed_statement(body))
+                    {
+                        println!(
+                            "false body: \n{}",
+                            source_string_at_location(source_id, source, &stmt_src(stmt))
+                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
                 }
                 crate::analysis::StepVariant::ForLoop(for_stmt) => {
                     // modify the body if needed
-                    if let BlockOrStatement::Statement(stmt) = &for_stmt.body {
+                    if let Some(stmt) = indeed_statement(&for_stmt.body) {
+                        println!(
+                            "for body: \n{}",
+                            source_string_at_location(source_id, source, &stmt_src(stmt))
+                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
                 }
                 crate::analysis::StepVariant::WhileLoop(while_stmt) => {
                     // modify the body if needed
-                    if let BlockOrStatement::Statement(stmt) = &while_stmt.body {
+                    if let Some(stmt) = indeed_statement(&while_stmt.body) {
+                        println!(
+                            "while body: \n{}",
+                            source_string_at_location(source_id, source, &stmt_src(stmt))
+                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
@@ -657,6 +685,28 @@ mod tests {
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
         modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 13);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
+
+    #[test]
+    fn test_modifier_is_not_step() {
+        let source = r#"
+        contract C {
+            modifier m(uint x) {
+                _;
+            }
+
+            function a() public m(1) {}
+        }
+        "#;
+        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 1);
         let modified_source = modifications.modify_source(source);
 
         // The modified source should be able to be compiled and analyzed.

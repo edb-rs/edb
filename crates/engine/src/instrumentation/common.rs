@@ -34,7 +34,8 @@ pub fn instrument(input: &SolcInput, analysis: &AnalysisResult) -> Result<SolcIn
         let mut modifications = SourceModifications::new(*source_id);
         modifications.collect_modifications(&source.content, analysis_data)?;
 
-        let instrumented_source = Source::new(modifications.modify_source(&source.content));
+        let modified_source = modifications.modify_source(&source.content);
+        let instrumented_source = Source::new(modified_source);
         instrumented_input.sources.insert(source_path, instrumented_source);
     }
 

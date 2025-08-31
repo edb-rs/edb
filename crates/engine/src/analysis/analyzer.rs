@@ -19,8 +19,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, EventDefinition, ForStatement, FunctionCall,
-    FunctionDefinition, Source, SourceUnit, StateMutability, Statement, UncheckedBlock,
-    VariableDeclaration, Visibility,
+    FunctionCallKind, FunctionDefinition, Source, SourceUnit, StateMutability, Statement,
+    UncheckedBlock, VariableDeclaration, Visibility,
 };
 
 use serde::{Deserialize, Serialize};
@@ -678,7 +678,9 @@ impl Analyzer {
     /// Add a function call to the current step, if we are in a step.
     fn add_function_call(&mut self, call: &FunctionCall) -> eyre::Result<()> {
         if let Some(step) = self.current_step.as_mut() {
-            step.write().function_calls.push(call.clone());
+            if call.kind == FunctionCallKind::FunctionCall {
+                step.write().function_calls.push(call.clone());
+            }
         }
         Ok(())
     }
@@ -1134,5 +1136,37 @@ contract TestContract {
         // Assert that we have one if step, and one statement step
         assert!(count_step_by_variant!(analysis, IfCondition()) == 1);
         assert!(count_step_by_variant!(analysis, Statement()) == 2);
+    }
+
+    #[test]
+    fn test_type_conversion_is_not_function_call() {
+        let source = r#"
+interface ITestContract {
+    function getValue() external view returns (uint256);
+}
+
+contract TestContract {
+    struct S {
+        uint256 value;
+    }
+    function getValue() public view returns (uint256) {
+        ITestContract I = ITestContract(msg.sender);
+        S memory s = S({ value: 1 });
+        getValue();
+        this.getValue();
+        return uint256(1);
+    }
+}
+"#;
+
+        // Use utility function to compile and analyze
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        // Assert that we have one function call step
+        let mut function_calls = 0;
+        analysis.steps.iter().for_each(|step| {
+            function_calls += step.read().function_calls.len();
+        });
+        assert_eq!(function_calls, 2);
     }
 }
