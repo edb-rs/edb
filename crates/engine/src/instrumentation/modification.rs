@@ -486,6 +486,14 @@ impl SourceModifications {
                     // the first char of function body is the '{', so we insert after that.
                     body.src.start.expect("function body start location not found") + 1
                 }
+                crate::analysis::StepVariant::ModifierEntry(modifier_definition) => {
+                    // the before step hook should be instrumented before the first statement of the modifier
+                    let Some(body) = &modifier_definition.body else {
+                        // skip the step if the modifier has no body
+                        continue;
+                    };
+                    body.src.start.expect("modifier body start location not found") + 1
+                }
                 crate::analysis::StepVariant::Statement(statement) => {
                     // the before step hook should be instrumented before the statement
                     stmt_src(statement).start.expect("statement start location not found")

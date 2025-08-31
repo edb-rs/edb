@@ -19,8 +19,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, EventDefinition, ForStatement, FunctionCall,
-    FunctionCallKind, FunctionDefinition, Source, SourceUnit, StateMutability, Statement,
-    UncheckedBlock, VariableDeclaration, Visibility,
+    FunctionCallKind, FunctionDefinition, ModifierDefinition, Source, SourceUnit, StateMutability,
+    Statement, UncheckedBlock, VariableDeclaration, Visibility,
 };
 
 use serde::{Deserialize, Serialize};
@@ -221,6 +221,7 @@ impl SourceAnalysis {
     fn step_variant_name(&self, variant: &StepVariant) -> String {
         match variant {
             StepVariant::FunctionEntry(_) => "Function Entry".to_string(),
+            StepVariant::ModifierEntry(_) => "Modifier Entry".to_string(),
             StepVariant::Statement(stmt) => self.statement_name(stmt),
             StepVariant::Statements(_) => "Multiple Statements".to_string(),
             StepVariant::IfCondition(_) => "If Condition".to_string(),
@@ -675,6 +676,40 @@ impl Analyzer {
         Ok(VisitorAction::SkipSubtree)
     }
 
+    fn enter_new_modifier_step(
+        &mut self,
+        modifier: &ModifierDefinition,
+    ) -> eyre::Result<VisitorAction> {
+        assert!(self.current_step.is_none(), "Step cannot be nested");
+
+        if modifier.body.is_none() {
+            // if a modifier has no body, we skip the modifier step
+            return Ok(VisitorAction::SkipSubtree);
+        }
+
+        // step is the modifier header
+        let current_scope = self.current_scope();
+        let loc = sloc_ldiff(modifier.src, modifier.body.as_ref().unwrap().src);
+        self.current_step = Some(
+            Step::new(StepVariant::ModifierEntry(modifier.clone()), loc, current_scope.clone())
+                .into(),
+        );
+
+        // we take over the walk of the sub ast tree in the modifier step.
+        let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
+        modifier.parameters.walk(&mut single_step_walker)?;
+
+        // end the modifier step early and then walk the body of the modifier.
+        let step = self.current_step.take().unwrap();
+        self.finished_steps.push(step);
+        if let Some(body) = &modifier.body {
+            body.walk(self)?;
+        }
+
+        // skip the subtree of the modifier since we have already walked it
+        Ok(VisitorAction::SkipSubtree)
+    }
+
     /// Add a function call to the current step, if we are in a step.
     fn add_function_call(&mut self, call: &FunctionCall) -> eyre::Result<()> {
         if let Some(step) = self.current_step.as_mut() {
@@ -804,6 +839,26 @@ impl Visitor for Analyzer {
         definition: &FunctionDefinition,
     ) -> eyre::Result<()> {
         // exit the function scope
+        self.exit_current_scope(definition.src)?;
+        Ok(())
+    }
+
+    fn visit_modifier_definition(
+        &mut self,
+        definition: &foundry_compilers::artifacts::ModifierDefinition,
+    ) -> eyre::Result<VisitorAction> {
+        // enter a variable scope for the modifier
+        self.enter_new_scope(ScopeNode::ModifierDefinition(definition.clone()))?;
+
+        // enter a modifier step
+        self.enter_new_modifier_step(definition)
+    }
+
+    fn post_visit_modifier_definition(
+        &mut self,
+        definition: &ModifierDefinition,
+    ) -> eyre::Result<()> {
+        // exit the modifier scope
         self.exit_current_scope(definition.src)?;
         Ok(())
     }
@@ -1168,5 +1223,23 @@ contract TestContract {
             function_calls += step.read().function_calls.len();
         });
         assert_eq!(function_calls, 2);
+    }
+
+    #[test]
+    fn test_steps_in_modifier() {
+        let source = r#"
+contract TestContract {
+    modifier test() {
+        uint x = 1;
+        _;
+        uint y = 2;
+    }
+}
+"#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        // Assert that we have one modifier step, and two statement steps
+        assert!(count_step_by_variant!(analysis, ModifierEntry()) == 1);
+        assert!(count_step_by_variant!(analysis, Statement()) == 2);
     }
 }

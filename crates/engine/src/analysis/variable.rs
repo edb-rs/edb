@@ -33,7 +33,7 @@ use delegate::delegate;
 use derive_more::From;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, Expression, ForStatement, FunctionDefinition,
-    SourceUnit, UncheckedBlock, VariableDeclaration,
+    ModifierDefinition, SourceUnit, UncheckedBlock, VariableDeclaration,
 };
 use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
@@ -506,6 +506,8 @@ pub enum ScopeNode {
     ContractDefinition(#[from] ContractDefinition),
     /// A function definition scope.
     FunctionDefinition(#[from] FunctionDefinition),
+    /// A modifier definition scope.
+    ModifierDefinition(#[from] ModifierDefinition),
 }
 
 impl ScopeNode {
@@ -518,6 +520,7 @@ impl ScopeNode {
             Self::ForStatement(for_statement) => for_statement.id,
             Self::ContractDefinition(contract_definition) => contract_definition.id,
             Self::FunctionDefinition(function_definition) => function_definition.id,
+            Self::ModifierDefinition(modifier_definition) => modifier_definition.id,
         }
     }
 
@@ -530,6 +533,7 @@ impl ScopeNode {
             Self::ForStatement(for_statement) => for_statement.src,
             Self::ContractDefinition(contract_definition) => contract_definition.src,
             Self::FunctionDefinition(function_definition) => function_definition.src,
+            Self::ModifierDefinition(modifier_definition) => modifier_definition.src,
         }
     }
 
@@ -542,6 +546,7 @@ impl ScopeNode {
             Self::ForStatement(_) => "ForStatement",
             Self::ContractDefinition(_) => "ContractDefinition",
             Self::FunctionDefinition(_) => "FunctionDefinition",
+            Self::ModifierDefinition(_) => "ModifierDefinition",
         }
     }
 }

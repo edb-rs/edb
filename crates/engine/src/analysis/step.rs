@@ -34,6 +34,7 @@ use foundry_compilers::artifacts::{
     FunctionCall,
     FunctionDefinition,
     IfStatement,
+    ModifierDefinition,
     Statement,
     TryStatement,
     VariableDeclaration,
@@ -292,6 +293,8 @@ impl Step {
 pub enum StepVariant {
     /// A function entry step.
     FunctionEntry(FunctionDefinition),
+    /// A modifier entry step.
+    ModifierEntry(ModifierDefinition),
     /// A single statement that is executed in a single debug step.
     Statement(Statement),
     /// A consecutive list of statements that are executed in a single debug step.
