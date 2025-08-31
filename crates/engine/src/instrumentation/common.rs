@@ -18,25 +18,30 @@
 
 use std::path::PathBuf;
 
-use crate::{AnalysisResult, SourceAnalysis, StepRef};
+use crate::{AnalysisResult, SourceAnalysis, SourceModifications, StepRef};
 use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
 
 pub fn instrument(input: &SolcInput, analysis: &AnalysisResult) -> Result<SolcInput> {
     let mut instrumented_input = input.clone();
-    for (_, analysis_data) in &analysis.sources {
-        let source = instrumented_input.sources.get(&analysis_data.path).ok_or(eyre::eyre!(
+    for (source_id, analysis_data) in &analysis.sources {
+        let source_path = analysis_data.path.clone();
+        let source = instrumented_input.sources.get(&source_path).ok_or(eyre::eyre!(
             "Source code for path {:?} not found in input sources",
-            analysis_data.path
+            source_path
         ))?;
 
-        let instrumented_source = instrument_inner(&analysis_data.path, source, analysis_data)?;
-        instrumented_input.sources.insert(analysis_data.path.clone(), instrumented_source);
+        let mut modifications = SourceModifications::new(*source_id);
+        modifications.collect_modifications(&source.content, analysis_data)?;
+
+        let instrumented_source = Source::new(modifications.modify_source(&source.content));
+        instrumented_input.sources.insert(source_path, instrumented_source);
     }
 
     Ok(instrumented_input)
 }
 
+#[deprecated]
 fn instrument_inner(
     path: &PathBuf,
     source: &Source,
@@ -70,6 +75,7 @@ fn instrument_inner(
     Ok(Source::new(source_text))
 }
 
+#[deprecated]
 fn instrument_before_step(source_text: &mut String, step_result: &StepRef) {
     let checkpoint_call = format!(
         "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode({}));\n",
@@ -80,14 +86,17 @@ fn instrument_before_step(source_text: &mut String, step_result: &StepRef) {
     source_text.insert_str(start, checkpoint_call.as_str());
 }
 
+#[deprecated]
 fn instrument_variable_in_scope(source_text: &mut String, step_result: &StepRef) {
     // TODO (ZZ): Implement variable in scope instrumentation
 }
 
+#[deprecated]
 fn instrument_variable_out_of_scope(source_text: &mut String, step_result: &StepRef) {
     // TODO (ZZ): Implement variable out of scope instrumentation
 }
 
+#[deprecated]
 fn instrument_variable_update(source_text: &mut String, step_result: &StepRef) {
     // TODO (ZZ): Implement variable update instrumentation
 }

@@ -258,7 +258,10 @@ impl SourceModifications {
         // Collect the modifications to patch single-statement if/for/while/try/catch/etc.
         self.collect_statement_to_block_modifications(source, analysis)?;
 
-        // TODO: collect more modifications for each step.
+        // Collect the before step hook modifications for each step.
+        self.collect_before_step_hook_modifications(source, analysis)?;
+
+        // TODO: Collect the variable update hook modifications for each step.
 
         Ok(())
     }
@@ -655,7 +658,6 @@ mod tests {
         modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 13);
         let modified_source = modifications.modify_source(source);
-        println!("{}", modified_source);
 
         // The modified source should be able to be compiled and analyzed.
         let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
