@@ -1098,7 +1098,7 @@ impl PanelTr for TracePanel {
             let status_bar = StatusBar::new()
                 .current_panel("Trace".to_string())
                 .message(format!(
-                    "Exec: {} | Sel: {}/{}",
+                    "Exec: {} | User: {}/{}",
                     exec_entry,
                     self.selected_index + 1,
                     display_lines.len()

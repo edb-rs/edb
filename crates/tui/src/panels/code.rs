@@ -25,7 +25,7 @@ use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_primitives::Address;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use edb_common::types::Code;
+use edb_common::types::{Code, SnapshotInfo};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -35,6 +35,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 use tracing::{debug, info};
+use tracing_subscriber::field::display;
 
 /// Code display mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -868,7 +869,7 @@ impl CodePanel {
                 let execution_line = self
                     .opcodes
                     .iter()
-                    .position(|(pc, _)| Some(*pc as usize as usize) == exec_opcode_pc)
+                    .position(|(pc, _)| Some(*pc as usize) == exec_opcode_pc)
                     .map(|idx| idx + 1) // 1-based
                     .unwrap_or_default();
                 self.move_to(execution_line);
@@ -916,7 +917,52 @@ impl CodePanel {
     fn update_execution_info(&mut self, dm: &mut DataManager) -> Option<()> {
         if self.current_execution_snapshot != Some(dm.execution.get_current_snapshot()) {
             // We have update the execution snapshot
-            self.current_execution_snapshot = Some(dm.execution.get_current_snapshot());
+            let execution_snapshot_id = dm.execution.get_current_snapshot();
+            let display_snapshot_id = dm.execution.get_display_snapshot();
+
+            let execution_entry_id =
+                dm.execution.get_snapshot_info(execution_snapshot_id)?.frame_id().trace_entry_id();
+            let display_entry_id =
+                dm.execution.get_snapshot_info(display_snapshot_id)?.frame_id().trace_entry_id();
+
+            let execution_address = dm.execution.get_trace().get(execution_entry_id)?.code_address;
+            let display_address = dm.execution.get_trace().get(display_entry_id)?.code_address;
+
+            self.current_execution_snapshot = Some(execution_snapshot_id);
+
+            if execution_address != display_address {
+                // We do not need to show the execution line
+                self.current_execution_line = None;
+                return Some(());
+            }
+
+            match dm.execution.get_snapshot_info(execution_snapshot_id)? {
+                SnapshotInfo::Hook(hook_info) => {
+                    let execution_path = hook_info.path.as_os_str().to_string_lossy();
+                    let display_path = &self.display_info.available_files[self.selected_path_index];
+                    if &*execution_path != display_path {
+                        // Execution moved to a different file, we simply do not show it
+                        self.current_execution_line = None;
+                    } else {
+                        let offset = hook_info.offset;
+                        let execution_line = self
+                            .sources
+                            .get(display_path)
+                            .and_then(|s| Some(s[..offset].lines().count()))
+                            .unwrap_or_default(); // 1-based
+                        self.current_execution_line = Some(execution_line);
+                    }
+                }
+                SnapshotInfo::Opcode(opcode_info) => {
+                    let execution_line = self
+                        .opcodes
+                        .iter()
+                        .position(|(pc, _)| *pc as usize == opcode_info.pc)
+                        .map(|idx| idx + 1) // 1-based
+                        .unwrap_or_default();
+                    self.current_execution_line = Some(execution_line);
+                }
+            }
 
             // Simply sync the execution line with the user cursor
             self.current_execution_line = self.user_cursor_line;
