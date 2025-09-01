@@ -35,7 +35,6 @@ use ratatui::{
 };
 use std::collections::HashMap;
 use tracing::{debug, info};
-use tracing_subscriber::field::display;
 
 /// Code display mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -680,7 +679,7 @@ impl CodePanel {
     fn vim_next_blank_line(&mut self, count: usize) {
         let lines = self.get_display_lines();
         if let Some(current_line) = self.user_cursor_line {
-            let mut target_line = current_line;
+            let mut target_line = lines.len(); // Default as Max
             let mut blank_lines_found = 0;
 
             for line_num in (current_line + 1)..=lines.len() {
@@ -693,9 +692,7 @@ impl CodePanel {
                 }
             }
 
-            if blank_lines_found > 0 {
-                self.move_to(target_line);
-            }
+            self.move_to(target_line);
         }
     }
 
@@ -703,7 +700,7 @@ impl CodePanel {
     fn vim_prev_blank_line(&mut self, count: usize) {
         let lines = self.get_display_lines();
         if let Some(current_line) = self.user_cursor_line {
-            let mut target_line = current_line;
+            let mut target_line = 1; // Default as 1
             let mut blank_lines_found = 0;
 
             for line_num in (1..current_line).rev() {
@@ -716,9 +713,7 @@ impl CodePanel {
                 }
             }
 
-            if blank_lines_found > 0 {
-                self.move_to(target_line);
-            }
+            self.move_to(target_line);
         }
     }
 
@@ -1214,12 +1209,12 @@ impl PanelTr for CodePanel {
                 KeyCode::Char('s') => {
                     // Step: Move to next snapshot/instruction
                     debug!("Step (next instruction) requested from code panel");
-                    dm.execution.step()?;
+                    dm.execution.step(1)?;
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('r') => {
                     debug!("Reverse step (previous instruction) requested from code panel");
-                    dm.execution.reverse_step()?;
+                    dm.execution.reverse_step(1)?;
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('n') => {

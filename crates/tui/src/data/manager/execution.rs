@@ -291,20 +291,17 @@ impl ExecutionManager {
         }
     }
 
-    pub fn step(&mut self) -> Result<()> {
-        let next_id = if self.current_snapshot + 1 < self.state.snapshot_count {
-            self.current_snapshot + 1
-        } else {
-            self.current_snapshot
-        };
+    pub fn step(&mut self, count: usize) -> Result<()> {
+        let next_id =
+            self.current_snapshot.saturating_add(count).min(self.state.snapshot_count - 1);
         let _ = self.goto_snapshot(next_id);
         let _ = self.display_snapshot(next_id);
 
         Ok(())
     }
 
-    pub fn reverse_step(&mut self) -> Result<()> {
-        let prev_id = if self.current_snapshot > 0 { self.current_snapshot - 1 } else { 0 };
+    pub fn reverse_step(&mut self, count: usize) -> Result<()> {
+        let prev_id = self.current_snapshot.saturating_sub(count).max(0);
         let _ = self.goto_snapshot(prev_id);
         let _ = self.display_snapshot(prev_id);
 

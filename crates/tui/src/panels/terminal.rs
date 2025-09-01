@@ -23,6 +23,7 @@ use crate::data::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::icons::Icons;
 use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
+use crate::{Spinner, SpinnerStyles};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use eyre::Result;
 use ratatui::{
@@ -73,6 +74,45 @@ pub enum TerminalMode {
     Vim,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingCommand {
+    /// Step forward in execution
+    StepForward(usize),
+    /// Step backward in execution
+    StepBackward(usize),
+}
+
+impl PendingCommand {
+    /// Check whether the command is still pending
+    fn is_pending(&self, dm: &mut DataManager) -> bool {
+        fn inner(cmd: &PendingCommand, dm: &mut DataManager) -> Option<()> {
+            match cmd {
+                PendingCommand::StepForward(_) | PendingCommand::StepBackward(_) => {
+                    let id = dm.execution.get_current_snapshot();
+                    dm.execution.get_snapshot_info(id)?;
+                    dm.execution.get_code(id)?;
+                }
+            }
+            Some(())
+        }
+
+        inner(self, dm).is_none()
+    }
+
+    /// Output when command is finished
+    fn output_finished(&self, dm: &mut DataManager) -> Option<String> {
+        let id = dm.execution.get_current_snapshot();
+        match self {
+            PendingCommand::StepForward(count) => {
+                Some(format!("Stepped forward {} times to Snapshot {}", count, id))
+            }
+            PendingCommand::StepBackward(count) => {
+                Some(format!("Stepped backward {} times to Snapshot {}", count, id))
+            }
+        }
+    }
+}
+
 /// Terminal panel implementation with vim-style navigation
 #[derive(Debug)]
 pub struct TerminalPanel {
@@ -111,6 +151,10 @@ pub struct TerminalPanel {
     vim_number_prefix: String,
     /// VIM mode cursor absolute line number in terminal history (1-based, like code panel)
     vim_cursor_line: usize,
+    /// Current pending command
+    pending_command: Option<PendingCommand>,
+    /// Spinner for command execution
+    spinner: Spinner,
 }
 
 impl TerminalPanel {
@@ -134,6 +178,8 @@ impl TerminalPanel {
             last_ctrl_c: None,
             vim_number_prefix: String::new(),
             vim_cursor_line: 1, // Start at first line (1-based like code panel)
+            pending_command: None,
+            spinner: Spinner::new(Some(SpinnerStyles::SQUARE), None),
         };
 
         // Add welcome message with fancy styling
@@ -308,30 +354,16 @@ impl TerminalPanel {
             "step" | "s" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
-                self.add_output(&format!("Stepping {} snapshots...", count));
-                let current = 0usize;
-                let total = 10usize;
-                let new_pos = (current + count).min(total.saturating_sub(1));
-                // TODO
-                // self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
-                self.add_output(&format!(
-                    "✅ Stepped {} snapshots to {}/{}",
-                    count, new_pos, total
-                ));
+                self.pending_command = Some(PendingCommand::StepForward(count));
+                self.spinner.start_loading(&format!("Stepping {} times...", count));
+                dm.execution.step(count)?;
             }
             "reverse" | "r" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
-                self.add_output(&format!("Reverse stepping {} snapshots...", count));
-                let current = 0usize;
-                let total = 10usize;
-                let new_pos = current.saturating_sub(count);
-                // TODO
-                // self.exec_mgr_mut().update_state(new_pos, total, Some(new_pos + 9), None);
-                self.add_output(&format!(
-                    "✅ Reverse stepped {} snapshots to {}/{}",
-                    count, new_pos, total
-                ));
+                self.pending_command = Some(PendingCommand::StepBackward(count));
+                self.spinner.start_loading(&format!("Reverse stepping {} times...", count));
+                dm.execution.reverse_step(count)?;
             }
             "call" | "c" => {
                 self.add_system("Stepping to next function call...");
@@ -849,17 +881,36 @@ impl TerminalPanel {
 
     /// Render the unified bash-like terminal view
     fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
+        // Update pending command
+        if self.pending_command.map_or(false, |cmd| !cmd.is_pending(dm)) {
+            self.spinner.finish_loading();
+            let pending_command = self.pending_command.take().unwrap();
+            self.add_output(
+                pending_command.output_finished(dm).as_deref().unwrap_or("Command completed"),
+            );
+        }
+
         // Start with all terminal history
         let mut all_content = self.lines.clone();
 
-        // Add current input line only in both INSERT and VIM modes
-        let prompt = format!(
-            "{} edb{} {}",
-            if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
-            Icons::ARROW_RIGHT,
-            self.input_buffer
-        );
-        all_content.push(TerminalLine { content: prompt, line_type: LineType::Command });
+        if self.pending_command.is_some() {
+            // We still have pending command
+            self.input_buffer.clear();
+            self.spinner.tick();
+            all_content.push(TerminalLine {
+                content: self.spinner.display_text(),
+                line_type: LineType::System,
+            });
+        } else {
+            // Add current input line
+            let prompt = format!(
+                "{} edb{} {}",
+                if self.connected { Icons::CONNECTED } else { Icons::DISCONNECTED },
+                Icons::ARROW_RIGHT,
+                self.input_buffer
+            );
+            all_content.push(TerminalLine { content: prompt, line_type: LineType::Command });
+        }
 
         // Calculate visible area (leave space for status and help text if needed)
         let status_help_height = if self.focused && area.height > 10 { 2 } else { 0 };
