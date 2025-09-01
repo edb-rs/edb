@@ -28,7 +28,7 @@ use alloy_primitives::Address;
 use eyre::Result;
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, error};
 
 use edb_common::types::{Code, SnapshotInfo, Trace};
 
@@ -44,6 +44,7 @@ pub struct ExecutionState {
     snapshot_count: usize,
     snapshot_info: FetchCache<usize, SnapshotInfo>,
     code: FetchCache<Address, Code>,
+    next_call: FetchCache<usize, usize>,
     trace_data: Trace,
 }
 
@@ -55,6 +56,7 @@ impl ManagerStateTr for ExecutionState {
             snapshot_count,
             snapshot_info: FetchCache::new(),
             code: FetchCache::new(),
+            next_call: FetchCache::new(),
             trace_data,
         })
     }
@@ -67,13 +69,30 @@ impl ManagerStateTr for ExecutionState {
         if self.code.need_update(&other.code) {
             self.code.update(&other.code);
         }
+
+        if self.next_call.need_update(&other.next_call) {
+            self.next_call.update(&other.next_call);
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecutionRequest {
     SnapshotInfo(usize),
     Code(usize),
+    NextCall(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExecutionStatus {
+    Normal,
+    WaitNextCall(usize),
+}
+
+impl ExecutionStatus {
+    pub fn is_waiting(&self) -> bool {
+        !matches!(self, ExecutionStatus::Normal)
+    }
 }
 
 impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
@@ -116,6 +135,21 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                 let code = rpc_client.get_code(id).await?;
                 state.code.insert(bytecode_address, Some(code));
             }
+            ExecutionRequest::NextCall(id) => {
+                if state.next_call.contains_key(&id) {
+                    return Ok(());
+                }
+
+                let next_call = rpc_client.get_next_call(id).await?;
+
+                // We separate this insertion since id might be equal to next_call
+                state.next_call.insert(id, Some(next_call));
+
+                // We will update all snapshots in the range
+                for i in id + 1..next_call {
+                    state.next_call.insert(i, Some(next_call));
+                }
+            }
         }
 
         Ok(())
@@ -156,6 +190,7 @@ pub struct ExecutionManager {
     // User-controlled data
     current_snapshot: usize,
     display_snapshot: usize,
+    execution_status: ExecutionStatus,
 
     /// State
     state: ExecutionState,
@@ -186,6 +221,7 @@ impl ExecutionManager {
         let mut mgr = Self {
             state: core.clone().read().await.state.clone(),
             pending_requests: HashSet::new(),
+            execution_status: ExecutionStatus::Normal,
             core,
             current_snapshot: 0,
             display_snapshot: 0,
@@ -211,15 +247,36 @@ impl ExecutionManager {
         }
     }
 
+    pub fn get_next_call(&mut self, id: usize) -> Option<usize> {
+        let _ = self.pull_from_core();
+
+        if !self.state.next_call.contains_key(&id) {
+            debug!("Next call info not found in cache, fetching...");
+            self.new_fetching_request(ExecutionRequest::NextCall(id));
+            return None;
+        }
+
+        match self.state.next_call.get(&id) {
+            Some(next_id) => *next_id,
+            _ => None,
+        }
+    }
+
+    pub fn get_execution_status(&self) -> ExecutionStatus {
+        self.execution_status
+    }
+
     pub fn get_snapshot_count(&self) -> usize {
         self.state.snapshot_count
     }
 
-    pub fn get_current_snapshot(&self) -> usize {
+    pub fn get_current_snapshot(&mut self) -> usize {
+        let _ = self.check_pending_request();
         self.current_snapshot
     }
 
-    pub fn get_display_snapshot(&self) -> usize {
+    pub fn get_display_snapshot(&mut self) -> usize {
+        let _ = self.check_pending_request();
         self.display_snapshot
     }
 
@@ -256,7 +313,7 @@ impl ExecutionManager {
         }
     }
 
-    pub fn display_snapshot(&mut self, id: usize) -> Result<()> {
+    fn display_snapshot(&mut self, id: usize) -> Result<()> {
         if id >= self.state.snapshot_count {
             Err(eyre::eyre!(
                 "Snapshot id {} out of bounds (total {})",
@@ -273,7 +330,7 @@ impl ExecutionManager {
         }
     }
 
-    pub fn goto_snapshot(&mut self, id: usize) -> Result<()> {
+    fn goto_snapshot(&mut self, id: usize) -> Result<()> {
         if id >= self.state.snapshot_count {
             Err(eyre::eyre!(
                 "Snapshot id {} out of bounds (total {})",
@@ -291,19 +348,76 @@ impl ExecutionManager {
         }
     }
 
-    pub fn step(&mut self, count: usize) -> Result<()> {
-        let next_id =
-            self.current_snapshot.saturating_add(count).min(self.state.snapshot_count - 1);
-        let _ = self.goto_snapshot(next_id);
-        let _ = self.display_snapshot(next_id);
+    fn check_pending_request(&mut self) -> bool {
+        match self.execution_status {
+            ExecutionStatus::WaitNextCall(src_id) => {
+                // There is a pending execution request, for which we should wait
+                // and should not update current_snapshot
+                if let Some(next_id) = self.get_next_call(src_id) {
+                    // The pending request is for the same id, we can proceed
+                    self.execution_status = ExecutionStatus::Normal;
+
+                    // We will override the current snapshot
+                    let _ = self.goto_snapshot(next_id);
+                    let _ = self.display_snapshot(next_id);
+                }
+
+                // Any other execution request will be rejected
+                false
+            }
+            ExecutionStatus::Normal => true,
+        }
+    }
+
+    pub fn display(&mut self, id: usize) -> Result<()> {
+        self.display_snapshot(id)
+    }
+
+    /// The actual function that deals with execution
+    pub fn goto(&mut self, id: usize) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update current_snapshot
+            return Ok(());
+        }
+
+        let _ = self.goto_snapshot(id);
+        let _ = self.display_snapshot(id);
 
         Ok(())
     }
 
+    pub fn step(&mut self, count: usize) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update current_snapshot
+            return Ok(());
+        }
+
+        let next_id =
+            self.current_snapshot.saturating_add(count).min(self.state.snapshot_count - 1);
+        self.goto(next_id)
+    }
+
     pub fn reverse_step(&mut self, count: usize) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update current_snapshot
+            return Ok(());
+        }
+
         let prev_id = self.current_snapshot.saturating_sub(count).max(0);
-        let _ = self.goto_snapshot(prev_id);
-        let _ = self.display_snapshot(prev_id);
+        self.goto(prev_id)
+    }
+
+    pub fn next_call(&mut self) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update current_snapshot
+            return Ok(());
+        }
+
+        if let Some(next_call) = self.get_next_call(self.current_snapshot) {
+            self.goto(next_call)?;
+        } else {
+            self.execution_status = ExecutionStatus::WaitNextCall(self.current_snapshot);
+        }
 
         Ok(())
     }

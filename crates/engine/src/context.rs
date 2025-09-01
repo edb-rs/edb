@@ -88,4 +88,24 @@ where
             }
         }
     }
+
+    /// Get code address of a given snapshot id
+    pub fn get_bytecode_address(&self, snapshot_id: usize) -> Option<Address> {
+        let (frame_id, _) = self.snapshots.get(snapshot_id)?;
+        self.trace.get(frame_id.trace_entry_id()).and_then(|entry| Some(entry.code_address))
+    }
+
+    /// Get target address of a given snapshot id
+    pub fn get_target_address(&self, snapshot_id: usize) -> Option<Address> {
+        let (frame_id, _) = self.snapshots.get(snapshot_id)?;
+        self.trace.get(frame_id.trace_entry_id()).and_then(|entry| Some(entry.target))
+    }
+
+    /// Is the given trace id a parent of another trace id?
+    pub fn is_parent_trace(&self, parent_id: usize, child_id: usize) -> bool {
+        match self.trace.get(child_id) {
+            Some(child_entry) => child_entry.parent_id == Some(parent_id),
+            None => false,
+        }
+    }
 }

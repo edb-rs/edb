@@ -80,6 +80,8 @@ enum PendingCommand {
     StepForward(usize),
     /// Step backward in execution
     StepBackward(usize),
+    /// Goto next call in execution
+    NextCall(usize),
 }
 
 impl PendingCommand {
@@ -89,6 +91,11 @@ impl PendingCommand {
             match cmd {
                 PendingCommand::StepForward(_) | PendingCommand::StepBackward(_) => {
                     let id = dm.execution.get_current_snapshot();
+                    dm.execution.get_snapshot_info(id)?;
+                    dm.execution.get_code(id)?;
+                }
+                PendingCommand::NextCall(src_id) => {
+                    let id = dm.execution.get_next_call(*src_id)?;
                     dm.execution.get_snapshot_info(id)?;
                     dm.execution.get_code(id)?;
                 }
@@ -108,6 +115,10 @@ impl PendingCommand {
             }
             PendingCommand::StepBackward(count) => {
                 Some(format!("Stepped backward {} times to Snapshot {}", count, id))
+            }
+            PendingCommand::NextCall(src_id) => {
+                let next_id = dm.execution.get_next_call(*src_id)?;
+                Some(format!("Goto Next Call at Snapshot {}", next_id))
             }
         }
     }
@@ -331,6 +342,12 @@ impl TerminalPanel {
             return Ok(());
         }
 
+        if dm.execution.get_execution_status().is_waiting() {
+            // We should notifiy the user that the backend is still waiting, so they should wait as well
+            self.add_error("The backend is waiting for an execution request");
+            return Ok(());
+        }
+
         match parts[0] {
             "next" | "n" => {
                 self.add_system("Stepping to next snapshot...");
@@ -371,17 +388,10 @@ impl TerminalPanel {
                 dm.execution.reverse_step(count)?;
             }
             "call" | "c" => {
-                self.add_system("Stepping to next function call...");
-                let current = 0usize;
-                let total = 10usize;
-                // Simulate jumping to next significant call (larger step)
-                let new_pos = (current + 10).min(total.saturating_sub(1));
-                // TODO
-                // dm.execution.update_state(new_pos, total, Some(new_pos + 9), None);
-                self.add_output(&format!(
-                    "✅ Stepped to next call at snapshot {}/{}",
-                    new_pos, total
-                ));
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::NextCall(id));
+                self.spinner.start_loading("Stepping to next function call...");
+                dm.execution.next_call()?;
             }
             "rcall" | "rc" => {
                 self.add_system("Stepping back from function call...");

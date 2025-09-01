@@ -35,7 +35,7 @@ use revm::{Database, DatabaseCommit, DatabaseRef};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Handle to the running RPC server
 #[derive(Debug)]
@@ -152,8 +152,9 @@ where
             Ok(result) => {
                 RpcResponse { jsonrpc: "2.0".to_string(), result: Some(result), error: None, id }
             }
-            Err(error) => {
-                RpcResponse { jsonrpc: "2.0".to_string(), result: None, error: Some(error), id }
+            Err(err) => {
+                error!(target: "rpc", "Error handling RPC request: {:?}", err);
+                RpcResponse { jsonrpc: "2.0".to_string(), result: None, error: Some(err), id }
             }
         }
     }

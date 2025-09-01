@@ -1210,8 +1210,7 @@ impl PanelTr for TracePanel {
                     // Jump to the first snapshot of this trace entry if available
                     if let Some(snapshot_id) = entry.first_snapshot_id {
                         debug!("Jumping to snapshot: {}", snapshot_id);
-                        dm.execution.goto_snapshot(snapshot_id)?;
-                        dm.execution.display_snapshot(snapshot_id)?;
+                        dm.execution.goto(snapshot_id)?;
                     } else {
                         error!("No snapshot available for trace entry");
                     }
@@ -1227,7 +1226,7 @@ impl PanelTr for TracePanel {
                     // Jump to the first snapshot of this trace entry if available
                     if let Some(snapshot_id) = entry.first_snapshot_id {
                         debug!("Jumping to snapshot: {}", snapshot_id);
-                        dm.execution.display_snapshot(snapshot_id)?;
+                        dm.execution.display(snapshot_id)?;
                     } else {
                         error!("No snapshot available for trace entry");
                     }

@@ -83,6 +83,14 @@ where
         }
     }
 
+    /// Get USID if the snapshot is hooked
+    pub fn usid(&self) -> Option<USID> {
+        match self {
+            Snapshot::Opcode(_) => None,
+            Snapshot::Hook(snapshot) => Some(snapshot.usid),
+        }
+    }
+
     /// Get the contract address associated with this snapshot
     pub fn address(&self) -> alloy_primitives::Address {
         match self {
