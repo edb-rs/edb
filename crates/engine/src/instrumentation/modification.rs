@@ -418,10 +418,6 @@ impl SourceModifications {
                 crate::analysis::StepVariant::IfCondition(if_stmt) => {
                     // modify the true body if needed
                     if let Some(stmt) = indeed_statement(&if_stmt.true_body) {
-                        println!(
-                            "true body: \n{}",
-                            source_string_at_location(source_id, source, &stmt_src(stmt))
-                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
@@ -430,10 +426,6 @@ impl SourceModifications {
                     if let Some(stmt) =
                         if_stmt.false_body.as_ref().and_then(|body| indeed_statement(body))
                     {
-                        println!(
-                            "false body: \n{}",
-                            source_string_at_location(source_id, source, &stmt_src(stmt))
-                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
@@ -441,10 +433,6 @@ impl SourceModifications {
                 crate::analysis::StepVariant::ForLoop(for_stmt) => {
                     // modify the body if needed
                     if let Some(stmt) = indeed_statement(&for_stmt.body) {
-                        println!(
-                            "for body: \n{}",
-                            source_string_at_location(source_id, source, &stmt_src(stmt))
-                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
@@ -452,10 +440,6 @@ impl SourceModifications {
                 crate::analysis::StepVariant::WhileLoop(while_stmt) => {
                     // modify the body if needed
                     if let Some(stmt) = indeed_statement(&while_stmt.body) {
-                        println!(
-                            "while body: \n{}",
-                            source_string_at_location(source_id, source, &stmt_src(stmt))
-                        );
                         let modifications = wrap_statement_as_block(&stmt_src(stmt));
                         self.extend_modifications(modifications);
                     }
