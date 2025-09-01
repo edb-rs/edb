@@ -29,11 +29,10 @@ use thiserror::Error;
 use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
-        visitor::VisitorAction, ScopeNode, Step, StepHook, StepRef, StepVariant, Variable,
-        VariableScope, VariableScopeRef, Visitor, Walk,
+        visitor::VisitorAction, Function, FunctionRef, ScopeNode, Step, StepHook, StepRef,
+        StepVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk, UFID,
     },
     block_or_stmt_src,
-    new_uvid,
     sloc_ldiff,
     sloc_rdiff,
     VariableRef,
@@ -67,11 +66,13 @@ pub struct SourceAnalysis {
     /// List of analyzed execution steps in this file
     pub steps: Vec<StepRef>,
     /// State variables that should be made public
-    pub private_state_variables: Vec<VariableDeclaration>,
+    pub private_state_variables: Vec<VariableRef>,
+    /// List of all functions in this file.
+    pub functions: Vec<FunctionRef>,
     /// Functions that should be made public
-    pub private_functions: Vec<FunctionDefinition>,
+    pub private_functions: Vec<FunctionRef>,
     /// Functions that should be made mutable (i.e., neither pure nor view)
-    pub immutable_functions: Vec<FunctionDefinition>,
+    pub immutable_functions: Vec<FunctionRef>,
 }
 
 impl SourceAnalysis {
@@ -109,6 +110,14 @@ impl SourceAnalysis {
         let mut table = HashMap::default();
         for step in &self.steps {
             table.insert(step.read().usid, step.clone());
+        }
+        table
+    }
+
+    pub fn function_table(&self) -> HashMap<UFID, FunctionRef> {
+        let mut table = HashMap::default();
+        for function in &self.functions {
+            table.insert(function.read().ufid, function.clone());
         }
         table
     }
@@ -327,7 +336,11 @@ impl SourceAnalysis {
             }
             println!("Private state variables that should be made public:");
             for var in &self.private_state_variables {
-                println!("  - {} (visibility: {:?})", var.name, var.visibility);
+                println!(
+                    "  - {} (visibility: {:?})",
+                    var.declaration().name,
+                    var.declaration().visibility
+                );
             }
         }
 
@@ -338,7 +351,7 @@ impl SourceAnalysis {
             }
             println!("Private functions that should be made public:");
             for func in &self.private_functions {
-                println!("  - {} (visibility: {:?})", func.name, func.visibility);
+                println!("  - {} (visibility: {:?})", func.name(), func.visibility());
             }
         }
 
@@ -350,11 +363,11 @@ impl SourceAnalysis {
             println!("Functions that should be made mutable:");
             for func in &self.immutable_functions {
                 let mutability = func
-                    .state_mutability
+                    .state_mutability()
                     .as_ref()
                     .map(|m| format!("{m:?}"))
                     .unwrap_or_else(|| "None".to_string());
-                println!("  - {} (mutability: {})", func.name, mutability);
+                println!("  - {} (mutability: {})", func.name(), mutability);
             }
         }
 
@@ -384,12 +397,15 @@ pub struct Analyzer {
 
     finished_steps: Vec<StepRef>,
     current_step: Option<StepRef>,
+    current_function: Option<FunctionRef>,
+    /// List of all functions in this file.
+    functions: Vec<FunctionRef>,
     /// State variables that should be made public
-    private_state_variables: Vec<VariableDeclaration>,
+    private_state_variables: Vec<VariableRef>,
     /// Functions that should be made public
-    private_functions: Vec<FunctionDefinition>,
+    private_functions: Vec<FunctionRef>,
     /// Functions that should be made mutable (i.e., neither pure nor view)
-    immutable_functions: Vec<FunctionDefinition>,
+    immutable_functions: Vec<FunctionRef>,
 }
 
 impl Analyzer {
@@ -434,6 +450,7 @@ impl Analyzer {
         assert!(self.current_step.is_none(), "current step should be none");
         let global_scope = self.scope_stack.pop().expect("global scope should not be empty");
         let steps = self.finished_steps;
+        let functions = self.functions;
         Ok(SourceAnalysis {
             id: source_id,
             path: source_path.clone(),
@@ -441,6 +458,7 @@ impl Analyzer {
             global_scope,
             steps,
             private_state_variables: self.private_state_variables,
+            functions,
             private_functions: self.private_functions,
             immutable_functions: self.immutable_functions,
         })
@@ -449,8 +467,8 @@ impl Analyzer {
 
 /* Scope analysis utils */
 impl Analyzer {
-    fn current_scope(&mut self) -> &mut VariableScopeRef {
-        self.scope_stack.last_mut().expect("scope stack is empty")
+    fn current_scope(&self) -> VariableScopeRef {
+        self.scope_stack.last().expect("scope stack is empty").clone()
     }
 
     fn enter_new_scope(&mut self, node: ScopeNode) -> eyre::Result<()> {
@@ -473,10 +491,12 @@ impl Analyzer {
 
         // add a new variable to the current scope
         let scope = self.current_scope();
-        let uvid = new_uvid();
+        let uvid = UVID::next();
         let state_variable = declaration.state_variable;
-        let variable = Variable::Plain { uvid, declaration: declaration.clone(), state_variable };
-        scope.write().variables.push(variable.into());
+        let variable: VariableRef =
+            Variable::Plain { uvid, declaration: declaration.clone(), state_variable }.into();
+        self.check_state_variable_visibility(&variable)?;
+        scope.write().variables.push(variable);
 
         if let Some(step) = self.current_step.as_mut() {
             // add the variable to the current step
@@ -509,19 +529,89 @@ impl Analyzer {
         }
         Ok(())
     }
+
+    fn check_state_variable_visibility(&mut self, variable: &VariableRef) -> eyre::Result<()> {
+        let declaration = variable.declaration();
+        if declaration.state_variable {
+            // we need to change the visibility of the state variable to public
+            if declaration.visibility != Visibility::Public {
+                self.private_state_variables.push(variable.clone());
+            }
+        }
+        Ok(())
+    }
+}
+
+/* Function analysis utils */
+impl Analyzer {
+    fn current_function(&self) -> FunctionRef {
+        self.current_function.as_ref().expect("current function should be set").clone()
+    }
+
+    fn enter_new_function(&mut self, function: &FunctionDefinition) -> eyre::Result<VisitorAction> {
+        assert!(self.current_function.is_none(), "Function cannot be nested");
+        let new_func: FunctionRef = Function::new_function(function.clone()).into();
+        self.check_function_visibility_and_mutability(&new_func)?;
+        self.current_function = Some(new_func.clone());
+        Ok(VisitorAction::Continue)
+    }
+
+    fn exit_current_function(&mut self) -> eyre::Result<()> {
+        assert!(self.current_function.is_some(), "current function should be set");
+        let function = self.current_function.take().unwrap();
+        self.functions.push(function);
+        Ok(())
+    }
+
+    fn enter_new_modifier(&mut self, modifier: &ModifierDefinition) -> eyre::Result<VisitorAction> {
+        assert!(self.current_function.is_none(), "Function cannot be nested");
+        let new_func: FunctionRef = Function::new_modifier(modifier.clone()).into();
+        self.current_function = Some(new_func.clone());
+        Ok(VisitorAction::Continue)
+    }
+
+    fn exit_current_modifier(&mut self) -> eyre::Result<()> {
+        assert!(self.current_function.is_some(), "current function should be set");
+        let function = self.current_function.take().unwrap();
+        self.functions.push(function);
+        Ok(())
+    }
+
+    fn check_function_visibility_and_mutability(&mut self, func: &FunctionRef) -> eyre::Result<()> {
+        if func.visibility() != Visibility::Public && func.visibility() != Visibility::External {
+            self.private_functions.push(func.clone());
+        }
+
+        if func
+            .state_mutability()
+            .as_ref()
+            .is_some_and(|mu| *mu == StateMutability::View || *mu == StateMutability::Pure)
+        {
+            self.immutable_functions.push(func.clone());
+        }
+        Ok(())
+    }
 }
 
 /* Step partition utils */
 impl Analyzer {
     fn enter_new_statement_step(&mut self, statement: &Statement) -> eyre::Result<VisitorAction> {
         assert!(self.current_step.is_none(), "Step cannot be nested");
+        let current_function = self.current_function();
         let current_scope = self.current_scope();
 
         macro_rules! step {
             ($variant:ident, $stmt:expr, $loc:expr) => {{
-                self.current_step = Some(
-                    Step::new(StepVariant::$variant($stmt), $loc, current_scope.clone()).into(),
-                );
+                let new_step: StepRef = Step::new(
+                    current_function.ufid(),
+                    StepVariant::$variant($stmt),
+                    $loc,
+                    current_scope.clone(),
+                )
+                .into();
+                self.current_step = Some(new_step.clone());
+                // add the step to the current function
+                current_function.write().steps.push(new_step);
             }};
         }
         macro_rules! simple_stmt_to_step {
@@ -646,6 +736,7 @@ impl Analyzer {
         function: &FunctionDefinition,
     ) -> eyre::Result<VisitorAction> {
         assert!(self.current_step.is_none(), "Step cannot be nested");
+        let current_function = self.current_function();
 
         if function.body.is_none() {
             // if a function has no body, we skip the function step
@@ -655,10 +746,15 @@ impl Analyzer {
         // step is the function header
         let current_scope = self.current_scope();
         let loc = sloc_ldiff(function.src, function.body.as_ref().unwrap().src);
-        self.current_step = Some(
-            Step::new(StepVariant::FunctionEntry(function.clone()), loc, current_scope.clone())
-                .into(),
-        );
+        let new_step: StepRef = Step::new(
+            current_function.ufid(),
+            StepVariant::FunctionEntry(function.clone()),
+            loc,
+            current_scope.clone(),
+        )
+        .into();
+        self.current_step = Some(new_step.clone());
+        current_function.write().steps.push(new_step);
 
         // we take over the walk of the sub ast tree in the function step.
         let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -681,6 +777,7 @@ impl Analyzer {
         modifier: &ModifierDefinition,
     ) -> eyre::Result<VisitorAction> {
         assert!(self.current_step.is_none(), "Step cannot be nested");
+        let current_function = self.current_function();
 
         if modifier.body.is_none() {
             // if a modifier has no body, we skip the modifier step
@@ -690,10 +787,15 @@ impl Analyzer {
         // step is the modifier header
         let current_scope = self.current_scope();
         let loc = sloc_ldiff(modifier.src, modifier.body.as_ref().unwrap().src);
-        self.current_step = Some(
-            Step::new(StepVariant::ModifierEntry(modifier.clone()), loc, current_scope.clone())
-                .into(),
-        );
+        let new_step: StepRef = Step::new(
+            current_function.ufid(),
+            StepVariant::ModifierEntry(modifier.clone()),
+            loc,
+            current_scope.clone(),
+        )
+        .into();
+        self.current_step = Some(new_step.clone());
+        current_function.write().steps.push(new_step);
 
         // we take over the walk of the sub ast tree in the modifier step.
         let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
@@ -742,41 +844,8 @@ impl Analyzer {
     }
 }
 
-/* State variable and function visibility and mutability analysis */
-impl Analyzer {
-    fn check_state_variable_visibility(
-        &mut self,
-        declaration: &VariableDeclaration,
-    ) -> eyre::Result<()> {
-        if declaration.state_variable {
-            // we need to change the visibility of the state variable to public
-            if declaration.visibility != Visibility::Public {
-                self.private_state_variables.push(declaration.clone());
-            }
-        }
-        Ok(())
-    }
-
-    fn check_function_visibility_and_mutability(
-        &mut self,
-        definition: &FunctionDefinition,
-    ) -> eyre::Result<()> {
-        if definition.visibility != Visibility::Public
-            && definition.visibility != Visibility::External
-        {
-            self.private_functions.push(definition.clone());
-        }
-
-        if definition
-            .state_mutability
-            .as_ref()
-            .is_some_and(|mu| *mu == StateMutability::View || *mu == StateMutability::Pure)
-        {
-            self.immutable_functions.push(definition.clone());
-        }
-        Ok(())
-    }
-}
+/* State variable  analysis */
+impl Analyzer {}
 
 impl Visitor for Analyzer {
     fn visit_source_unit(&mut self, source_unit: &SourceUnit) -> eyre::Result<VisitorAction> {
@@ -824,8 +893,8 @@ impl Visitor for Analyzer {
         &mut self,
         definition: &FunctionDefinition,
     ) -> eyre::Result<VisitorAction> {
-        // check if the function is private or mutable
-        self.check_function_visibility_and_mutability(definition)?;
+        // enter a new function
+        self.enter_new_function(definition)?;
 
         // enter a variable scope for the function
         self.enter_new_scope(ScopeNode::FunctionDefinition(definition.clone()))?;
@@ -840,6 +909,9 @@ impl Visitor for Analyzer {
     ) -> eyre::Result<()> {
         // exit the function scope
         self.exit_current_scope(definition.src)?;
+
+        // exit the function
+        self.exit_current_function()?;
         Ok(())
     }
 
@@ -847,6 +919,9 @@ impl Visitor for Analyzer {
         &mut self,
         definition: &foundry_compilers::artifacts::ModifierDefinition,
     ) -> eyre::Result<VisitorAction> {
+        // enter a new modifier
+        self.enter_new_modifier(definition)?;
+
         // enter a variable scope for the modifier
         self.enter_new_scope(ScopeNode::ModifierDefinition(definition.clone()))?;
 
@@ -860,6 +935,9 @@ impl Visitor for Analyzer {
     ) -> eyre::Result<()> {
         // exit the modifier scope
         self.exit_current_scope(definition.src)?;
+
+        // exit the modifier
+        self.exit_current_modifier()?;
         Ok(())
     }
 
@@ -924,8 +1002,6 @@ impl Visitor for Analyzer {
     ) -> eyre::Result<VisitorAction> {
         // declare a variable
         self.declare_variable(declaration)?;
-        // check if the state variable is private
-        self.check_state_variable_visibility(declaration)?;
         Ok(VisitorAction::Continue)
     }
 }

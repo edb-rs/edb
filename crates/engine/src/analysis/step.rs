@@ -45,64 +45,16 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{StepHook, VariableScope, VariableScopeRef, UVID};
+use crate::analysis::{macros::universal_id, StepHook, VariableScope, VariableScopeRef, UVID};
 
-lazy_static! {
-    /// The next USID to be assigned.
-    pub static ref NEXT_USID: Mutex<USID> = Mutex::new(USID(0));
+universal_id! {
+    /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
+    USID => 0
 }
 
-/// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct USID(u64);
-
-impl USID {
-    /// Increment the USID and return the previous value.
-    pub fn inc(&mut self) -> Self {
-        let v = *self;
-        self.0 += 1;
-        v
-    }
-}
-
-impl From<USID> for u64 {
-    fn from(usid: USID) -> Self {
-        usid.0
-    }
-}
-
-impl From<USID> for alloy_primitives::U256 {
-    fn from(usid: USID) -> Self {
-        Self::from(usid.0)
-    }
-}
-
-impl From<u64> for USID {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-impl TryFrom<alloy_primitives::U256> for USID {
-    type Error = FromUintError<u64>;
-
-    fn try_from(value: alloy_primitives::U256) -> Result<Self, FromUintError<u64>> {
-        value.try_into().map(USID)
-    }
-}
-
-impl Display for USID {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Generate a new USID.
-pub fn new_usid() -> USID {
-    let mut usid = NEXT_USID.lock().unwrap();
-    usid.inc()
+universal_id! {
+    /// A Universal Function Identifier (UFID) is a unique identifier for a function in contract execution.
+    UFID => 0
 }
 
 /// A reference-counted pointer to a Step for efficient sharing across multiple contexts.
@@ -205,6 +157,8 @@ impl StepRef {
 pub struct Step {
     /// Unique step identifier for this execution step
     pub usid: USID,
+    /// The identifier of the function that this step belongs to.
+    pub ufid: UFID,
     /// The specific type of step (statement, expression, etc.)
     pub variant: StepVariant,
     /// Source location information (file, line, column)
@@ -234,10 +188,16 @@ impl Step {
     /// # Returns
     ///
     /// A new Step instance with a unique USID and default hooks.
-    pub fn new(variant: StepVariant, src: SourceLocation, scope: VariableScopeRef) -> Self {
-        let usid = new_usid();
+    pub fn new(
+        ufid: UFID,
+        variant: StepVariant,
+        src: SourceLocation,
+        scope: VariableScopeRef,
+    ) -> Self {
+        let usid = USID::next();
         let mut this = Self {
             usid,
+            ufid,
             variant,
             src,
             function_calls: vec![],

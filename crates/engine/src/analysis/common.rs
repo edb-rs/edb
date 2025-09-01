@@ -63,7 +63,7 @@ use std::collections::HashMap;
 use tracing::warn;
 
 use crate::{
-    analysis::{AnalysisError, Analyzer, SourceAnalysis, StepRef},
+    analysis::{AnalysisError, Analyzer, FunctionRef, SourceAnalysis, StepRef, UFID},
     ASTPruner, Artifact, VariableRef, USID, UVID,
 };
 
@@ -99,6 +99,8 @@ use crate::{
 pub struct AnalysisResult {
     /// Maps source index to their corresponding source analysis results
     pub sources: HashMap<u32, SourceAnalysis>,
+    /// Maps unique function identifiers to their function references
+    pub ufid_to_function: HashMap<UFID, FunctionRef>,
     /// Maps unique step identifiers to their source step references for quick lookup
     pub usid_to_step: HashMap<USID, StepRef>,
     /// Maps unique variable identifiers to their variable references (currently unimplemented)
@@ -198,15 +200,17 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
         .collect::<Result<Vec<_>, AnalysisError>>()?;
 
     // build lookup tables
+    let mut ufid_to_function = HashMap::new();
     let mut usid_to_step = HashMap::new();
     let mut uvid_to_variable = HashMap::new();
     for result in source_results.iter() {
+        ufid_to_function.extend(result.function_table().into_iter());
         usid_to_step.extend(result.step_table().into_iter());
         uvid_to_variable.extend(result.variable_table().into_iter());
     }
     let sources = source_results.into_iter().map(|s| (s.id, s)).collect();
 
-    Ok(AnalysisResult { sources, usid_to_step, uvid_to_variable })
+    Ok(AnalysisResult { sources, ufid_to_function, usid_to_step, uvid_to_variable })
 }
 
 #[cfg(test)]

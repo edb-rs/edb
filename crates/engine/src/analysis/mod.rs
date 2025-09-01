@@ -22,6 +22,9 @@ pub use analyzer::*;
 mod common;
 pub use common::*;
 
+mod function;
+pub use function::*;
+
 mod hook;
 pub use hook::*;
 
@@ -54,4 +57,70 @@ mod log {
 
     pub(crate) use debug;
     pub(crate) use trace;
+}
+
+mod macros {
+    macro_rules! universal_id {
+        (
+            $(#[$attr:meta])*
+            $name:ident => $initial_value:expr
+        ) => {
+            $(#[$attr])*
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, Serialize, Deserialize)]
+            pub struct $name(u64);
+
+            paste::paste! {
+                lazy_static::lazy_static! {
+                    /// The global counter for the $name.
+                    #[doc = "The global counter for the " $name " object."]
+                    pub static ref [<NEXT_ $name>]: std::sync::Mutex<$name> = std::sync::Mutex::new($name($initial_value));
+                }
+            }
+
+            paste::paste! {
+                impl $name {
+                    /// Get the next value and increment the global counter.
+                    pub fn next() -> Self {
+                        let mut counter = [<NEXT_ $name>].lock().unwrap();
+                        let value = *counter;
+                        counter.0 += 1;
+                        value
+                    }
+                }
+            }
+
+            impl From<$name> for u64 {
+                fn from(value: $name) -> Self {
+                    value.0
+                }
+            }
+
+            impl From<$name> for alloy_primitives::U256 {
+                fn from(value: $name) -> Self {
+                    Self::from(value.0)
+                }
+            }
+
+            impl From<u64> for $name {
+                fn from(value: u64) -> Self {
+                    Self(value)
+                }
+            }
+
+            impl TryFrom<alloy_primitives::U256> for $name {
+                type Error = alloy_primitives::ruint::FromUintError<u64>;
+                fn try_from(value: alloy_primitives::U256) -> Result<Self, alloy_primitives::ruint::FromUintError<u64>> {
+                    value.try_into().map(Self)
+                }
+            }
+
+            impl std::fmt::Display for $name {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}", self.0)
+                }
+            }
+        };
+    }
+
+    pub(crate) use universal_id;
 }

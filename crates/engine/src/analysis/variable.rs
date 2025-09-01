@@ -41,19 +41,11 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use crate::analysis::macros::universal_id;
+
 // use crate::{
 //     // Visitor, Walk
 // };
-
-lazy_static! {
-    /// Global counter for generating unique variable identifiers (UVIDs). It is
-    /// also the storage slot that a variable should be stored in storage during debugging.
-    ///
-    /// This mutex-protected counter ensures thread-safe generation of unique
-    /// identifiers across multiple analysis contexts. The counter starts from
-    /// `EDB_RUNTIME_VALUE_OFFSET` to avoid conflicts with other identifier spaces.
-    pub static ref NEXT_UVID: Mutex<UVID> = Mutex::new(UVID(EDB_RUNTIME_VALUE_OFFSET));
-}
 
 /// The slot where the `edb_runtime_values` mapping is stored.
 ///
@@ -62,89 +54,25 @@ lazy_static! {
 /// to ensure unique identifier spaces across different analysis contexts.
 pub const EDB_RUNTIME_VALUE_OFFSET: u64 = 0x234c6dfc3bf8fed1;
 
-/// A Universal Variable Identifier (UVID) is a unique identifier for a variable in a contract.
-///
-/// UVIDs provide a way to uniquely identify variables across different scopes,
-/// contexts, and analysis passes. They are used internally by the analysis engine
-/// to track variable relationships and dependencies.
-///
-/// # Examples
-///
-/// ```rust
-/// use edb::analysis::variable::{UVID, new_uvid};
-///
-/// let uvid1 = new_uvid();
-/// let uvid2 = new_uvid();
-/// assert_ne!(uvid1, uvid2);
-/// ```
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Default, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct UVID(u64);
-
-impl UVID {
-    /// Increment the UVID and return the previous value.
+universal_id! {
+    /// A Universal Variable Identifier (UVID) is a unique identifier for a variable in a contract.
     ///
-    /// This method atomically increments the internal counter and returns
-    /// the previous value, ensuring each call produces a unique identifier.
+    /// UVIDs provide a way to uniquely identify variables across different scopes,
+    /// contexts, and analysis passes. They are used internally by the analysis engine
+    /// to track variable relationships and dependencies.
     ///
-    /// # Returns
-    ///
-    /// The previous UVID value before incrementing.
+    /// UVID is also the storage slot that a variable should be stored in storage during debugging. UVID starts from `EDB_RUNTIME_VALUE_OFFSET`.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// use edb::analysis::variable::UVID;
+    /// use edb::analysis::variable::{UVID, UVID::next};
     ///
-    /// let mut uvid = UVID(42);
-    /// let previous = uvid.inc();
-    /// assert_eq!(previous, UVID(42));
-    /// assert_eq!(uvid, UVID(43));
+    /// let uvid1 = UVID::next();
+    /// let uvid2 = UVID::next();
+    /// assert_ne!(uvid1, uvid2);
     /// ```
-    pub fn inc(&mut self) -> Self {
-        let v = *self;
-        self.0 += 1;
-        v
-    }
-}
-
-impl From<UVID> for u64 {
-    /// Convert a UVID to its underlying u64 representation.
-    fn from(uvid: UVID) -> Self {
-        uvid.0
-    }
-}
-
-impl From<UVID> for U256 {
-    /// Convert a UVID to a U256 representation for use in Ethereum-related operations.
-    fn from(uvid: UVID) -> Self {
-        Self::from(uvid.0)
-    }
-}
-
-/// Generate a new unique variable identifier (UVID).
-///
-/// This function provides a thread-safe way to generate unique identifiers
-/// for variables. Each call returns a new UVID that is guaranteed to be
-/// unique within the current analysis session.
-///
-/// # Returns
-///
-/// A new unique UVID.
-///
-/// # Examples
-///
-/// ```rust
-/// use edb::analysis::variable::new_uvid;
-///
-/// let uvid1 = new_uvid();
-/// let uvid2 = new_uvid();
-/// assert_ne!(uvid1, uvid2);
-/// ```
-pub fn new_uvid() -> UVID {
-    let mut uvid = NEXT_UVID.lock();
-    uvid.inc()
+    UVID => EDB_RUNTIME_VALUE_OFFSET
 }
 
 /// A reference-counted pointer to a Variable.
@@ -155,6 +83,8 @@ pub fn new_uvid() -> UVID {
 #[derive(Debug, Clone)]
 pub struct VariableRef {
     inner: Arc<RwLock<Variable>>,
+    /* cached readonly fields*/
+    declaration: OnceCell<VariableDeclaration>,
 }
 
 impl From<Variable> for VariableRef {
@@ -165,7 +95,7 @@ impl From<Variable> for VariableRef {
 
 impl VariableRef {
     pub fn new(inner: Variable) -> Self {
-        Self { inner: Arc::new(RwLock::new(inner)) }
+        Self { inner: Arc::new(RwLock::new(inner)), declaration: OnceCell::new() }
     }
 
     pub(crate) fn read(&self) -> RwLockReadGuard<'_, Variable> {
@@ -174,6 +104,10 @@ impl VariableRef {
 
     pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Variable> {
         self.inner.write()
+    }
+
+    pub fn declaration(&self) -> &VariableDeclaration {
+        self.declaration.get_or_init(|| self.inner.read().declaration())
     }
 }
 
@@ -265,6 +199,15 @@ impl Variable {
             Self::Member { base, .. } => base.read().id(),
             Self::Index { base, .. } => base.read().id(),
             Self::IndexRange { base, .. } => base.read().id(),
+        }
+    }
+
+    pub fn declaration(&self) -> VariableDeclaration {
+        match self {
+            Self::Plain { declaration, .. } => declaration.clone(),
+            Self::Member { base, .. } => base.read().declaration(),
+            Self::Index { base, .. } => base.read().declaration(),
+            Self::IndexRange { base, .. } => base.read().declaration(),
         }
     }
 

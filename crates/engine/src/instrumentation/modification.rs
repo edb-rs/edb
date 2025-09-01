@@ -298,24 +298,27 @@ impl SourceModifications {
             };
 
         for private_state_variable in &analysis.private_state_variables {
-            let declaration_str =
-                source_string_at_location(source_id, source, &private_state_variable.src);
+            let declaration_str = source_string_at_location(
+                source_id,
+                source,
+                &private_state_variable.declaration().src,
+            );
             // Remove the existing visibility of the state variable
             if let Some(remove_action) = remove_visibility(
                 declaration_str,
-                private_state_variable.src,
-                visibility_to_str(&private_state_variable.visibility),
+                private_state_variable.declaration().src,
+                visibility_to_str(&private_state_variable.declaration().visibility),
             ) {
                 self.add_modification(remove_action.into());
             }
 
             // Add the new visibility of the state variable before the variable name, i.e., public
             let at_index =
-                declaration_str.find(&private_state_variable.name).unwrap_or_else(|| {
-                    panic!("{}", "variable name not found in declaration".to_string())
-                });
+                declaration_str.find(&private_state_variable.declaration().name).unwrap_or_else(
+                    || panic!("{}", "variable name not found in declaration".to_string()),
+                );
             let instrument_action = add_visibility(
-                private_state_variable.src,
+                private_state_variable.declaration().src,
                 visibility_to_str(&Visibility::Public),
                 at_index,
             );
@@ -324,12 +327,12 @@ impl SourceModifications {
 
         for private_function in &analysis.private_functions {
             let definition_str =
-                source_string_at_location(source_id, source, &private_function.src);
+                source_string_at_location(source_id, source, &private_function.src());
             // Remove the existing visibility of the function
             if let Some(remove_action) = remove_visibility(
                 definition_str,
-                private_function.src,
-                visibility_to_str(&private_function.visibility),
+                private_function.src(),
+                visibility_to_str(&private_function.visibility()),
             ) {
                 self.add_modification(remove_action.into());
             }
@@ -337,7 +340,7 @@ impl SourceModifications {
             // Add the new visibility of the function before the function name, i.e., public
             let at_index = definition_str.find(")").expect("function parament list not found") + 1;
             let instrument_action = add_visibility(
-                private_function.src,
+                private_function.src(),
                 visibility_to_str(&Visibility::Public),
                 at_index,
             );
@@ -346,14 +349,14 @@ impl SourceModifications {
 
         for immutable_function in &analysis.immutable_functions {
             let definition_str =
-                source_string_at_location(source_id, source, &immutable_function.src);
-            if let Some(mutability) = &immutable_function.state_mutability {
+                source_string_at_location(source_id, source, &immutable_function.src());
+            if let Some(mutability) = &immutable_function.state_mutability() {
                 // Remove the existing pure or view mutability of the function
                 if matches!(mutability, StateMutability::Pure | StateMutability::View) {
                     if let Some(remove_action) = remove_visibility(
                         definition_str,
-                        immutable_function.src,
-                        mutability_to_str(mutability),
+                        immutable_function.src(),
+                        mutability_to_str(&mutability),
                     ) {
                         self.add_modification(remove_action.into());
                     }
