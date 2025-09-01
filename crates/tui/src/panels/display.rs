@@ -369,7 +369,7 @@ impl PanelTr for DisplayPanel {
             if self.max_line_width > self.content_width {
                 help.push_str(" • ←/→: Scroll");
             }
-            help.push_str(" • Enter/Backspace: Switch mode");
+            help.push_str(" • s/S: Switch mode");
 
             let help_paragraph =
                 Paragraph::new(help).style(Style::default().fg(dm.theme.help_text_color));
@@ -387,11 +387,11 @@ impl PanelTr for DisplayPanel {
         }
 
         match event.code {
-            KeyCode::Enter => {
+            KeyCode::Char('s') => {
                 self.next_mode();
                 Ok(EventResponse::Handled)
             }
-            KeyCode::Backspace => {
+            KeyCode::Char('S') => {
                 self.prev_mode();
                 Ok(EventResponse::Handled)
             }

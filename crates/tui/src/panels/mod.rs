@@ -98,11 +98,13 @@ pub trait PanelTr: Debug + Send {
 // Re-export all panel implementations
 pub mod code;
 pub mod display;
+pub mod help;
 pub mod terminal;
 pub mod trace;
 
 pub use code::CodePanel;
 pub use display::DisplayPanel;
+pub use help::HelpOverlay;
 pub use terminal::TerminalPanel;
 pub use trace::TracePanel;
 

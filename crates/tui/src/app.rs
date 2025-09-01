@@ -21,7 +21,8 @@
 use crate::data::DataManager;
 use crate::layout::{LayoutConfig, LayoutManager, LayoutType};
 use crate::panels::{
-    CodePanel, DisplayPanel, EventResponse, Panel, PanelTr, PanelType, TerminalPanel, TracePanel,
+    CodePanel, DisplayPanel, EventResponse, HelpOverlay, Panel, PanelTr, PanelType, TerminalPanel,
+    TracePanel,
 };
 use crate::rpc::RpcClient;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
@@ -145,6 +146,10 @@ pub struct App {
     /// Panel resize ratios
     vertical_split: u16, // Left panel width % (default: 50)
     horizontal_split: u16, // Top panels height % (default: 60)
+    /// Help overlay
+    help_overlay: HelpOverlay,
+    /// Whether to show help overlay
+    show_help: bool,
 }
 
 impl App {
@@ -172,6 +177,8 @@ impl App {
             last_health_check: None,
             vertical_split: 50,   // 50% left panel width
             horizontal_split: 50, // 50% top panels height
+            help_overlay: HelpOverlay::new(),
+            show_help: false,
         })
     }
 
@@ -185,6 +192,11 @@ impl App {
             LayoutType::Full => self.render_full_layout(frame, area, data_manager),
             LayoutType::Compact => self.render_compact_layout(frame, area, data_manager),
             LayoutType::Mobile => self.render_mobile_layout(frame, area, data_manager),
+        }
+
+        // Render help overlay if active
+        if self.show_help {
+            self.help_overlay.render(frame, self.layout_manager.layout_type(), data_manager);
         }
     }
 
@@ -401,6 +413,8 @@ impl App {
             Span::styled(format!("Panel: {}", panel_name), Style::default().fg(Color::White)),
             Span::raw(" | "),
             Span::styled(format!("Layout: {}", layout_type), Style::default().fg(Color::Gray)),
+            Span::raw(" | "),
+            Span::styled("Press ? for help", Style::default().fg(Color::Gray)),
         ]);
 
         let status_line = Line::from(status_spans);
@@ -435,6 +449,34 @@ impl App {
 
         debug!("Key pressed: {:?}", key);
 
+        // If help is showing, handle help-specific keys
+        if self.show_help {
+            match key.code {
+                KeyCode::Char('?') | KeyCode::Esc => {
+                    self.show_help = false;
+                    self.help_overlay.reset_scroll();
+                    return Ok(EventResponse::Handled);
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.help_overlay.scroll_down(1);
+                    return Ok(EventResponse::Handled);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.help_overlay.scroll_up(1);
+                    return Ok(EventResponse::Handled);
+                }
+                KeyCode::PageDown => {
+                    self.help_overlay.scroll_down(10);
+                    return Ok(EventResponse::Handled);
+                }
+                KeyCode::PageUp => {
+                    self.help_overlay.scroll_up(10);
+                    return Ok(EventResponse::Handled);
+                }
+                _ => return Ok(EventResponse::Handled), // Consume all other keys when help is open
+            }
+        }
+
         // First, handle global keys
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q')
@@ -442,6 +484,12 @@ impl App {
             {
                 self.should_exit = true;
                 return Ok(EventResponse::Exit);
+            }
+            KeyCode::Char('?') => {
+                // Open help overlay with '?'
+                self.show_help = true;
+                self.help_overlay.reset_scroll();
+                return Ok(EventResponse::Handled);
             }
             KeyCode::Esc => {
                 // ESC: Context-aware navigation

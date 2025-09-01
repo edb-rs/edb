@@ -241,6 +241,11 @@ impl TerminalPanel {
         self.add_line(line, LineType::Error);
     }
 
+    /// Get the current terminal mode
+    pub fn mode(&self) -> TerminalMode {
+        self.mode
+    }
+
     /// Add system message (convenience method)
     pub fn add_system(&mut self, line: &str) {
         self.add_line(&format!("⚡ {}", line), LineType::System);
