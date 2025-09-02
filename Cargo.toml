@@ -111,7 +111,7 @@ alloy-transport-ipc = { version = "1.0.23", default-features = false }
 alloy-transport-ws = { version = "1.0.23", default-features = false }
 
 # foundry - matching Foundry's versions exactly
-foundry-block-explorers = { version = "0.21.0", default-features = false }
+foundry-block-explorers = { version = "0.22.0", default-features = false }
 foundry-compilers = { version = "0.19.1", default-features = false }
 
 # revm - matching Foundry's version exactly (updated to 29.0.0)
