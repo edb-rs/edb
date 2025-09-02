@@ -438,20 +438,6 @@ impl CodePanel {
         use ratatui::text::{Line, Span};
         use ratatui::widgets::{List, ListItem, Paragraph};
 
-        // Calculate viewport height and width
-        self.context_height = if self.focused && area.height > 10 {
-            area.height.saturating_sub(4) // Account for borders and status lines
-        } else {
-            area.height.saturating_sub(2) // Just borders
-        } as usize;
-        self.content_width = area.width.saturating_sub(2) as usize; // Account for borders
-
-        // We update display information after we have the self.context_height/_width
-        let _ = self
-            .update_display_info(dm)
-            .and_then(|_| self.fresh_source_code(dm))
-            .and_then(|_| self.update_execution_info(dm));
-
         let lines = self.get_display_lines();
 
         if lines.is_empty() {
@@ -1021,6 +1007,20 @@ impl PanelTr for CodePanel {
             (None, area)
         };
 
+        // Calculate viewport height and width (for code area)
+        self.context_height = if self.focused && code_area.height > 10 {
+            code_area.height.saturating_sub(4) // Account for borders and status lines
+        } else {
+            code_area.height.saturating_sub(2) // Just borders
+        } as usize;
+        self.content_width = code_area.width.saturating_sub(2) as usize; // Account for borders
+
+        // We update display information after we have the self.context_height/_width
+        let _ = self
+            .update_display_info(dm)
+            .and_then(|_| self.fresh_source_code(dm))
+            .and_then(|_| self.update_execution_info(dm));
+
         // Render file selector if shown
         if let Some(selector_area) = file_selector_area {
             self.render_file_selector(frame, selector_area, dm);
@@ -1248,9 +1248,8 @@ impl PanelTr for CodePanel {
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('C') => {
-                    // TODO: Step back from call (reverse call navigation)
-                    // This will send a command to the RPC server to step back from the current call
                     debug!("Previous call navigation requested");
+                    dm.execution.prev_call()?;
                     Ok(EventResponse::Handled)
                 }
                 _ => Ok(EventResponse::NotHandled),

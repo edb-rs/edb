@@ -18,7 +18,7 @@
 //!
 //! This module implements RPC methods for navigating through snapshots.
 
-use crate::rpc::types::{RpcError, SnapshotInfo};
+use crate::rpc::types::RpcError;
 use crate::{EngineContext, Snapshot};
 use edb_common::types::ExecutionFrameId;
 use edb_common::OpcodeTr;
@@ -67,6 +67,53 @@ where
 
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(next_call).map_err(|e| RpcError {
+        code: -32603,
+        message: format!("Failed to serialize snapshot info: {}", e),
+        data: None,
+    })?;
+
+    debug!("Retrieved snapshot info for snapshot {}", snapshot_id);
+    Ok(json_value)
+}
+
+pub fn get_prev_call<DB>(
+    context: &Arc<EngineContext<DB>>,
+    params: Option<Value>,
+) -> Result<Value, RpcError>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    // Parse the snapshot ID from parameters
+    let snapshot_id = params
+        .as_ref()
+        .and_then(|p| p.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| RpcError {
+            code: -32602,
+            message: "Invalid params: expected [snapshot_id]".to_string(),
+            data: None,
+        })? as usize;
+
+    // Get the snapshot at the specified index
+    let _ = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
+        code: -32602,
+        message: format!("Snapshot with id {} not found", snapshot_id),
+        data: None,
+    })?;
+
+    let mut prev_call = 0;
+    for (s_id, (f_id, snapshot)) in context.snapshots.iter().enumerate().take(snapshot_id).rev() {
+        if snapshot_is_call(context, snapshot, f_id, s_id)? {
+            prev_call = s_id;
+            break;
+        }
+    }
+
+    // Serialize the SnapshotInfo enum to JSON
+    let json_value = serde_json::to_value(prev_call).map_err(|e| RpcError {
         code: -32603,
         message: format!("Failed to serialize snapshot info: {}", e),
         data: None,

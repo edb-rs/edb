@@ -28,7 +28,7 @@ use alloy_primitives::Address;
 use eyre::Result;
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
-use tracing::{debug, error};
+use tracing::debug;
 
 use edb_common::types::{Code, SnapshotInfo, Trace};
 
@@ -45,6 +45,7 @@ pub struct ExecutionState {
     snapshot_info: FetchCache<usize, SnapshotInfo>,
     code: FetchCache<Address, Code>,
     next_call: FetchCache<usize, usize>,
+    prev_call: FetchCache<usize, usize>,
     trace_data: Trace,
 }
 
@@ -57,6 +58,7 @@ impl ManagerStateTr for ExecutionState {
             snapshot_info: FetchCache::new(),
             code: FetchCache::new(),
             next_call: FetchCache::new(),
+            prev_call: FetchCache::new(),
             trace_data,
         })
     }
@@ -73,6 +75,10 @@ impl ManagerStateTr for ExecutionState {
         if self.next_call.need_update(&other.next_call) {
             self.next_call.update(&other.next_call);
         }
+
+        if self.prev_call.need_update(&other.prev_call) {
+            self.prev_call.update(&other.prev_call);
+        }
     }
 }
 
@@ -81,12 +87,14 @@ pub enum ExecutionRequest {
     SnapshotInfo(usize),
     Code(usize),
     NextCall(usize),
+    PrevCall(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecutionStatus {
     Normal,
     WaitNextCall(usize),
+    WaitPrevCall(usize),
 }
 
 impl ExecutionStatus {
@@ -148,6 +156,21 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                 // We will update all snapshots in the range
                 for i in id + 1..next_call {
                     state.next_call.insert(i, Some(next_call));
+                }
+            }
+            ExecutionRequest::PrevCall(id) => {
+                if state.prev_call.contains_key(&id) {
+                    return Ok(());
+                }
+
+                let prev_call = rpc_client.get_prev_call(id).await?;
+
+                // We separate this insertion since id might be equal to prev_call
+                state.prev_call.insert(id, Some(prev_call));
+
+                // We will update all snapshots in the range
+                for i in prev_call + 1..id {
+                    state.prev_call.insert(i, Some(prev_call));
                 }
             }
         }
@@ -262,22 +285,27 @@ impl ExecutionManager {
         }
     }
 
+    pub fn get_prev_call(&mut self, id: usize) -> Option<usize> {
+        let _ = self.pull_from_core();
+
+        if !self.state.prev_call.contains_key(&id) {
+            debug!("Prev call info not found in cache, fetching...");
+            self.new_fetching_request(ExecutionRequest::PrevCall(id));
+            return None;
+        }
+
+        match self.state.prev_call.get(&id) {
+            Some(prev_id) => *prev_id,
+            _ => None,
+        }
+    }
+
     pub fn get_execution_status(&self) -> ExecutionStatus {
         self.execution_status
     }
 
     pub fn get_snapshot_count(&self) -> usize {
         self.state.snapshot_count
-    }
-
-    pub fn get_current_snapshot(&mut self) -> usize {
-        let _ = self.check_pending_request();
-        self.current_snapshot
-    }
-
-    pub fn get_display_snapshot(&mut self) -> usize {
-        let _ = self.check_pending_request();
-        self.display_snapshot
     }
 
     pub fn get_trace(&self) -> &Trace {
@@ -311,6 +339,16 @@ impl ExecutionManager {
             Some(code) => code.as_ref(),
             _ => None,
         }
+    }
+
+    pub fn get_current_snapshot(&mut self) -> usize {
+        let _ = self.check_pending_request();
+        self.current_snapshot
+    }
+
+    pub fn get_display_snapshot(&mut self) -> usize {
+        let _ = self.check_pending_request();
+        self.display_snapshot
     }
 
     fn display_snapshot(&mut self, id: usize) -> Result<()> {
@@ -348,6 +386,8 @@ impl ExecutionManager {
         }
     }
 
+    // Check whether the pending request can be fulfilled.
+    // Return true if any following execution operation can be performed, false otherwise.
     fn check_pending_request(&mut self) -> bool {
         match self.execution_status {
             ExecutionStatus::WaitNextCall(src_id) => {
@@ -360,6 +400,21 @@ impl ExecutionManager {
                     // We will override the current snapshot
                     let _ = self.goto_snapshot(next_id);
                     let _ = self.display_snapshot(next_id);
+                }
+
+                // Any other execution request will be rejected
+                false
+            }
+            ExecutionStatus::WaitPrevCall(src_id) => {
+                // There is a pending execution request, for which we should wait
+                // and should not update current_snapshot
+                if let Some(prev_id) = self.get_prev_call(src_id) {
+                    // The pending request is for the same id, we can proceed
+                    self.execution_status = ExecutionStatus::Normal;
+
+                    // We will override the current snapshot
+                    let _ = self.goto_snapshot(prev_id);
+                    let _ = self.display_snapshot(prev_id);
                 }
 
                 // Any other execution request will be rejected
@@ -417,6 +472,21 @@ impl ExecutionManager {
             self.goto(next_call)?;
         } else {
             self.execution_status = ExecutionStatus::WaitNextCall(self.current_snapshot);
+        }
+
+        Ok(())
+    }
+
+    pub fn prev_call(&mut self) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update current_snapshot
+            return Ok(());
+        }
+
+        if let Some(prev_call) = self.get_prev_call(self.current_snapshot) {
+            self.goto(prev_call)?;
+        } else {
+            self.execution_status = ExecutionStatus::WaitPrevCall(self.current_snapshot);
         }
 
         Ok(())

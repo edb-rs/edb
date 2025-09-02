@@ -68,6 +68,7 @@ where
             "edb_getSnapshotInfo" => snapshot::get_snapshot_info(&self.context, params),
             "edb_getContractABI" => resolve::get_contract_abi(&self.context, params),
             "edb_getNextCall" => navigation::get_next_call(&self.context, params),
+            "edb_getPrevCall" => navigation::get_prev_call(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: -32601,

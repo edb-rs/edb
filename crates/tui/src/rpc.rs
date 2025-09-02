@@ -321,6 +321,19 @@ impl RpcClient {
 
         serde_json::from_value(value).map_err(|e| eyre::eyre!("Failed to parse next call: {}", e))
     }
+
+    /// Get prev call
+    pub async fn get_prev_call(&self, snapshot_id: usize) -> Result<usize> {
+        let value = self
+            .request_with_spinner(
+                "edb_getPrevCall",
+                rpc_params!(snapshot_id),
+                &format!("Getting prev call for snapshot {}", snapshot_id),
+            )
+            .await?;
+
+        serde_json::from_value(value).map_err(|e| eyre::eyre!("Failed to parse prev call: {}", e))
+    }
 }
 
 #[cfg(test)]

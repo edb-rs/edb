@@ -45,7 +45,7 @@ const MAX_COMMAND_HISTORY: usize = 100;
 
 /// Type of terminal line
 #[derive(Debug, Clone, PartialEq)]
-pub enum LineType {
+enum LineType {
     /// User command (prefixed with ">")
     Command,
     /// Command output
@@ -58,16 +58,16 @@ pub enum LineType {
 
 /// Terminal line with content and type
 #[derive(Debug, Clone)]
-pub struct TerminalLine {
+struct TerminalLine {
     /// Line content
-    pub content: String,
+    content: String,
     /// Type of line for styling
-    pub line_type: LineType,
+    line_type: LineType,
 }
 
 /// Terminal interaction mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminalMode {
+enum TerminalMode {
     /// Normal typing mode (default)
     Insert,
     /// Navigation mode for scrolling (vim-style)
@@ -82,6 +82,8 @@ enum PendingCommand {
     StepBackward(usize),
     /// Goto next call in execution
     NextCall(usize),
+    /// Goto previous call in execution
+    PrevCall(usize),
 }
 
 impl PendingCommand {
@@ -96,6 +98,11 @@ impl PendingCommand {
                 }
                 PendingCommand::NextCall(src_id) => {
                     let id = dm.execution.get_next_call(*src_id)?;
+                    dm.execution.get_snapshot_info(id)?;
+                    dm.execution.get_code(id)?;
+                }
+                PendingCommand::PrevCall(src_id) => {
+                    let id = dm.execution.get_prev_call(*src_id)?;
                     dm.execution.get_snapshot_info(id)?;
                     dm.execution.get_code(id)?;
                 }
@@ -119,6 +126,10 @@ impl PendingCommand {
             PendingCommand::NextCall(src_id) => {
                 let next_id = dm.execution.get_next_call(*src_id)?;
                 Some(format!("Goto Next Call at Snapshot {}", next_id))
+            }
+            PendingCommand::PrevCall(src_id) => {
+                let prev_id = dm.execution.get_prev_call(*src_id)?;
+                Some(format!("Goto Previous Call at Snapshot {}", prev_id))
             }
         }
     }
@@ -235,7 +246,7 @@ impl TerminalPanel {
     }
 
     /// Add a line to the terminal with specified type
-    pub fn add_line(&mut self, content: &str, line_type: LineType) {
+    fn add_line(&mut self, content: &str, line_type: LineType) {
         if self.lines.len() >= MAX_TERMINAL_LINES {
             self.lines.remove(0);
         }
@@ -250,11 +261,6 @@ impl TerminalPanel {
     /// Add error line (convenience method)
     pub fn add_error(&mut self, line: &str) {
         self.add_line(line, LineType::Error);
-    }
-
-    /// Get the current terminal mode
-    pub fn mode(&self) -> TerminalMode {
-        self.mode
     }
 
     /// Add system message (convenience method)
@@ -394,39 +400,10 @@ impl TerminalPanel {
                 dm.execution.next_call()?;
             }
             "rcall" | "rc" => {
-                self.add_system("Stepping back from function call...");
-                let current = 0usize;
-                let total = 10usize;
-                // Simulate jumping back to previous significant call
-                let new_pos = current.saturating_sub(10);
-                // TODO
-                // dm.execution.update_state(new_pos, total, Some(new_pos + 9), None);
-                self.add_output(&format!(
-                    "✅ Stepped back to previous call at snapshot {}/{}",
-                    new_pos, total
-                ));
-            }
-            "goto" => {
-                if parts.len() > 1 {
-                    if let Ok(index) = parts[1].parse::<usize>() {
-                        self.add_output(&format!("Jumping to snapshot {}...", index));
-                        let total = dm.execution.get_snapshot_count();
-                        if index < total {
-                            // TODO
-                            // dm.execution.update_state(index, total, Some(index + 9), None);
-                            self.add_output(&format!("✅ Jumped to snapshot {}/{}", index, total));
-                        } else {
-                            self.add_output(&format!(
-                                "⚠️ Invalid snapshot index. Range: 0-{}",
-                                total.saturating_sub(1)
-                            ));
-                        }
-                    } else {
-                        self.add_output("Invalid snapshot index");
-                    }
-                } else {
-                    self.add_output("Usage: goto <index>");
-                }
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::PrevCall(id));
+                self.spinner.start_loading("Stepping to previous function call...");
+                dm.execution.prev_call()?;
             }
             "break" => {
                 if parts.len() > 1 {
@@ -485,7 +462,6 @@ impl TerminalPanel {
         self.add_output("  reverse, r <count> - Reverse step multiple snapshots");
         self.add_output("  call, c          - Step to next function call");
         self.add_output("  rcall, rc        - Step back from function call");
-        self.add_output("  goto <index>     - Jump to specific snapshot");
         self.add_output("");
         self.add_output("🔍 Inspection:");
         self.add_output("  stack            - Show current stack");
