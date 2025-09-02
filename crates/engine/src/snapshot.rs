@@ -92,6 +92,7 @@ where
     }
 
     /// Get the contract address associated with this snapshot
+    #[deprecated]
     pub fn address(&self) -> alloy_primitives::Address {
         match self {
             Snapshot::Opcode(snapshot) => snapshot.address,

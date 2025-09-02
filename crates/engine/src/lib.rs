@@ -38,9 +38,6 @@ pub use rpc::*;
 pub mod snapshot;
 pub use snapshot::*;
 
-pub mod source;
-pub use source::*;
-
 pub mod tweak;
 pub use tweak::*;
 

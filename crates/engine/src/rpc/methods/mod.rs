@@ -25,7 +25,7 @@ mod snapshot;
 mod trace;
 
 use super::types::RpcError;
-use crate::EngineContext;
+use crate::{error_codes, EngineContext};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use std::sync::Arc;
 use tracing::debug;
@@ -71,7 +71,7 @@ where
             "edb_getPrevCall" => navigation::get_prev_call(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
-                code: -32601,
+                code: error_codes::METHOD_NOT_FOUND,
                 message: format!("Method '{}' not found", method),
                 data: None,
             }),

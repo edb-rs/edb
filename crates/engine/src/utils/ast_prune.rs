@@ -20,7 +20,7 @@ use eyre::{OptionExt, Result};
 use foundry_compilers::{
     artifacts::{
         output_selection::OutputSelection, Ast, Node, NodeType, Settings, Severity, Source,
-        SourceFile, SourceUnit, Sources,
+        SourceUnit, Sources,
     },
     solc::{SolcCompiler, SolcLanguage, SolcSettings, SolcVersionedInput},
     CompilationError, Compiler, CompilerInput,

@@ -16,9 +16,7 @@
 
 //! Common utilities for instrumentation
 
-use std::path::PathBuf;
-
-use crate::{AnalysisResult, SourceAnalysis, SourceModifications, StepRef};
+use crate::{AnalysisResult, SourceModifications};
 use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
 

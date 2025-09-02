@@ -30,12 +30,11 @@ use indicatif::{ProgressBar, ProgressStyle};
 use revm::{
     context::{
         result::{ExecutionResult, HaltReason},
-        BlockEnv, CfgEnv, Host, TxEnv,
+        Host, TxEnv,
     },
     database::CacheDB,
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -44,7 +43,7 @@ use std::{
 use tracing::{debug, error, info, warn};
 
 use edb_common::{
-    relax_context_constraints, types::Trace, CachePath, EdbCachePath, EdbContext, ForkResult,
+    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
     DEFAULT_ETHERSCAN_CACHE_TTL,
 };
 

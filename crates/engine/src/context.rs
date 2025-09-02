@@ -16,8 +16,7 @@
 
 use std::collections::HashMap;
 
-use alloy_dyn_abi::abi;
-use alloy_primitives::{Address, Selector, TxHash};
+use alloy_primitives::{Address, TxHash};
 use edb_common::{types::Trace, ForkInfo};
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},

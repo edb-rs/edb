@@ -20,17 +20,14 @@
 //! and execution flow. The trace can be replayed later to determine execution paths
 //! without needing to re-examine transaction inputs/outputs.
 
-use alloy_primitives::{Address, Bytes, Log, U256};
+use alloy_primitives::{Address, Log, U256};
 use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
 use revm::{
-    context::{ContextTr, CreateScheme},
-    interpreter::{CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, Interpreter},
+    context::ContextTr,
+    interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter},
     Inspector,
 };
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
+use std::{collections::HashMap, ops::Deref};
 use tracing::{debug, error};
 
 /// Result of transaction replay with call trace

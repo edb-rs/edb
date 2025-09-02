@@ -18,15 +18,14 @@
 
 use std::path::PathBuf;
 
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::Address;
 use edb_common::{Cache, EdbCache};
 use eyre::Result;
-use foundry_block_explorers::{contract::Metadata, errors::EtherscanError, Client};
+use foundry_block_explorers::{errors::EtherscanError, Client};
 use foundry_compilers::{
-    artifacts::{output_selection::OutputSelection, CompilerOutput, Contract, SolcInput, Source},
+    artifacts::{output_selection::OutputSelection, SolcInput, Source},
     solc::{Solc, SolcLanguage},
 };
-use serde::{Deserialize, Serialize};
 use tracing::trace;
 
 use crate::{etherscan_rate_limit_guard, Artifact};

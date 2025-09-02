@@ -23,7 +23,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::{EngineContext, Snapshot};
+use crate::{error_codes, EngineContext, Snapshot};
 
 use super::super::types::RpcError;
 
@@ -55,20 +55,20 @@ where
         .and_then(|arr| arr.first())
         .and_then(|v| v.as_u64())
         .ok_or_else(|| RpcError {
-            code: -32602,
+            code: error_codes::INVALID_PARAMS,
             message: "Invalid params: expected [snapshot_id]".to_string(),
             data: None,
         })? as usize;
 
     // Get the snapshot at the specified index
     let (frame_id, snapshot) = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
-        code: -32602,
+        code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
         message: format!("Snapshot with id {} not found", snapshot_id),
         data: None,
     })?;
 
     let trace_entry = context.trace.get(frame_id.trace_entry_id()).ok_or_else(|| RpcError {
-        code: -32602,
+        code: error_codes::TRACE_ENTRY_NOT_FOUND,
         message: format!("Trace entry with id {} not found", frame_id.trace_entry_id()),
         data: None,
     })?;
@@ -94,14 +94,14 @@ where
             // Get the analysis result for this address
             let analysis_result =
                 context.analysis_results.get(&bytecode_address).ok_or_else(|| RpcError {
-                    code: -32603,
+                    code: error_codes::INVALID_ADDRESS,
                     message: format!("No analysis result found for address {}", bytecode_address),
                     data: None,
                 })?;
 
             // Get the step from USID
             let step_ref = analysis_result.usid_to_step.get(&usid).ok_or_else(|| RpcError {
-                code: -32603,
+                code: error_codes::USID_NOT_FOUND,
                 message: format!("No step found for USID {}", u64::from(usid)),
                 data: None,
             })?;
@@ -114,7 +114,7 @@ where
             let source_index = source_location.index.unwrap_or(0) as u32;
             let source_analysis =
                 analysis_result.sources.get(&source_index).ok_or_else(|| RpcError {
-                    code: -32603,
+                    code: error_codes::CODE_NOT_FOUND,
                     message: format!("No source analysis found for index {}", source_index),
                     data: None,
                 })?;
@@ -130,7 +130,7 @@ where
 
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(snapshot_info).map_err(|e| RpcError {
-        code: -32603,
+        code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize snapshot info: {}", e),
         data: None,
     })?;
@@ -148,7 +148,7 @@ where
 {
     let total_snapshots = context.snapshots.len();
     Ok(serde_json::to_value(total_snapshots).map_err(|e| RpcError {
-        code: -32603,
+        code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize total snapshots: {}", e),
         data: None,
     })?)

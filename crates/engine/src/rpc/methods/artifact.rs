@@ -25,7 +25,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::{utils::disasm::disassemble, EngineContext, Snapshot};
+use crate::{error_codes, utils::disasm::disassemble, EngineContext, Snapshot};
 
 use super::super::types::RpcError;
 
@@ -56,20 +56,20 @@ where
         .and_then(|arr| arr.first())
         .and_then(|v| v.as_u64())
         .ok_or_else(|| RpcError {
-            code: -32602,
+            code: error_codes::INVALID_PARAMS,
             message: "Invalid params: expected [snapshot_id]".to_string(),
             data: None,
         })? as usize;
 
     // Get the snapshot at the specified index
     let (frame_id, snapshot) = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
-        code: -32602,
+        code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
         message: format!("Snapshot with id {} not found", snapshot_id),
         data: None,
     })?;
 
     let trace_entry = context.trace.get(frame_id.trace_entry_id()).ok_or_else(|| RpcError {
-        code: -32603,
+        code: error_codes::TRACE_ENTRY_NOT_FOUND,
         message: format!("Trace entry with id {} not found", frame_id.trace_entry_id()),
         data: None,
     })?;
@@ -82,7 +82,7 @@ where
             // For opcode snapshots, return disassembled bytecode
             // Get the bytecode from the database
             let bytecode = trace_entry.bytecode.as_ref().ok_or_else(|| RpcError {
-                code: -32603,
+                code: error_codes::CODE_NOT_FOUND,
                 message: format!("No bytecode found for trace entry {}", frame_id.trace_entry_id()),
                 data: None,
             })?;
@@ -107,7 +107,7 @@ where
         Snapshot::Hook(..) => {
             // Get the artifact for this address
             let artifact = context.artifacts.get(&bytecode_address).ok_or_else(|| RpcError {
-                code: -32603,
+                code: error_codes::INVALID_ADDRESS,
                 message: format!("No artifact found for address {}", bytecode_address),
                 data: None,
             })?;
@@ -124,7 +124,7 @@ where
 
     // Serialize the Code enum to JSON
     let json_value = serde_json::to_value(code).map_err(|e| RpcError {
-        code: -32603,
+        code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize code: {}", e),
         data: None,
     })?;
@@ -149,7 +149,7 @@ where
         .and_then(|arr| arr.first())
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .ok_or_else(|| RpcError {
-            code: -32602,
+            code: error_codes::INVALID_PARAMS,
             message: "Invalid params: expected [address]".to_string(),
             data: None,
         })?;
@@ -158,7 +158,7 @@ where
         context.artifacts.get(&address).map(|artifact| artifact.meta.constructor_arguments.clone());
 
     let json_value = serde_json::to_value(args).map_err(|e| RpcError {
-        code: -32603,
+        code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize ABI: {}", e),
         data: None,
     })?;

@@ -19,7 +19,7 @@
 //! This module implements RPC methods for navigating through snapshots.
 
 use crate::rpc::types::RpcError;
-use crate::{EngineContext, Snapshot};
+use crate::{error_codes, EngineContext, Snapshot};
 use edb_common::types::ExecutionFrameId;
 use edb_common::OpcodeTr;
 use revm::bytecode::OpCode;
@@ -45,14 +45,14 @@ where
         .and_then(|arr| arr.first())
         .and_then(|v| v.as_u64())
         .ok_or_else(|| RpcError {
-            code: -32602,
+            code: error_codes::INVALID_PARAMS,
             message: "Invalid params: expected [snapshot_id]".to_string(),
             data: None,
         })? as usize;
 
     // Get the snapshot at the specified index
     let _ = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
-        code: -32602,
+        code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
         message: format!("Snapshot with id {} not found", snapshot_id),
         data: None,
     })?;
@@ -67,7 +67,7 @@ where
 
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(next_call).map_err(|e| RpcError {
-        code: -32603,
+        code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize snapshot info: {}", e),
         data: None,
     })?;
@@ -92,14 +92,14 @@ where
         .and_then(|arr| arr.first())
         .and_then(|v| v.as_u64())
         .ok_or_else(|| RpcError {
-            code: -32602,
+            code: error_codes::INVALID_PARAMS,
             message: "Invalid params: expected [snapshot_id]".to_string(),
             data: None,
         })? as usize;
 
     // Get the snapshot at the specified index
     let _ = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
-        code: -32602,
+        code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
         message: format!("Snapshot with id {} not found", snapshot_id),
         data: None,
     })?;
@@ -114,7 +114,7 @@ where
 
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(prev_call).map_err(|e| RpcError {
-        code: -32603,
+        code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize snapshot info: {}", e),
         data: None,
     })?;
@@ -143,20 +143,20 @@ where
         Snapshot::<DB>::Hook(s) => {
             let usid = s.usid;
             let address = context.get_bytecode_address(s_id).ok_or_else(|| RpcError {
-                code: -32603,
+                code: error_codes::TRACE_ENTRY_NOT_FOUND,
                 message: format!("Trace entry with id {} not found", f_id.trace_entry_id()),
                 data: None,
             })?;
 
             let analysis_result =
                 context.analysis_results.get(&address).ok_or_else(|| RpcError {
-                    code: -32603,
+                    code: error_codes::INVALID_ADDRESS,
                     message: format!("Analysis result for address {} not found", address),
                     data: None,
                 })?;
 
             let step_info = analysis_result.usid_to_step.get(&usid).ok_or_else(|| RpcError {
-                code: -32603,
+                code: error_codes::USID_NOT_FOUND,
                 message: format!("Step info for USID {} not found", usid),
                 data: None,
             })?;

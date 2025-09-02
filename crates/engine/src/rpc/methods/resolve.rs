@@ -21,7 +21,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::{EngineContext, RpcError};
+use crate::{error_codes, EngineContext, RpcError};
 
 pub fn get_contract_abi<DB>(
     context: &Arc<EngineContext<DB>>,
@@ -39,7 +39,7 @@ where
         .and_then(|arr| arr.first())
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .ok_or_else(|| RpcError {
-            code: -32602,
+            code: error_codes::INVALID_PARAMS,
             message: "Invalid params: expected [address, recompiled]".to_string(),
             data: None,
         })?;
@@ -51,7 +51,7 @@ where
         .and_then(|arr| arr.get(1))
         .and_then(|v| v.as_bool())
         .ok_or_else(|| RpcError {
-            code: -32602,
+            code: error_codes::INVALID_PARAMS,
             message: "Invalid params: expected [address, recompiled]".to_string(),
             data: None,
         })?;
@@ -73,7 +73,7 @@ where
     };
 
     let json_value = serde_json::to_value(abi).map_err(|e| RpcError {
-        code: -32603,
+        code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize ABI: {}", e),
         data: None,
     })?;
