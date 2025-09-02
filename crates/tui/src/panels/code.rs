@@ -25,7 +25,7 @@ use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_primitives::Address;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use edb_common::types::{Code, SnapshotInfo};
+use edb_common::types::{Code, SnapshotInfo, SnapshotInfoDetail};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -605,7 +605,7 @@ impl CodePanel {
                 if self.max_line_width > self.content_width {
                     help.push_str(" • ←/→: Scroll");
                 }
-                help.push_str(" • s/r/n/p: Step/Rev/Next/Prev • c/C: Next/Prev call");
+                help.push_str(" • s/S/n/N: Step/Rev/Next/Prev • c/C: Next/Prev call");
                 if self.display_info.mode == CodeMode::Source {
                     help.push_str(" • F: Files");
                 }
@@ -923,8 +923,8 @@ impl CodePanel {
                 return Some(());
             }
 
-            match dm.execution.get_snapshot_info(execution_snapshot_id)? {
-                SnapshotInfo::Hook(hook_info) => {
+            match dm.execution.get_snapshot_info(execution_snapshot_id)?.detail() {
+                SnapshotInfoDetail::Hook(hook_info) => {
                     let execution_path = hook_info.path.as_os_str().to_string_lossy();
                     let display_path = &self.display_info.available_files[self.selected_path_index];
                     if &*execution_path != display_path {
@@ -940,7 +940,7 @@ impl CodePanel {
                         self.current_execution_line = Some(execution_line);
                     }
                 }
-                SnapshotInfo::Opcode(opcode_info) => {
+                SnapshotInfoDetail::Opcode(opcode_info) => {
                     let execution_line = self
                         .opcodes
                         .iter()
@@ -1209,37 +1209,19 @@ impl PanelTr for CodePanel {
                     dm.execution.step(1)?;
                     Ok(EventResponse::Handled)
                 }
-                KeyCode::Char('r') => {
+                KeyCode::Char('S') => {
                     debug!("Reverse step (previous instruction) requested from code panel");
                     dm.execution.reverse_step(1)?;
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('n') => {
-                    // Next: Step over function calls (skip internal calls)
-                    // TODO: This will send a next command to the RPC server
                     debug!("Next (step over) requested from code panel");
-                    // // For now, simulate stepping over to next significant point
-                    // let current = dm.execution.current_snapshot;
-                    // let total = dm.execution.snapshot_count;
-                    // let next_pos = (current + 5).min(total.saturating_sub(1));
-                    // // TODO
-                    // // dm.execution_mut().update_state(next_pos, total, Some(next_pos + 9), None);
-                    // debug!("Next (step over) to snapshot {}", next_pos);
-
+                    dm.execution.next()?;
                     Ok(EventResponse::Handled)
                 }
-                KeyCode::Char('p') => {
-                    // Previous: Step back over function calls (reverse step over)
-                    // TODO: This will send a previous command to the RPC server
+                KeyCode::Char('N') => {
                     debug!("Previous (reverse step over) requested from code panel");
-                    // // For now, simulate stepping back to previous significant point
-                    // let current = dm.execution.current_snapshot;
-                    // let total = dm.execution.snapshot_count;
-                    // let prev_pos = current.saturating_sub(5);
-                    // // TODO
-                    // // dm.execution_mut().update_state(prev_pos, total, Some(prev_pos + 9), None);
-                    // debug!("Previous (reverse step over) to snapshot {}", prev_pos);
-
+                    dm.execution.prev()?;
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('c') => {

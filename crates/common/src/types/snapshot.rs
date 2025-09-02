@@ -8,50 +8,65 @@ use serde::{Deserialize, Serialize};
 use crate::types::ExecutionFrameId;
 
 #[derive(Debug, Clone, Serialize, Deserialize, From)]
-pub enum SnapshotInfo {
-    Opcode(#[from] OpcodeSnapshotInfo),
-    Hook(#[from] HookSnapshotInfo),
+pub struct SnapshotInfo {
+    pub id: usize,
+    pub frame_id: ExecutionFrameId,
+    pub next_id: usize,
+    pub prev_id: usize,
+    pub detail: SnapshotInfoDetail,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, From)]
+pub enum SnapshotInfoDetail {
+    Opcode(#[from] OpcodeSnapshotInfoDetail),
+    Hook(#[from] HookSnapshotInfoDetail),
 }
 
 impl SnapshotInfo {
     pub fn frame_id(&self) -> ExecutionFrameId {
-        match self {
-            SnapshotInfo::Opcode(info) => info.frame_id,
-            SnapshotInfo::Hook(info) => info.frame_id,
-        }
+        self.frame_id
     }
 
     pub fn id(&self) -> usize {
-        match self {
-            SnapshotInfo::Opcode(info) => info.id,
-            SnapshotInfo::Hook(info) => info.id,
-        }
+        self.id
+    }
+
+    pub fn next_id(&self) -> usize {
+        self.next_id
+    }
+
+    pub fn prev_id(&self) -> usize {
+        self.prev_id
+    }
+
+    pub fn detail(&self) -> &SnapshotInfoDetail {
+        &self.detail
     }
 
     pub fn path(&self) -> Option<&PathBuf> {
-        match self {
-            SnapshotInfo::Opcode(_) => None,
-            SnapshotInfo::Hook(info) => Some(&info.path),
+        match self.detail() {
+            SnapshotInfoDetail::Opcode(_) => None,
+            SnapshotInfoDetail::Hook(info) => Some(&info.path),
         }
     }
 
     pub fn offset(&self) -> Option<usize> {
-        match self {
-            SnapshotInfo::Opcode(_) => None,
-            SnapshotInfo::Hook(info) => Some(info.offset),
+        match self.detail() {
+            SnapshotInfoDetail::Opcode(_) => None,
+            SnapshotInfoDetail::Hook(info) => Some(info.offset),
         }
     }
 
     pub fn pc(&self) -> Option<usize> {
-        match self {
-            SnapshotInfo::Opcode(info) => Some(info.pc),
-            SnapshotInfo::Hook(_) => None,
+        match self.detail() {
+            SnapshotInfoDetail::Opcode(info) => Some(info.pc),
+            SnapshotInfoDetail::Hook(_) => None,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HookSnapshotInfo {
+pub struct HookSnapshotInfoDetail {
     /// Snapshot Id
     pub id: usize,
     /// Execution Frame Id
@@ -65,7 +80,7 @@ pub struct HookSnapshotInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpcodeSnapshotInfo {
+pub struct OpcodeSnapshotInfoDetail {
     /// Snapshot Id
     pub id: usize,
     /// Execution Frame Id

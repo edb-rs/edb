@@ -135,7 +135,7 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    match snapshot.detail {
+    match snapshot.detail() {
         SnapshotDetail::Opcode(ref s) => {
             let op = unsafe { OpCode::new_unchecked(s.opcode) };
             Ok(op.is_call())

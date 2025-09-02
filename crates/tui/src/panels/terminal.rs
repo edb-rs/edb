@@ -386,7 +386,7 @@ impl TerminalPanel {
                 self.spinner.start_loading(&format!("Stepping {} times...", count));
                 dm.execution.step(count)?;
             }
-            "reverse" | "r" => {
+            "reverse" | "rs" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.pending_command = Some(PendingCommand::StepBackward(count));
@@ -459,7 +459,7 @@ impl TerminalPanel {
         self.add_output("  next, n          - Step to next snapshot");
         self.add_output("  prev, p          - Step to previous snapshot");
         self.add_output("  step, s <count>  - Step multiple snapshots");
-        self.add_output("  reverse, r <count> - Reverse step multiple snapshots");
+        self.add_output("  reverse, rs <count> - Reverse step multiple snapshots");
         self.add_output("  call, c          - Step to next function call");
         self.add_output("  rcall, rc        - Step back from function call");
         self.add_output("");

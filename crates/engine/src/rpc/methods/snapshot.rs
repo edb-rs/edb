@@ -18,7 +18,9 @@
 
 use std::sync::Arc;
 
-use edb_common::types::{HookSnapshotInfo, OpcodeSnapshotInfo, SnapshotInfo};
+use edb_common::types::{
+    HookSnapshotInfoDetail, OpcodeSnapshotInfoDetail, SnapshotInfo, SnapshotInfoDetail,
+};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
@@ -73,19 +75,33 @@ where
         data: None,
     })?;
 
-    let snapshot_info = match snapshot.detail {
+    let snapshot_info = match snapshot.detail() {
         SnapshotDetail::Opcode(ref opcode_snapshot) => {
             // For opcode snapshots, return complete execution state
-            SnapshotInfo::Opcode(OpcodeSnapshotInfo {
-                id: snapshot.id,
-                frame_id: *frame_id,
-                pc: opcode_snapshot.pc,
-                opcode: opcode_snapshot.opcode,
-                memory: opcode_snapshot.memory.as_ref().clone(),
-                stack: opcode_snapshot.stack.clone(),
-                calldata: opcode_snapshot.calldata.as_ref().clone(),
-                transition_storage: opcode_snapshot.transition_storage.as_ref().clone(),
-            })
+            SnapshotInfo {
+                id: snapshot.id(),
+                frame_id: snapshot.frame_id(),
+                next_id: snapshot.next_id().ok_or_else(|| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: format!("We do not find next id for Snapshot {}", snapshot.id()),
+                    data: None,
+                })?,
+                prev_id: snapshot.prev_id().ok_or_else(|| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: format!("We do not find previous id for Snapshot {}", snapshot.id()),
+                    data: None,
+                })?,
+                detail: SnapshotInfoDetail::Opcode(OpcodeSnapshotInfoDetail {
+                    id: snapshot.id(),
+                    frame_id: *frame_id,
+                    pc: opcode_snapshot.pc,
+                    opcode: opcode_snapshot.opcode,
+                    memory: opcode_snapshot.memory.as_ref().clone(),
+                    stack: opcode_snapshot.stack.clone(),
+                    calldata: opcode_snapshot.calldata.as_ref().clone(),
+                    transition_storage: opcode_snapshot.transition_storage.as_ref().clone(),
+                }),
+            }
         }
         SnapshotDetail::Hook(ref hook_snapshot) => {
             // For hook snapshots, get source location from analysis results
@@ -120,13 +136,27 @@ where
                     data: None,
                 })?;
 
-            SnapshotInfo::Hook(HookSnapshotInfo {
-                id: snapshot.id,
-                frame_id: *frame_id,
-                path: source_analysis.path.clone(),
-                offset: source_location.start.unwrap_or(0),
-                length: source_location.length.unwrap_or(0),
-            })
+            SnapshotInfo {
+                id: snapshot.id(),
+                frame_id: snapshot.frame_id(),
+                next_id: snapshot.next_id().ok_or_else(|| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: format!("We do not find next id for Snapshot {}", snapshot.id()),
+                    data: None,
+                })?,
+                prev_id: snapshot.prev_id().ok_or_else(|| RpcError {
+                    code: error_codes::INTERNAL_ERROR,
+                    message: format!("We do not find previous id for Snapshot {}", snapshot.id()),
+                    data: None,
+                })?,
+                detail: SnapshotInfoDetail::Hook(HookSnapshotInfoDetail {
+                    id: snapshot.id(),
+                    frame_id: *frame_id,
+                    path: source_analysis.path.clone(),
+                    offset: source_location.start.unwrap_or(0),
+                    length: source_location.length.unwrap_or(0),
+                }),
+            }
         }
     };
 

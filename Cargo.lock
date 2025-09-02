@@ -2046,6 +2046,7 @@ dependencies = [
  "foundry-compilers",
  "hex",
  "indicatif",
+ "itertools 0.14.0",
  "lazy_static",
  "once_cell",
  "parking_lot",

@@ -149,18 +149,19 @@ impl StepRef {
             _ => {}
         }
 
-        // Corner case 2: require statements
-        let require_n = calls
+        // Corner case 2: built-in statements
+        static BUILT_IN_FUNCTIONS: &[&str] = &["require", "assert"];
+        let built_in_n = calls
             .iter()
             .filter(|call| {
                 if let Expression::Identifier(ref id) = call.expression {
-                    id.name == "require"
+                    BUILT_IN_FUNCTIONS.contains(&id.name.as_str())
                 } else {
                     false
                 }
             })
             .count();
-        function_calls = function_calls.saturating_sub(require_n);
+        function_calls = function_calls.saturating_sub(built_in_n);
 
         *self.function_calls.get_or_init(|| function_calls)
     }
@@ -247,6 +248,24 @@ impl Step {
             }
         }
         this
+    }
+
+    /// Check whether this step is an entry of a function
+    pub fn function_entry(&self) -> Option<UFID> {
+        if let StepVariant::FunctionEntry(_) = self.variant {
+            Some(self.ufid)
+        } else {
+            None
+        }
+    }
+
+    /// Check whether this step is an entry of a modifier
+    pub fn modifier_entry(&self) -> Option<UFID> {
+        if let StepVariant::ModifierEntry(_) = self.variant {
+            Some(self.ufid)
+        } else {
+            None
+        }
     }
 
     /// Adds a variable out-of-scope hook to this step.

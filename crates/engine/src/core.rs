@@ -186,7 +186,8 @@ impl Engine {
 
         // Step 8: Start RPC server with analysis results and snapshots
         info!("Starting RPC server with analysis results and snapshots");
-        let snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
+        let mut snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
+        snapshots.analyze_next_step(&replay_result.execution_trace, &analysis_results)?;
         // Let's pack the debug context
         let mut context = EngineContext {
             cfg: ctx.cfg.clone(),

@@ -452,6 +452,38 @@ impl ExecutionManager {
         self.goto(next_id)
     }
 
+    pub fn next(&mut self) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update current_snapshot
+            return Ok(());
+        }
+
+        let current_id = self.get_current_snapshot();
+        if let Some(snapshot_info) = self.get_snapshot_info(current_id) {
+            let next_id = snapshot_info.next_id();
+            self.goto(next_id)
+        } else {
+            // We do nothing if we do not have the snapshot info
+            Ok(())
+        }
+    }
+
+    pub fn prev(&mut self) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update current_snapshot
+            return Ok(());
+        }
+
+        let current_id = self.get_current_snapshot();
+        if let Some(snapshot_info) = self.get_snapshot_info(current_id) {
+            let prev_id = snapshot_info.prev_id();
+            self.goto(prev_id)
+        } else {
+            // We do nothing if we do not have the snapshot info
+            Ok(())
+        }
+    }
+
     pub fn reverse_step(&mut self, count: usize) -> Result<()> {
         if !self.check_pending_request() {
             // There is a pending request, we should not update current_snapshot

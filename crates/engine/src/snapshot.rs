@@ -29,17 +29,23 @@
 //! of execution state across the entire transaction.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
 };
 
+use alloy_primitives::Address;
+use edb_common::types::{ExecutionFrameId, Trace};
+use eyre::Result;
+use itertools::Itertools;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
-
-use edb_common::types::ExecutionFrameId;
 use serde::{Deserialize, Serialize};
+use tower_http::trace;
 use tracing::error;
 
-use crate::{HookSnapshot, HookSnapshots, OpcodeSnapshot, OpcodeSnapshots, USID};
+use crate::{
+    analysis::AnalysisResult, snapshot, HookSnapshot, HookSnapshots, OpcodeSnapshot,
+    OpcodeSnapshots, USID,
+};
 
 /// Union type representing either an opcode or hook snapshot
 ///
@@ -54,9 +60,13 @@ where
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
-    pub id: usize,
-    pub frame_id: ExecutionFrameId,
-    pub detail: SnapshotDetail<DB>,
+    id: usize,
+    frame_id: ExecutionFrameId,
+    next_id: Option<usize>,
+    prev_id: Option<usize>,
+
+    /// Detail of the snapshot
+    detail: SnapshotDetail<DB>,
 }
 
 /// Union type representing details of either an opcode or hook snapshot
@@ -86,12 +96,47 @@ where
 {
     /// Create an opcode snapshot
     pub fn new_opcode(id: usize, frame_id: ExecutionFrameId, detail: OpcodeSnapshot<DB>) -> Self {
-        Self { id, frame_id, detail: SnapshotDetail::Opcode(detail) }
+        Self { id, frame_id, next_id: None, prev_id: None, detail: SnapshotDetail::Opcode(detail) }
     }
 
     /// Create a hook snapshot
     pub fn new_hook(id: usize, frame_id: ExecutionFrameId, detail: HookSnapshot<DB>) -> Self {
-        Self { id, frame_id, detail: SnapshotDetail::Hook(detail) }
+        Self { id, frame_id, next_id: None, prev_id: None, detail: SnapshotDetail::Hook(detail) }
+    }
+
+    /// Set the id of the next snapshot
+    pub fn set_next_id(&mut self, id: usize) {
+        self.next_id = Some(id);
+    }
+
+    /// Get the id of the next snapshot
+    pub fn next_id(&self) -> Option<usize> {
+        self.next_id
+    }
+
+    /// Set the id of the previous snapshot
+    pub fn set_prev_id(&mut self, id: usize) {
+        self.prev_id = Some(id);
+    }
+
+    /// Get the id of the previous snapshot
+    pub fn prev_id(&self) -> Option<usize> {
+        self.prev_id
+    }
+
+    /// Get the snapshot id
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    /// Get the execution frame id
+    pub fn frame_id(&self) -> ExecutionFrameId {
+        self.frame_id
+    }
+
+    /// Get the detail of the snapshot
+    pub fn detail(&self) -> &SnapshotDetail<DB> {
+        &self.detail
     }
 
     /// Get USID if the snapshot is hooked
@@ -579,5 +624,128 @@ where
 
         println!("{}├─ Range: \x1b[36m{}\x1b[0m", indent, pc_range);
         println!("{}└─ Avg stack depth: \x1b[36m{:.1}\x1b[0m", indent, avg_stack);
+    }
+}
+
+// Next (step over the call) snapshot information analysis
+impl<DB> Snapshots<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    /// Analysis next step information for snapshots
+    pub fn analyze_next_step(
+        &mut self,
+        trace: &Trace,
+        analysis: &HashMap<Address, AnalysisResult>,
+    ) -> Result<()> {
+        let mut holed_snapshots: HashSet<usize> = HashSet::new();
+
+        for (entry_id, snapshots) in &self
+            .iter_mut()
+            .sorted_by_key(|(f_id, _)| f_id.trace_entry_id())
+            .chunk_by(|(f_id, _)| f_id.trace_entry_id())
+        {
+            let snapshots_vec: Vec<_> = snapshots.collect();
+
+            // The last snapshot of a entry will become holed
+            let Some((_, last_snapshot)) = snapshots_vec.last() else {
+                continue;
+            };
+            holed_snapshots.insert(last_snapshot.id());
+
+            if last_snapshot.is_opcode() {
+                Self::analyze_next_step_for_opcode(snapshots_vec)?;
+            } else {
+                Self::analyze_next_step_for_opcode(snapshots_vec)?;
+            }
+        }
+
+        // Handle holed snapshots
+        self.find_next_step_for_holed_snapshots(trace, holed_snapshots)?;
+        self.analyze_prev_step()?;
+
+        Ok(())
+    }
+
+    fn analyze_prev_step(&mut self) -> Result<()> {
+        for i in 0..self.len() {
+            let current_snapshot = &self[i].1;
+            let current_id = current_snapshot.id();
+            let next_id = current_snapshot
+                .next_id()
+                .ok_or_else(|| eyre::eyre!("Snapshot {} does not have next_id set", current_id))?;
+
+            let next_snapshot = &mut self[next_id].1;
+            if next_snapshot.prev_id().is_none() {
+                // The first snapshot whose next_id is the subject one, will be the prev_id
+                // of the current snapshot
+                next_snapshot.set_prev_id(current_id);
+            }
+        }
+
+        self.iter_mut().filter(|(_, snapshot)| snapshot.prev_id().is_none()).for_each(
+            |(_, snapshot)| {
+                snapshot.set_prev_id(snapshot.id().saturating_sub(1));
+            },
+        );
+
+        Ok(())
+    }
+
+    fn find_next_step_for_holed_snapshots(
+        &mut self,
+        trace: &Trace,
+        holed_snapshots: HashSet<usize>,
+    ) -> Result<()> {
+        let last_snapshot_id = self.len().saturating_sub(1);
+
+        // Handle holed snapshots
+        for current_id in holed_snapshots {
+            let entry_id = self[current_id].0.trace_entry_id();
+
+            // Try to find the first snapshot in the ancestor frames that is after the current snapshot
+            let mut next_id = None;
+            let mut entry = trace
+                .get(entry_id)
+                .ok_or_else(|| eyre::eyre!("Trace entry {} not found", entry_id))?;
+            while let Some(parent_id) = entry.parent_id {
+                // Find the first snapshot in the parent frame that is after the current snapshot
+                if let Some((_, parent_snapshot)) = self
+                    .iter()
+                    .skip(current_id.saturating_add(1))
+                    .find(|(f_id, _)| f_id.trace_entry_id() == parent_id)
+                {
+                    next_id = Some(parent_snapshot.id());
+                    break;
+                }
+
+                // Move up to the next parent
+                entry = trace
+                    .get(parent_id)
+                    .ok_or_else(|| eyre::eyre!("Trace entry {} not found", parent_id))?;
+            }
+
+            self[current_id].1.set_next_id(next_id.unwrap_or(last_snapshot_id));
+        }
+
+        Ok(())
+    }
+
+    // Helper functions
+    fn analyze_next_step_for_opcode(
+        mut snapshots: Vec<&mut (ExecutionFrameId, Snapshot<DB>)>,
+    ) -> Result<()> {
+        for i in 0..snapshots.len().saturating_sub(1) {
+            let (_, next_snapshot) = &snapshots[i + 1];
+            let next_id = next_snapshot.id();
+
+            // Link to the next snapshot in the same frame
+            let (_, current_snapshot) = &mut snapshots[i];
+            current_snapshot.set_next_id(next_id);
+        }
+
+        Ok(())
     }
 }

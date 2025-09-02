@@ -77,7 +77,7 @@ where
     let address = trace_entry.target;
     let bytecode_address = trace_entry.code_address;
 
-    let code = match snapshot.detail {
+    let code = match snapshot.detail() {
         SnapshotDetail::Opcode(..) => {
             // For opcode snapshots, return disassembled bytecode
             // Get the bytecode from the database

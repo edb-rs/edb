@@ -255,13 +255,13 @@ impl HelpOverlay {
                         layout_specific: None,
                     },
                     HelpItem {
-                        keys: "n/p",
+                        keys: "n/N",
                         description: "Next/Previous step",
                         layout_specific: None,
                     },
                     HelpItem {
-                        keys: "s/r",
-                        description: "Step into/Step out",
+                        keys: "s/S",
+                        description: "Step forward/backward",
                         layout_specific: None,
                     },
                     HelpItem {
