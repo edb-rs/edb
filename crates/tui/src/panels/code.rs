@@ -446,6 +446,12 @@ impl CodePanel {
         } as usize;
         self.content_width = area.width.saturating_sub(2) as usize; // Account for borders
 
+        // We update display information after we have the self.context_height/_width
+        let _ = self
+            .update_display_info(dm)
+            .and_then(|_| self.fresh_source_code(dm))
+            .and_then(|_| self.update_execution_info(dm));
+
         let lines = self.get_display_lines();
 
         if lines.is_empty() {
@@ -1003,15 +1009,6 @@ impl PanelTr for CodePanel {
     }
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        if self
-            .update_display_info(dm)
-            .and_then(|_| self.fresh_source_code(dm))
-            .and_then(|_| self.update_execution_info(dm))
-            .is_none()
-        {
-            // Do nothing;
-        }
-
         // Split area if file selector is shown
         let (file_selector_area, code_area) = if self.show_file_selector {
             let file_height = (area.height * self.file_selector_height_percent / 100).max(3);
@@ -1246,9 +1243,8 @@ impl PanelTr for CodePanel {
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('c') => {
-                    // TODO: Step into next call (forward call navigation)
-                    // This will send a command to the RPC server to step into the next function call
                     debug!("Next call navigation requested");
+                    dm.execution.next_call()?;
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('C') => {

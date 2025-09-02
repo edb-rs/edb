@@ -76,6 +76,9 @@ pub trait OpcodeTr {
     /// assert!(!OpCode::SSTORE.modifies_transient_storage());
     /// ```
     fn modifies_transient_storage(&self) -> bool;
+
+    /// Check if this opcode is a call instruction
+    fn is_call(&self) -> bool;
 }
 
 impl OpcodeTr for OpCode {
@@ -103,6 +106,18 @@ impl OpcodeTr for OpCode {
         matches!(
             *self,
             OpCode::TSTORE // Write to transient storage (EIP-1153)
+        )
+    }
+
+    fn is_call(&self) -> bool {
+        matches!(
+            *self,
+            OpCode::CREATE
+                | OpCode::CREATE2
+                | OpCode::CALL
+                | OpCode::CALLCODE
+                | OpCode::DELEGATECALL
+                | OpCode::STATICCALL
         )
     }
 }
