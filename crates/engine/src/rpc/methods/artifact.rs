@@ -25,7 +25,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::{error_codes, utils::disasm::disassemble, EngineContext, Snapshot};
+use crate::{error_codes, utils::disasm::disassemble, EngineContext, SnapshotDetail};
 
 use super::super::types::RpcError;
 
@@ -77,8 +77,8 @@ where
     let address = trace_entry.target;
     let bytecode_address = trace_entry.code_address;
 
-    let code = match snapshot {
-        Snapshot::Opcode(..) => {
+    let code = match snapshot.detail {
+        SnapshotDetail::Opcode(..) => {
             // For opcode snapshots, return disassembled bytecode
             // Get the bytecode from the database
             let bytecode = trace_entry.bytecode.as_ref().ok_or_else(|| RpcError {
@@ -104,7 +104,7 @@ where
 
             Code::Opcode(OpcodeInfo { address, bytecode_address, codes })
         }
-        Snapshot::Hook(..) => {
+        SnapshotDetail::Hook(..) => {
             // Get the artifact for this address
             let artifact = context.artifacts.get(&bytecode_address).ok_or_else(|| RpcError {
                 code: error_codes::INVALID_ADDRESS,

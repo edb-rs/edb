@@ -240,9 +240,9 @@ impl Display for InstrumentContent {
             Self::Plain(content) => write!(f, "{content}"),
             Self::BeforeStepHook { usid, function_calls } => write!(
                 f,
-                "address(0x0000000000000000000000000000000000023333).staticcall(abi.encode({}, {}));",
+                "address(0x0000000000000000000000000000000000023333).call(abi.encode({}, {}));",
                 u64::from(*usid),
-                function_calls
+                function_calls,
             ),
             Self::VariableUpdateHook(_vid) => todo!(),
         }

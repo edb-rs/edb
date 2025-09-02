@@ -128,7 +128,41 @@ impl StepRef {
 
     /// Returns the number of function calls made in this step.
     pub fn function_calls(&self) -> usize {
-        *self.function_calls.get_or_init(|| self.inner.read().function_calls.len())
+        // XXX (ZZ): a relatively hacky way to handle corner cases
+        let calls = &self.inner.read().function_calls;
+        let mut function_calls = calls.len();
+
+        // Corner case 1: emit statement(s)
+        // In EmitStatement, an event is also considered as a function call, for which
+        // we need to reduce the count by 1.
+        match self.variant() {
+            StepVariant::Statement(Statement::EmitStatement { .. }) => {
+                function_calls = function_calls.saturating_sub(1);
+            }
+            StepVariant::Statements(ref stmts) => {
+                let emit_n = stmts
+                    .iter()
+                    .filter(|stmt| matches!(stmt, Statement::EmitStatement { .. }))
+                    .count();
+                function_calls = function_calls.saturating_sub(emit_n);
+            }
+            _ => {}
+        }
+
+        // Corner case 2: require statements
+        let require_n = calls
+            .iter()
+            .filter(|call| {
+                if let Expression::Identifier(ref id) = call.expression {
+                    id.name == "require"
+                } else {
+                    false
+                }
+            })
+            .count();
+        function_calls = function_calls.saturating_sub(require_n);
+
+        *self.function_calls.get_or_init(|| function_calls)
     }
 }
 

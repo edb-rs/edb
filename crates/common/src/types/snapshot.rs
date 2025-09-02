@@ -21,6 +21,13 @@ impl SnapshotInfo {
         }
     }
 
+    pub fn id(&self) -> usize {
+        match self {
+            SnapshotInfo::Opcode(info) => info.id,
+            SnapshotInfo::Hook(info) => info.id,
+        }
+    }
+
     pub fn path(&self) -> Option<&PathBuf> {
         match self {
             SnapshotInfo::Opcode(_) => None,
@@ -45,6 +52,8 @@ impl SnapshotInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookSnapshotInfo {
+    /// Snapshot Id
+    pub id: usize,
     /// Execution Frame Id
     pub frame_id: ExecutionFrameId,
     /// Current file
@@ -57,6 +66,8 @@ pub struct HookSnapshotInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpcodeSnapshotInfo {
+    /// Snapshot Id
+    pub id: usize,
     /// Execution Frame Id
     pub frame_id: ExecutionFrameId,
     /// Program counter (instruction offset)

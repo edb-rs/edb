@@ -23,7 +23,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::{error_codes, EngineContext, Snapshot};
+use crate::{error_codes, EngineContext, SnapshotDetail};
 
 use super::super::types::RpcError;
 
@@ -73,10 +73,11 @@ where
         data: None,
     })?;
 
-    let snapshot_info = match snapshot {
-        Snapshot::Opcode(opcode_snapshot) => {
+    let snapshot_info = match snapshot.detail {
+        SnapshotDetail::Opcode(ref opcode_snapshot) => {
             // For opcode snapshots, return complete execution state
             SnapshotInfo::Opcode(OpcodeSnapshotInfo {
+                id: snapshot.id,
                 frame_id: *frame_id,
                 pc: opcode_snapshot.pc,
                 opcode: opcode_snapshot.opcode,
@@ -86,7 +87,7 @@ where
                 transition_storage: opcode_snapshot.transition_storage.as_ref().clone(),
             })
         }
-        Snapshot::Hook(hook_snapshot) => {
+        SnapshotDetail::Hook(ref hook_snapshot) => {
             // For hook snapshots, get source location from analysis results
             let bytecode_address = trace_entry.code_address;
             let usid = hook_snapshot.usid;
@@ -120,6 +121,7 @@ where
                 })?;
 
             SnapshotInfo::Hook(HookSnapshotInfo {
+                id: snapshot.id,
                 frame_id: *frame_id,
                 path: source_analysis.path.clone(),
                 offset: source_location.start.unwrap_or(0),

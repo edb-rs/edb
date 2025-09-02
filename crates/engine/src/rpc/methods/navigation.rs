@@ -19,7 +19,7 @@
 //! This module implements RPC methods for navigating through snapshots.
 
 use crate::rpc::types::RpcError;
-use crate::{error_codes, EngineContext, Snapshot};
+use crate::{error_codes, EngineContext, Snapshot, SnapshotDetail};
 use edb_common::types::ExecutionFrameId;
 use edb_common::OpcodeTr;
 use revm::bytecode::OpCode;
@@ -135,12 +135,12 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    match snapshot {
-        Snapshot::<DB>::Opcode(s) => {
+    match snapshot.detail {
+        SnapshotDetail::Opcode(ref s) => {
             let op = unsafe { OpCode::new_unchecked(s.opcode) };
             Ok(op.is_call())
         }
-        Snapshot::<DB>::Hook(s) => {
+        SnapshotDetail::Hook(ref s) => {
             let usid = s.usid;
             let address = context.get_bytecode_address(s_id).ok_or_else(|| RpcError {
                 code: error_codes::TRACE_ENTRY_NOT_FOUND,

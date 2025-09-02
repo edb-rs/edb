@@ -41,15 +41,6 @@ use tracing::error;
 
 use crate::{HookSnapshot, HookSnapshots, OpcodeSnapshot, OpcodeSnapshots, USID};
 
-/// Unique identifier for different types of snapshots
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SnapshotId {
-    /// Opcode snapshot identified by program counter
-    Opcode(usize),
-    /// Hook snapshot identified by user-defined snapshot ID
-    Hook(USID),
-}
-
 /// Union type representing either an opcode or hook snapshot
 ///
 /// This enum allows us to treat both types of snapshots uniformly while preserving
@@ -57,7 +48,25 @@ pub enum SnapshotId {
 /// represent strategic breakpoints, while opcode snapshots provide fine-grained
 /// instruction-level details.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Snapshot<DB>
+pub struct Snapshot<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    pub id: usize,
+    pub frame_id: ExecutionFrameId,
+    pub detail: SnapshotDetail<DB>,
+}
+
+/// Union type representing details of either an opcode or hook snapshot
+///
+/// This enum allows us to treat both types of snapshots uniformly while preserving
+/// their specific characteristics. Hook snapshots are generally preferred as they
+/// represent strategic breakpoints, while opcode snapshots provide fine-grained
+/// instruction-level details.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SnapshotDetail<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
@@ -75,39 +84,41 @@ where
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
-    /// Get the unique identifier for this snapshot
-    pub fn id(&self) -> SnapshotId {
-        match self {
-            Snapshot::Opcode(snapshot) => SnapshotId::Opcode(snapshot.pc),
-            Snapshot::Hook(snapshot) => SnapshotId::Hook(snapshot.usid),
-        }
+    /// Create an opcode snapshot
+    pub fn new_opcode(id: usize, frame_id: ExecutionFrameId, detail: OpcodeSnapshot<DB>) -> Self {
+        Self { id, frame_id, detail: SnapshotDetail::Opcode(detail) }
+    }
+
+    /// Create a hook snapshot
+    pub fn new_hook(id: usize, frame_id: ExecutionFrameId, detail: HookSnapshot<DB>) -> Self {
+        Self { id, frame_id, detail: SnapshotDetail::Hook(detail) }
     }
 
     /// Get USID if the snapshot is hooked
     pub fn usid(&self) -> Option<USID> {
-        match self {
-            Snapshot::Opcode(_) => None,
-            Snapshot::Hook(snapshot) => Some(snapshot.usid),
+        match &self.detail {
+            SnapshotDetail::Opcode(_) => None,
+            SnapshotDetail::Hook(snapshot) => Some(snapshot.usid),
         }
     }
 
     /// Get the contract address associated with this snapshot
     #[deprecated]
     pub fn address(&self) -> alloy_primitives::Address {
-        match self {
-            Snapshot::Opcode(snapshot) => snapshot.address,
-            Snapshot::Hook(snapshot) => snapshot.address,
+        match &self.detail {
+            SnapshotDetail::Opcode(snapshot) => snapshot.address,
+            SnapshotDetail::Hook(snapshot) => snapshot.address,
         }
     }
 
     /// Check if this is a hook snapshot
     pub fn is_hook(&self) -> bool {
-        matches!(self, Snapshot::Hook(_))
+        matches!(self.detail, SnapshotDetail::Hook(_))
     }
 
     /// Check if this is an opcode snapshot  
     pub fn is_opcode(&self) -> bool {
-        matches!(self, Snapshot::Opcode(_))
+        matches!(self.detail, SnapshotDetail::Opcode(_))
     }
 }
 
@@ -229,17 +240,18 @@ where
             match snapshot_opt {
                 Some(snapshot) => {
                     // We have a valid hook snapshot - this takes priority
-                    inner.push((frame_id, Snapshot::Hook(snapshot)));
+                    inner.push((frame_id, Snapshot::new_hook(inner.len(), frame_id, snapshot)));
                 }
                 None => {
                     // No hook snapshot for this frame - try to use opcode snapshots
                     if let Some(opcode_frame_snapshots) = opcode_snapshots.remove(&frame_id) {
                         // Add all opcode snapshots for this frame
-                        inner.extend(
-                            opcode_frame_snapshots.into_iter().map(|opcode_snapshot| {
-                                (frame_id, Snapshot::Opcode(opcode_snapshot))
-                            }),
-                        );
+                        for opcode_snapshot in opcode_frame_snapshots {
+                            inner.push((
+                                frame_id,
+                                Snapshot::new_opcode(inner.len(), frame_id, opcode_snapshot),
+                            ));
+                        }
                     }
                 }
             }
@@ -289,12 +301,12 @@ where
         let mut frames_with_opcodes = std::collections::HashSet::new();
 
         for (frame_id, snapshot) in &self.inner {
-            match snapshot {
-                Snapshot::Hook(_) => {
+            match snapshot.detail {
+                SnapshotDetail::Hook(_) => {
                     hook_count += 1;
                     frames_with_hooks.insert(*frame_id);
                 }
-                Snapshot::Opcode(_) => {
+                SnapshotDetail::Opcode(_) => {
                     opcode_count += 1;
                     frames_with_opcodes.insert(*frame_id);
                 }
@@ -497,7 +509,13 @@ where
     fn print_hook_details(&self, snapshots: &[&Snapshot<DB>], indent: &str) {
         let hook_snapshots: Vec<_> = snapshots
             .iter()
-            .filter_map(|s| if let Snapshot::Hook(hook) = s { Some(hook) } else { None })
+            .filter_map(|s| {
+                if let SnapshotDetail::Hook(ref hook) = s.detail {
+                    Some(hook)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         if hook_snapshots.is_empty() {
@@ -531,7 +549,13 @@ where
     fn print_opcode_summary(&self, snapshots: &[&Snapshot<DB>], indent: &str) {
         let opcode_snapshots: Vec<_> = snapshots
             .iter()
-            .filter_map(|s| if let Snapshot::Opcode(opcode) = s { Some(opcode) } else { None })
+            .filter_map(|s| {
+                if let SnapshotDetail::Opcode(ref opcode) = s.detail {
+                    Some(opcode)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         if opcode_snapshots.is_empty() {
