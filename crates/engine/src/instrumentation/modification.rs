@@ -561,19 +561,62 @@ impl<T> ExpectWithContext<T> for Option<T> {
                 let dump_path = temp_dir.join(format!("edb_fail_source_{}.sol", source_id));
                 let _ = std::fs::write(&dump_path, source);
 
-                // Extract context around the error location
+                // Extract context around the error location with line numbers
                 let context = if let Some(start) = src_loc.start {
-                    let context_start = start.saturating_sub(50);
-                    let context_end = (start + 50).min(source.len());
+                    let context_start = start.saturating_sub(200);
+                    let context_end = (start + 200).min(source.len());
                     let context_slice = &source[context_start..context_end];
-                    let relative_pos = start - context_start;
 
-                    format!(
-                        "\n  Source context (around position {}):\n  '{}'\n  {}^ (error position)",
-                        start,
-                        context_slice.replace('\n', "\\n"),
-                        " ".repeat(relative_pos)
-                    )
+                    // Find line number of the error position
+                    let lines_before_context: Vec<&str> =
+                        source[..context_start].split('\n').collect();
+                    let context_lines: Vec<&str> = context_slice.split('\n').collect();
+                    let start_line_num = lines_before_context.len();
+                    let error_pos_in_context = start - context_start;
+
+                    // Find which line contains the error
+                    let mut current_pos = 0;
+                    let mut error_line_idx = 0;
+                    let mut error_col = 0;
+
+                    for (idx, line) in context_lines.iter().enumerate() {
+                        let line_end = current_pos + line.len();
+                        if error_pos_in_context >= current_pos && error_pos_in_context <= line_end {
+                            error_line_idx = idx;
+                            error_col = error_pos_in_context - current_pos;
+                            break;
+                        }
+                        current_pos = line_end + 1; // +1 for newline
+                    }
+
+                    let mut formatted_context = format!(
+                        "\n  Source context around line {}:",
+                        start_line_num + error_line_idx
+                    );
+
+                    for (idx, line) in context_lines.iter().enumerate() {
+                        if line.trim().is_empty() && idx != error_line_idx {
+                            continue; // Skip empty lines except the error line
+                        }
+
+                        let line_num = start_line_num + idx;
+                        let marker = if idx == error_line_idx { " --> " } else { "     " };
+                        formatted_context
+                            .push_str(&format!("\n{}{:4} | {}", marker, line_num, line));
+
+                        // Add error pointer for the error line
+                        if idx == error_line_idx {
+                            let pointer = format!(
+                                "\n     {} | {}{}^ error here",
+                                " ".repeat(4),
+                                "_".repeat(error_col),
+                                ""
+                            );
+                            formatted_context.push_str(&pointer);
+                        }
+                    }
+
+                    formatted_context
                 } else {
                     String::new()
                 };

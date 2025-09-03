@@ -701,7 +701,7 @@ impl Engine {
                 let source_file = dump_dir.join(&sanitized_path);
 
                 if let Some(context) =
-                    Self::extract_code_context(&source_file, loc.start, loc.end, 2)
+                    Self::extract_code_context(&source_file, loc.start, loc.end, 5)
                 {
                     formatted.push_str("\n\n");
                     formatted.push_str(&context);
