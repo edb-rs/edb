@@ -237,7 +237,14 @@ pub fn find_next_index_of_statement(source: &str, stmt: &Statement) -> Option<us
             find_next_semicolon_after_source_location(source, &placeholder_statement.src)
                 .map(|i| i + 1)
         }
-        Statement::Return(return_stmt) => find_next_index_of_source_location(&return_stmt.src),
+        Statement::Return(return_stmt) => {
+            let return_str = source_string_at_location_unchecked(source, &return_stmt.src);
+            if return_str.trim_end().ends_with(";") {
+                find_next_index_of_source_location(&return_stmt.src)
+            } else {
+                find_next_semicolon_after_source_location(source, &return_stmt.src).map(|i| i + 1)
+            }
+        }
         Statement::RevertStatement(revert_statement) => {
             find_next_semicolon_after_source_location(source, &revert_statement.src).map(|i| i + 1)
         }

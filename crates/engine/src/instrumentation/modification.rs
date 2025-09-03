@@ -4,7 +4,8 @@ use crate::{
     analysis::{stmt_src, SourceAnalysis},
     find_next_index_of_source_location, find_next_index_of_statement,
     find_next_semicolon_after_source_location, mutability_to_str, slice_source_location,
-    source_string_at_location, visibility_to_str, AnalysisResult, USID, UVID,
+    source_string_at_location, source_string_at_location_unchecked, visibility_to_str,
+    AnalysisResult, USID, UVID,
 };
 
 use eyre::Result;
@@ -97,7 +98,7 @@ impl SourceModifications {
                 Modification::Instrument(instrument_action) => {
                     modified_source.insert_str(
                         instrument_action.loc,
-                        format!("\n{}\n", instrument_action.content).as_str(),
+                        instrument_action.content.to_string().as_str(),
                     );
                 }
                 Modification::Remove(remove_action) => {
@@ -313,11 +314,10 @@ impl SourceModifications {
                 self.add_modification(remove_action.into());
             }
 
-            // Add the new visibility of the state variable before the variable name, i.e., public
-            let at_index =
-                declaration_str.find(&private_state_variable.declaration().name).unwrap_or_else(
-                    || panic!("{}", "variable name not found in declaration".to_string()),
-                );
+            // Add the new visibility of the state variable just before the variable name
+            let at_index = declaration_str
+                .rfind(&private_state_variable.declaration().name)
+                .expect("variable name not found");
             let instrument_action = add_visibility(
                 private_state_variable.declaration().src,
                 visibility_to_str(&Visibility::Public),
@@ -338,7 +338,7 @@ impl SourceModifications {
                 self.add_modification(remove_action.into());
             }
 
-            // Add the new visibility of the function before the function name, i.e., public
+            // Add the new visibility of the function after the argument list
             let at_index = definition_str.find(")").expect("function parament list not found") + 1;
             let instrument_action = add_visibility(
                 private_function.src(),

@@ -1395,13 +1395,13 @@ contract TestContract {
     fn test_statement_semicolon() {
         let source = r#"
 contract TestContract {
-    function foo() public {
+    function foo() public returns (uint) {
         require(false, "error");
         revert();
         uint x = 1;
         x = 2;
         x + 1;
-        return;
+        return 1;
     }
 }
 
