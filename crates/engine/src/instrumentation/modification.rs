@@ -6,6 +6,7 @@ use crate::{
     slice_source_location, source_string_at_location, visibility_to_str, AnalysisResult, USID,
     UVID,
 };
+
 use eyre::Result;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, BlockOrStatement, StateMutability, Statement, Visibility,
@@ -392,15 +393,23 @@ impl SourceModifications {
         };
         let wrap_statement_as_block = |stmt_src: &SourceLocation| -> Vec<Modification> {
             // The left bracket is inserted just before the statement.
-            let left_bracket =
-                left_bracket(stmt_src.start.expect("statement start location not found"));
+            let start_pos = stmt_src.start.expect_with_context(
+                "statement start location not found",
+                source_id,
+                source,
+                stmt_src,
+            );
+            let left_bracket = left_bracket(start_pos);
 
             // The right bracket is inserted just after the end of the statement. However, the `;` of the statement is not included in the source location, so we search the source code for the next `;` after the statement and insert the right bracket after it.
-            let right_bracket = right_bracket(
-                find_next_semicolon_after_source_location(source, stmt_src)
-                    .expect("statement end not found")
-                    + 1,
-            );
+            let semicolon_pos = find_next_semicolon_after_source_location(source, stmt_src)
+                .expect_with_context(
+                    "statement end semicolon not found",
+                    source_id,
+                    source,
+                    stmt_src,
+                );
+            let right_bracket = right_bracket(semicolon_pos + 1);
 
             vec![left_bracket.into(), right_bracket.into()]
         };
@@ -522,6 +531,63 @@ impl SourceModifications {
         }
 
         Ok(())
+    }
+}
+
+/// Trait to extend Option with better context for instrumentation failures
+trait ExpectWithContext<T> {
+    fn expect_with_context(
+        self,
+        error_msg: &str,
+        source_id: u32,
+        source: &str,
+        src_loc: &SourceLocation,
+    ) -> T;
+}
+
+impl<T> ExpectWithContext<T> for Option<T> {
+    fn expect_with_context(
+        self,
+        error_msg: &str,
+        source_id: u32,
+        source: &str,
+        src_loc: &SourceLocation,
+    ) -> T {
+        match self {
+            Some(value) => value,
+            None => {
+                // Simple source dump to temp file
+                let temp_dir = std::env::temp_dir();
+                let dump_path = temp_dir.join(format!("edb_fail_source_{}.sol", source_id));
+                let _ = std::fs::write(&dump_path, source);
+
+                // Extract context around the error location
+                let context = if let Some(start) = src_loc.start {
+                    let context_start = start.saturating_sub(50);
+                    let context_end = (start + 50).min(source.len());
+                    let context_slice = &source[context_start..context_end];
+                    let relative_pos = start - context_start;
+
+                    format!(
+                        "\n  Source context (around position {}):\n  '{}'\n  {}^ (error position)",
+                        start,
+                        context_slice.replace('\n', "\\n"),
+                        " ".repeat(relative_pos)
+                    )
+                } else {
+                    String::new()
+                };
+
+                panic!(
+                    "{}\n  Source ID: {}\n  Source location: {:?}{}\n  Full source dumped to: {}",
+                    error_msg,
+                    source_id,
+                    src_loc,
+                    context,
+                    dump_path.display()
+                );
+            }
+        }
     }
 }
 
