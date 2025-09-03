@@ -56,7 +56,7 @@ use crate::{
     start_debug_server,
     utils::{next_etherscan_api_key, Artifact, OnchainCompiler},
     CodeTweaker, EngineContext, HookSnapshotInspector, HookSnapshots, OpcodeSnapshotInspector,
-    OpcodeSnapshots, Snapshots,
+    OpcodeSnapshots, SnapshotAnalysis, Snapshots,
 };
 
 /// Configuration for the engine (reduced scope - no RPC URL or forking config)
@@ -131,9 +131,9 @@ impl Engine {
     /// It focuses on the core debugging workflow:
     /// 1. Replays the target transaction to collect touched contracts
     /// 2. Downloads verified source code for each contract
-    /// 3. Collect opcode-level step execution results
-    /// 4. Analyzes the source code to identify instrumentation points
-    /// 5. Instruments and recompiles the source code
+    /// 3. Analyzes the source code to identify instrumentation points
+    /// 4. Instruments and recompiles the source code
+    /// 5. Collect opcode-level step execution results
     /// 6. Re-executes the transaction with state snapshots
     /// 7. Starts a JSON-RPC server with the analysis results and snapshots
     pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
@@ -157,22 +157,22 @@ impl Engine {
         let artifacts =
             self.download_verified_source_code(&replay_result, ctx.chain_id().to::<u64>()).await?;
 
-        // Step 3: Collect opcode-level step execution results
+        // Step 3: Analyze source code to identify instrumentation points
+        info!("Analyzing source code");
+        let analysis_results = self.analyze_source_code(&artifacts)?;
+
+        // Step 4: Instrument source code
+        info!("Instrumenting source code");
+        let recompiled_artifacts =
+            self.instrument_and_recompile_source_code(&artifacts, &analysis_results)?;
+
+        // Step 5: Collect opcode-level step execution results
         info!("Collecting opcode-level step execution results");
         let opcode_snapshots = self.capture_opcode_level_snapshots(
             ctx.clone(),
             tx.clone(),
             artifacts.keys().into_iter().cloned().collect(),
         )?;
-
-        // Step 4: Analyze source code to identify instrumentation points
-        info!("Analyzing source code");
-        let analysis_results = self.analyze_source_code(&artifacts)?;
-
-        // Step 5: Instrument source code
-        info!("Instrumenting source code");
-        let recompiled_artifacts =
-            self.instrument_and_recompile_source_code(&artifacts, &analysis_results)?;
 
         // Step 6: Replace original bytecode with instrumented versions
         info!("Tweaking bytecode");
@@ -187,7 +187,7 @@ impl Engine {
         // Step 8: Start RPC server with analysis results and snapshots
         info!("Starting RPC server with analysis results and snapshots");
         let mut snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
-        snapshots.analyze_next_step(&replay_result.execution_trace, &analysis_results)?;
+        snapshots.analyze(&replay_result.execution_trace, &analysis_results)?;
         // Let's pack the debug context
         let mut context = EngineContext {
             cfg: ctx.cfg.clone(),
@@ -526,7 +526,6 @@ impl Engine {
         <DB as Database>::Error: Clone,
     {
         let snapshots = Snapshots::merge(opcode_snapshots, hook_snapshots);
-
         snapshots.print_summary();
 
         Ok(snapshots)

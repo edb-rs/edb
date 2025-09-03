@@ -84,6 +84,10 @@ enum PendingCommand {
     NextCall(usize),
     /// Goto previous call in execution
     PrevCall(usize),
+    /// Step forward without going into callees
+    StepForwardNoCallees(usize),
+    /// Step backward without going into callees
+    StepBackwardNoCallees(usize),
 }
 
 impl PendingCommand {
@@ -103,6 +107,16 @@ impl PendingCommand {
                 }
                 PendingCommand::PrevCall(src_id) => {
                     let id = dm.execution.get_prev_call(*src_id)?;
+                    dm.execution.get_snapshot_info(id)?;
+                    dm.execution.get_code(id)?;
+                }
+                PendingCommand::StepForwardNoCallees(src_id) => {
+                    let id = dm.execution.get_snapshot_info(*src_id)?.next_id;
+                    dm.execution.get_snapshot_info(id)?;
+                    dm.execution.get_code(id)?;
+                }
+                PendingCommand::StepBackwardNoCallees(src_id) => {
+                    let id = dm.execution.get_snapshot_info(*src_id)?.prev_id;
                     dm.execution.get_snapshot_info(id)?;
                     dm.execution.get_code(id)?;
                 }
@@ -130,6 +144,14 @@ impl PendingCommand {
             PendingCommand::PrevCall(src_id) => {
                 let prev_id = dm.execution.get_prev_call(*src_id)?;
                 Some(format!("Goto Previous Call at Snapshot {}", prev_id))
+            }
+            PendingCommand::StepForwardNoCallees(src_id) => {
+                let next_id = dm.execution.get_snapshot_info(*src_id)?.next_id;
+                Some(format!("Stepped to Snapshot {} without going into callees", next_id))
+            }
+            PendingCommand::StepBackwardNoCallees(src_id) => {
+                let prev_id = dm.execution.get_snapshot_info(*src_id)?.prev_id;
+                Some(format!("Stepped to Snapshot {} without going into callees", prev_id))
             }
         }
     }
@@ -356,28 +378,16 @@ impl TerminalPanel {
 
         match parts[0] {
             "next" | "n" => {
-                self.add_system("Stepping to next snapshot...");
-                let current = 0usize;
-                let total = 10usize;
-                if current < total.saturating_sub(1) {
-                    // TODO
-                    // dm.execution.update_state(current + 1, total, Some(current + 10), None);
-                    self.add_output(&format!("✅ Stepped to snapshot {}/{}", current + 1, total));
-                } else {
-                    self.add_output("⚠️ Already at last snapshot");
-                }
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::StepForwardNoCallees(id));
+                self.spinner.start_loading("Stepping forward without going into callees...");
+                dm.execution.next()?;
             }
             "prev" | "p" => {
-                self.add_system("Stepping to previous snapshot...");
-                let current = 0usize;
-                let total = 10usize;
-                if current > 0 {
-                    // TODO
-                    // dm.execution.update_state(current - 1, total, Some(current + 8), None);
-                    self.add_output(&format!("✅ Stepped to snapshot {}/{}", current - 1, total));
-                } else {
-                    self.add_output("⚠️ Already at first snapshot");
-                }
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::StepBackwardNoCallees(id));
+                self.spinner.start_loading("Stepping backward without going into callees...");
+                dm.execution.prev()?;
             }
             "step" | "s" => {
                 let count =

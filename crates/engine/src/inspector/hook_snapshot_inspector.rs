@@ -320,7 +320,6 @@ where
         snap.commit(changes);
 
         // Create hook snapshot
-        #[allow(deprecated)]
         let hook_snapshot = HookSnapshot { address: caller_address, database: snap, usid };
 
         // Update the last frame with this snapshot

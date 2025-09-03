@@ -1,0 +1,353 @@
+use std::collections::{HashMap, HashSet};
+
+use alloy_json_abi::Function;
+use alloy_primitives::Address;
+use edb_common::types::{ExecutionFrameId, Trace};
+use eyre::{bail, Result};
+use itertools::Itertools;
+use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
+
+use crate::{
+    analysis::{AnalysisResult, UFID},
+    Snapshot, Snapshots,
+};
+
+pub trait SnapshotAnalysis {
+    fn analyze(&mut self, trace: &Trace, analysis: &HashMap<Address, AnalysisResult>)
+        -> Result<()>;
+}
+
+impl<DB> SnapshotAnalysis for Snapshots<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    fn analyze(
+        &mut self,
+        trace: &Trace,
+        analysis: &HashMap<Address, AnalysisResult>,
+    ) -> Result<()> {
+        self.analyze_next_steps(trace, analysis)
+    }
+}
+
+// Next (step over the call) snapshot information analysis
+impl<DB> Snapshots<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    fn analyze_next_steps(
+        &mut self,
+        trace: &Trace,
+        analysis: &HashMap<Address, AnalysisResult>,
+    ) -> Result<()> {
+        let mut holed_snapshots: HashSet<usize> = HashSet::new();
+
+        for (entry_id, snapshots) in &self
+            .iter_mut()
+            .sorted_by_key(|(f_id, _)| f_id.trace_entry_id())
+            .chunk_by(|(f_id, _)| f_id.trace_entry_id())
+        {
+            let snapshots_vec: Vec<_> = snapshots.collect();
+
+            // The last snapshot of a entry will become holed
+            let Some((_, last_snapshot)) = snapshots_vec.last() else {
+                continue;
+            };
+            holed_snapshots.insert(last_snapshot.id());
+
+            if last_snapshot.is_opcode() {
+                Self::analyze_next_steps_for_opcode(snapshots_vec)?;
+            } else {
+                let bytecode_address = trace
+                    .get(entry_id)
+                    .ok_or_else(|| {
+                        eyre::eyre!("Trace entry {} not found for snapshot analysis", entry_id)
+                    })?
+                    .code_address;
+                let analysis_result = analysis.get(&bytecode_address).ok_or_else(|| {
+                    eyre::eyre!(
+                        "Analysis result not found for bytecode address {}",
+                        bytecode_address
+                    )
+                })?;
+                Self::analyze_next_steps_for_source(snapshots_vec, analysis_result)?;
+            }
+        }
+
+        // Handle holed snapshots
+        self.find_next_step_for_holed_snapshots(trace, holed_snapshots)?;
+        self.analyze_prev_steps()?;
+
+        Ok(())
+    }
+
+    fn analyze_prev_steps(&mut self) -> Result<()> {
+        for i in 0..self.len() {
+            let current_snapshot = &self[i].1;
+            let current_id = current_snapshot.id();
+            let next_id = current_snapshot
+                .next_id()
+                .ok_or_else(|| eyre::eyre!("Snapshot {} does not have next_id set", current_id))?;
+
+            let next_snapshot = &mut self[next_id].1;
+            if next_snapshot.prev_id().is_none() {
+                // The first snapshot whose next_id is the subject one, will be the prev_id
+                // of the current snapshot
+                next_snapshot.set_prev_id(current_id);
+            }
+        }
+
+        self.iter_mut().filter(|(_, snapshot)| snapshot.prev_id().is_none()).for_each(
+            |(_, snapshot)| {
+                snapshot.set_prev_id(snapshot.id().saturating_sub(1));
+            },
+        );
+
+        Ok(())
+    }
+
+    fn find_next_step_for_holed_snapshots(
+        &mut self,
+        trace: &Trace,
+        holed_snapshots: HashSet<usize>,
+    ) -> Result<()> {
+        let last_snapshot_id = self.len().saturating_sub(1);
+
+        // Handle holed snapshots
+        for current_id in holed_snapshots {
+            let entry_id = self[current_id].0.trace_entry_id();
+
+            // Try to find the first snapshot in the ancestor frames that is after the current snapshot
+            let mut next_id = None;
+            let mut entry = trace
+                .get(entry_id)
+                .ok_or_else(|| eyre::eyre!("Trace entry {} not found", entry_id))?;
+            while let Some(parent_id) = entry.parent_id {
+                // Find the first snapshot in the parent frame that is after the current snapshot
+                if let Some((_, parent_snapshot)) = self
+                    .iter()
+                    .skip(current_id.saturating_add(1))
+                    .find(|(f_id, _)| f_id.trace_entry_id() == parent_id)
+                {
+                    next_id = Some(parent_snapshot.id());
+                    break;
+                }
+
+                // Move up to the next parent
+                entry = trace
+                    .get(parent_id)
+                    .ok_or_else(|| eyre::eyre!("Trace entry {} not found", parent_id))?;
+            }
+
+            self[current_id].1.set_next_id(next_id.unwrap_or(last_snapshot_id));
+        }
+
+        Ok(())
+    }
+
+    // Helper function for opcode analysis
+    fn analyze_next_steps_for_opcode(
+        mut snapshots: Vec<&mut (ExecutionFrameId, Snapshot<DB>)>,
+    ) -> Result<()> {
+        for i in 0..snapshots.len().saturating_sub(1) {
+            let (_, next_snapshot) = &snapshots[i + 1];
+            let next_id = next_snapshot.id();
+
+            // Link to the next snapshot in the same frame
+            let (_, current_snapshot) = &mut snapshots[i];
+            current_snapshot.set_next_id(next_id);
+        }
+
+        Ok(())
+    }
+
+    // Helper function for source analysis
+    fn analyze_next_steps_for_source(
+        mut snapshots: Vec<&mut (ExecutionFrameId, Snapshot<DB>)>,
+        analysis: &AnalysisResult,
+    ) -> Result<()> {
+        let mut stack: Vec<CallStackEntry> = Vec::new();
+        stack.push(CallStackEntry {
+            func_info: FunctionInfo::Unknown,
+            callsite: None,
+            return_after_callsite: false,
+        });
+
+        for i in 0..snapshots.len().saturating_sub(1) {
+            let usid = snapshots[i]
+                .1
+                .usid()
+                .ok_or_else(|| eyre::eyre!("Snapshot {} does not have usid set", i))?;
+            let step = analysis
+                .usid_to_step
+                .get(&usid)
+                .ok_or_else(|| eyre::eyre!("No step found for USID {}", u64::from(usid)))?;
+
+            let next_id = snapshots[i + 1].1.id();
+            let next_usid = snapshots[i + 1]
+                .1
+                .usid()
+                .ok_or_else(|| eyre::eyre!("Snapshot {} does not have usid set", i + 1))?;
+            let next_step = analysis
+                .usid_to_step
+                .get(&next_usid)
+                .ok_or_else(|| eyre::eyre!("No step found for USID {}", u64::from(next_usid)))?;
+            let next_ufid = next_step.ufid();
+
+            // Step 1: try to update the current function entry
+            let stack_entry = stack.last_mut().ok_or_else(|| eyre::eyre!("Call stack is empty"))?;
+            if let Some(ufid) = step.function_entry() {
+                stack_entry.func_info.with_function(ufid);
+            }
+            if let Some(ufid) = step.modifier_entry() {
+                stack_entry.func_info.with_modifier(ufid);
+            }
+            if !stack_entry.func_info.is_valid() {
+                // The stack has become invalid, we return errors
+                bail!("Invalid function info in call stack");
+            }
+
+            // Step 2: check whether this step contains any valid internal call
+            if step.function_calls()
+                > snapshots[i + 1].0.re_entry_count() - snapshots[i].0.re_entry_count()
+                && (next_step.function_entry().is_some() || next_step.modifier_entry().is_some())
+            {
+                // This step contains at least one valid internal call
+                stack.push(CallStackEntry {
+                    func_info: FunctionInfo::Unknown,
+                    callsite: Some(Callsite {
+                        id: i,
+                        callees: step.function_calls()
+                            - (snapshots[i + 1].0.re_entry_count()
+                                - snapshots[i].0.re_entry_count()),
+                    }),
+                    return_after_callsite: step.contains_return(),
+                });
+                continue;
+            }
+
+            // Step 3: update next id since we are certain for steps without internal calls
+            snapshots[i].1.set_next_id(next_id);
+
+            // Step 4: check return
+            let stack_entry = stack.last().ok_or_else(|| eyre::eyre!("Call stack is empty"))?;
+            let will_return =
+                !stack_entry.func_info.contains_ufid(next_ufid) || step.contains_return();
+            if !will_return {
+                // There is nothing we need to do if this step will not return
+                continue;
+            }
+
+            // Step 5: handle returning chain
+            loop {
+                let mut stack_entry =
+                    stack.pop().ok_or_else(|| eyre::eyre!("Call stack is empty"))?;
+                if stack_entry.callsite.is_none() {
+                    // We have returned from the top level, nothing more to do
+                    break;
+                }
+
+                // We have finished one call
+                let callsite = stack_entry.callsite.as_mut().unwrap();
+                callsite.callees = callsite.callees.saturating_sub(1);
+
+                // Check whether we are done with this callsite
+                if callsite.callees > 0 {
+                    stack_entry.func_info = FunctionInfo::Unknown;
+                    stack.push(stack_entry);
+                    break;
+                }
+
+                // We can confidently update the snapshot
+                snapshots[callsite.id].1.set_next_id(next_id);
+
+                // Check whether we need to continue returning
+                let Some(parent_entry) = stack.last() else {
+                    // We have returned from the top level, nothing more to do
+                    break;
+                };
+                let continue_to_return = stack_entry.return_after_callsite
+                    || !parent_entry.func_info.contains_ufid(next_ufid);
+                if !continue_to_return {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+struct CallStackEntry {
+    func_info: FunctionInfo,
+    callsite: Option<Callsite>,
+    return_after_callsite: bool,
+}
+
+struct Callsite {
+    // The id in the snapshot
+    // NOTE: it is not snapshot id
+    id: usize,
+    // Number of callees that we haven't visited
+    callees: usize,
+}
+
+enum FunctionInfo {
+    Unknown,
+    ModifierOnly(Vec<UFID>),
+    FunctionOnly(UFID),
+    ModifiedFunction { func: UFID, modifiers: Vec<UFID> },
+    INVALID,
+}
+
+impl FunctionInfo {
+    fn contains_ufid(&self, ufid: UFID) -> bool {
+        match self {
+            FunctionInfo::Unknown => false,
+            FunctionInfo::ModifierOnly(ids) => ids.contains(&ufid),
+            FunctionInfo::FunctionOnly(id) => *id == ufid,
+            FunctionInfo::ModifiedFunction { func, modifiers } => {
+                *func == ufid || modifiers.contains(&ufid)
+            }
+            FunctionInfo::INVALID => false,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        !matches!(self, FunctionInfo::INVALID)
+    }
+
+    fn with_modifier(&mut self, modifier: UFID) {
+        match self {
+            FunctionInfo::Unknown => {
+                *self = FunctionInfo::ModifierOnly(vec![modifier]);
+            }
+            FunctionInfo::ModifierOnly(ids) => {
+                ids.push(modifier);
+            }
+            FunctionInfo::FunctionOnly(func) => {
+                *self = FunctionInfo::ModifiedFunction { func: *func, modifiers: vec![modifier] };
+            }
+            FunctionInfo::ModifiedFunction { modifiers, .. } => {
+                modifiers.push(modifier);
+            }
+            FunctionInfo::INVALID => {}
+        }
+    }
+
+    fn with_function(&mut self, function: UFID) {
+        match self {
+            FunctionInfo::Unknown => *self = FunctionInfo::FunctionOnly(function),
+            FunctionInfo::ModifierOnly(ids) => {
+                *self = FunctionInfo::ModifiedFunction { func: function, modifiers: ids.clone() }
+            }
+            FunctionInfo::FunctionOnly(..) => *self = FunctionInfo::INVALID,
+            FunctionInfo::ModifiedFunction { .. } => *self = FunctionInfo::INVALID,
+            FunctionInfo::INVALID => {}
+        }
+    }
+}

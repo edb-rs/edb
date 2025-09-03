@@ -67,6 +67,7 @@ pub struct StepRef {
     inner: Arc<RwLock<Step>>,
     /* cached readonly fields*/
     usid: OnceCell<USID>,
+    ufid: OnceCell<UFID>,
     variant: OnceCell<StepVariant>,
     function_calls: OnceCell<usize>,
 }
@@ -103,6 +104,7 @@ impl StepRef {
         Self {
             inner: Arc::new(RwLock::new(inner)),
             usid: OnceCell::new(),
+            ufid: OnceCell::new(),
             variant: OnceCell::new(),
             function_calls: OnceCell::new(),
         }
@@ -119,6 +121,11 @@ impl StepRef {
     /// Returns the USID of this step.
     pub fn usid(&self) -> USID {
         *self.usid.get_or_init(|| self.inner.read().usid)
+    }
+
+    /// Returns the UFID of this step.
+    pub fn ufid(&self) -> UFID {
+        *self.ufid.get_or_init(|| self.inner.read().ufid)
     }
 
     /// Returns the variant of this step.
@@ -164,6 +171,36 @@ impl StepRef {
         function_calls = function_calls.saturating_sub(built_in_n);
 
         *self.function_calls.get_or_init(|| function_calls)
+    }
+
+    /// Check whether this step is an entry of a function
+    pub fn function_entry(&self) -> Option<UFID> {
+        if let StepVariant::FunctionEntry(_) = self.variant() {
+            Some(self.read().ufid)
+        } else {
+            None
+        }
+    }
+
+    /// Check whether this step is an entry of a modifier
+    pub fn modifier_entry(&self) -> Option<UFID> {
+        if let StepVariant::ModifierEntry(_) = self.variant() {
+            Some(self.read().ufid)
+        } else {
+            None
+        }
+    }
+
+    /// Check whether this step contains return statements
+    pub fn contains_return(&self) -> bool {
+        match self.variant() {
+            StepVariant::Statement(Statement::Return(..)) => true,
+            StepVariant::Statements(stmts) => {
+                stmts.iter().any(|s| matches!(s, Statement::Return(..)))
+            }
+            // Other variants will do tag a return as a single step
+            _ => false,
+        }
     }
 }
 
@@ -248,24 +285,6 @@ impl Step {
             }
         }
         this
-    }
-
-    /// Check whether this step is an entry of a function
-    pub fn function_entry(&self) -> Option<UFID> {
-        if let StepVariant::FunctionEntry(_) = self.variant {
-            Some(self.ufid)
-        } else {
-            None
-        }
-    }
-
-    /// Check whether this step is an entry of a modifier
-    pub fn modifier_entry(&self) -> Option<UFID> {
-        if let StepVariant::ModifierEntry(_) = self.variant {
-            Some(self.ufid)
-        } else {
-            None
-        }
     }
 
     /// Adds a variable out-of-scope hook to this step.
