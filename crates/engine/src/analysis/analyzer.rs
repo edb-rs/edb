@@ -1061,7 +1061,9 @@ pub(crate) mod tests {
     };
     use semver::Version;
 
-    use crate::{compile_contract_source_to_source_unit, ASTPruner};
+    use crate::{
+        compile_contract_source_to_source_unit, source_string_at_location_unchecked, ASTPruner,
+    };
 
     use super::*;
 
@@ -1387,5 +1389,28 @@ contract TestContract {
             function_calls += step.read().function_calls.len();
         }
         assert_eq!(function_calls, 0);
+    }
+
+    #[test]
+    fn test_statement_semicolon() {
+        let source = r#"
+contract TestContract {
+    function foo() public {
+        require(false, "error");
+        revert();
+        uint x = 1;
+        x = 2;
+        x + 1;
+        return;
+    }
+}
+
+"#;
+        let (_sources, analysis) = compile_and_analyze(source);
+        let source = _sources.get(&TEST_CONTRACT_SOURCE_ID).unwrap().content.as_str();
+        for step in &analysis.steps {
+            let s = source_string_at_location_unchecked(source, &step.read().src);
+            println!("step: {}", s);
+        }
     }
 }

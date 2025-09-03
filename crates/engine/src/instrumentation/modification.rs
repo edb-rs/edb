@@ -2,9 +2,9 @@ use std::{collections::BTreeMap, fmt::Display};
 
 use crate::{
     analysis::{stmt_src, SourceAnalysis},
-    find_next_semicolon_after_source_location, mutability_to_str, next_index_of_source_location,
-    slice_source_location, source_string_at_location, visibility_to_str, AnalysisResult, USID,
-    UVID,
+    find_next_index_of_source_location, find_next_index_of_statement,
+    find_next_semicolon_after_source_location, mutability_to_str, slice_source_location,
+    source_string_at_location, visibility_to_str, AnalysisResult, USID, UVID,
 };
 
 use eyre::Result;
@@ -61,20 +61,21 @@ impl SourceModifications {
                 && *immediate_next_loc == loc
             {
                 immediate_next.modify_instrument_action(|act| {
-                    if act.priority >= modification.as_instrument_action().priority {
-                        act.content = InstrumentContent::Plain(format!(
+                    act.content = if act.priority >= modification.as_instrument_action().priority {
+                        InstrumentContent::Plain(format!(
                             "{} {}",
-                            act.content.to_string(),
-                            modification.as_instrument_action().content.to_string(),
+                            act.content,
+                            modification.as_instrument_action().content,
                         ))
                     } else {
-                        act.content = InstrumentContent::Plain(format!(
+                        InstrumentContent::Plain(format!(
                             "{} {}",
-                            modification.as_instrument_action().content.to_string(),
-                            act.content.to_string(),
+                            modification.as_instrument_action().content,
+                            act.content,
                         ))
-                    }
+                    };
                 });
+                return;
             }
         }
         // Insert the modification
@@ -391,25 +392,21 @@ impl SourceModifications {
                 priority: LOWEST_PRIORITY,
             }
         };
-        let wrap_statement_as_block = |stmt_src: &SourceLocation| -> Vec<Modification> {
+        let wrap_statement_as_block = |stmt: &Statement| -> Vec<Modification> {
+            let stmt_src = stmt_src(stmt);
             // The left bracket is inserted just before the statement.
             let start_pos = stmt_src.start.expect_with_context(
                 "statement start location not found",
                 source_id,
                 source,
-                stmt_src,
+                &stmt_src,
             );
             let left_bracket = left_bracket(start_pos);
 
-            // The right bracket is inserted just after the end of the statement. However, the `;` of the statement is not included in the source location, so we search the source code for the next `;` after the statement and insert the right bracket after it.
-            let semicolon_pos = find_next_semicolon_after_source_location(source, stmt_src)
-                .expect_with_context(
-                    "statement end semicolon not found",
-                    source_id,
-                    source,
-                    stmt_src,
-                );
-            let right_bracket = right_bracket(semicolon_pos + 1);
+            // The right bracket is inserted just after the statement.
+            let end_pos =
+                find_next_index_of_statement(source, stmt).expect("statement end not found");
+            let right_bracket = right_bracket(end_pos);
 
             vec![left_bracket.into(), right_bracket.into()]
         };
@@ -429,7 +426,7 @@ impl SourceModifications {
                 crate::analysis::StepVariant::IfCondition(if_stmt) => {
                     // modify the true body if needed
                     if let Some(stmt) = indeed_statement(&if_stmt.true_body) {
-                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        let modifications = wrap_statement_as_block(stmt);
                         self.extend_modifications(modifications);
                     }
 
@@ -437,21 +434,21 @@ impl SourceModifications {
                     if let Some(stmt) =
                         if_stmt.false_body.as_ref().and_then(|body| indeed_statement(body))
                     {
-                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        let modifications = wrap_statement_as_block(stmt);
                         self.extend_modifications(modifications);
                     }
                 }
                 crate::analysis::StepVariant::ForLoop(for_stmt) => {
                     // modify the body if needed
                     if let Some(stmt) = indeed_statement(&for_stmt.body) {
-                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        let modifications = wrap_statement_as_block(stmt);
                         self.extend_modifications(modifications);
                     }
                 }
                 crate::analysis::StepVariant::WhileLoop(while_stmt) => {
                     // modify the body if needed
                     if let Some(stmt) = indeed_statement(&while_stmt.body) {
-                        let modifications = wrap_statement_as_block(&stmt_src(stmt));
+                        let modifications = wrap_statement_as_block(stmt);
                         self.extend_modifications(modifications);
                     }
                 }
@@ -636,7 +633,7 @@ impl<T> ExpectWithContext<T> for Option<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::analysis;
+    use crate::analysis::{self, tests::compile_and_analyze};
 
     use super::*;
 
@@ -810,6 +807,57 @@ mod tests {
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
         modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 1);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
+
+    #[test]
+    fn test_else_if_statement_to_block() {
+        let source = r#"
+contract TestContract {
+    function foo() public {
+        if (true)
+            revert();
+        else if (false)
+            return;
+        else {
+            require(true, "error");
+        }
+    }
+}
+"#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 6);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
+
+    #[test]
+    fn test_if_for_statement_to_block() {
+        let source = r#"
+contract TestContract {
+    function foo() public {
+        if (true)
+            for (uint256 i = 0; i < 10; i++)
+                return;
+        else
+            while (true)
+                return;
+    }
+}
+"#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 6);
         let modified_source = modifications.modify_source(source);
 
         // The modified source should be able to be compiled and analyzed.

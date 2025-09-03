@@ -1,4 +1,6 @@
-use foundry_compilers::artifacts::{ast::SourceLocation, StateMutability, Visibility};
+use foundry_compilers::artifacts::{
+    ast::SourceLocation, BlockOrStatement, ForStatement, StateMutability, Statement, Visibility,
+};
 
 /// Get the source string at the given location.
 ///
@@ -124,14 +126,17 @@ pub fn mutability_to_str(mutability: &StateMutability) -> &'static str {
     }
 }
 
-/// Get the next index of the source location.
+/// Find the index of the next character immediately after the source location.
 ///
 /// # Arguments
 ///
 /// * `src` - The source location
 ///
 /// # Returns
-pub fn next_index_of_source_location(src: &SourceLocation) -> Option<usize> {
+///
+/// The index of the next character immediately after the source location.
+///
+pub fn find_next_index_of_source_location(src: &SourceLocation) -> Option<usize> {
     if let Some(start) = src.start {
         if let Some(length) = src.length {
             return Some(start + length);
@@ -149,7 +154,7 @@ pub fn next_index_of_source_location(src: &SourceLocation) -> Option<usize> {
 ///
 /// # Returns
 ///
-/// The index of the next semicolon after the source location.
+/// The index of the next semicolon after the source location in the source string.
 ///
 /// # Example
 ///
@@ -167,4 +172,87 @@ pub fn find_next_semicolon_after_source_location(
     let end = src.length.map(|l| start + l).unwrap_or(start);
     let substr = &source[end..];
     substr.find(";").map(|i| i + end)
+}
+
+/// Find the index of the next character immediately after the `BlockOrStatement`.
+///
+/// # Arguments
+///
+/// * `source` - The source string
+/// * `block_or_statement` - The `BlockOrStatement`
+///
+/// # Returns
+///
+/// The index of the next character immediately after the `BlockOrStatement`.
+pub fn find_next_index_of_block_or_statement(
+    source: &str,
+    block_or_statement: &BlockOrStatement,
+) -> Option<usize> {
+    match block_or_statement {
+        BlockOrStatement::Statement(statement) => find_next_index_of_statement(source, statement),
+        BlockOrStatement::Block(block) => find_next_index_of_source_location(&block.src),
+    }
+}
+
+/// Find the index of the next character immediately after the `Statement`.
+///
+/// # Arguments
+///
+/// * `source` - The source string
+/// * `stmt` - The `Statement`
+///
+/// # Returns
+///
+/// The index of the next character immediately after the `Statement`.
+pub fn find_next_index_of_statement(source: &str, stmt: &Statement) -> Option<usize> {
+    match stmt {
+        Statement::Block(block) => find_next_index_of_source_location(&block.src),
+        Statement::Break(break_stmt) => {
+            find_next_semicolon_after_source_location(source, &break_stmt.src)
+        }
+        Statement::Continue(continue_stmt) => {
+            find_next_semicolon_after_source_location(source, &continue_stmt.src).map(|i| i + 1)
+        }
+        Statement::DoWhileStatement(do_while_statement) => {
+            find_next_index_of_source_location(&do_while_statement.src)
+        }
+        Statement::EmitStatement(emit_statement) => {
+            find_next_semicolon_after_source_location(source, &emit_statement.src).map(|i| i + 1)
+        }
+        Statement::ExpressionStatement(expression_statement) => {
+            find_next_semicolon_after_source_location(source, &expression_statement.src)
+                .map(|i| i + 1)
+        }
+        Statement::ForStatement(for_statement) => {
+            find_next_index_of_block_or_statement(source, &for_statement.body)
+        }
+        Statement::IfStatement(if_statement) => match &if_statement.false_body {
+            Some(false_body) => find_next_index_of_block_or_statement(source, false_body),
+            None => find_next_index_of_block_or_statement(source, &if_statement.true_body),
+        },
+        Statement::InlineAssembly(inline_assembly) => {
+            find_next_index_of_source_location(&inline_assembly.src)
+        }
+        Statement::PlaceholderStatement(placeholder_statement) => {
+            find_next_semicolon_after_source_location(source, &placeholder_statement.src)
+                .map(|i| i + 1)
+        }
+        Statement::Return(return_stmt) => find_next_index_of_source_location(&return_stmt.src),
+        Statement::RevertStatement(revert_statement) => {
+            find_next_semicolon_after_source_location(source, &revert_statement.src).map(|i| i + 1)
+        }
+        Statement::TryStatement(try_statement) => {
+            find_next_index_of_source_location(&try_statement.src)
+        }
+        Statement::UncheckedBlock(unchecked_block) => {
+            find_next_index_of_source_location(&unchecked_block.src)
+        }
+        Statement::VariableDeclarationStatement(variable_declaration_statement) => {
+            find_next_semicolon_after_source_location(source, &variable_declaration_statement.src)
+                .map(|i| i + 1)
+        }
+        Statement::WhileStatement(while_statement) => {
+            find_next_index_of_block_or_statement(source, &while_statement.body)
+        }
+    }
 }
