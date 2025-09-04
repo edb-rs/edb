@@ -36,7 +36,10 @@ use revm::{
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use serde::{Deserialize, Serialize};
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 use tracing::{debug, error};
 
 use crate::USID;
@@ -60,7 +63,7 @@ where
     #[deprecated(note = "Use `trace` to get the address")]
     pub address: Address,
     /// Database state at the hook point
-    pub database: CacheDB<DB>,
+    pub database: Arc<CacheDB<DB>>,
     /// User-defined snapshot ID from call data
     pub usid: USID,
 }
@@ -320,7 +323,8 @@ where
         snap.commit(changes);
 
         // Create hook snapshot
-        let hook_snapshot = HookSnapshot { address: caller_address, database: snap, usid };
+        let hook_snapshot =
+            HookSnapshot { address: caller_address, database: Arc::new(snap), usid };
 
         // Update the last frame with this snapshot
         if let Some(current_frame_id) = self.current_frame_id() {

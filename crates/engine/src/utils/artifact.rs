@@ -16,7 +16,10 @@
 
 use alloy_primitives::Bytes;
 use foundry_block_explorers::contract::Metadata;
-use foundry_compilers::artifacts::{CompilerOutput, Contract, SolcInput};
+use foundry_compilers::{
+    artifacts::{CompilerOutput, Contract, SolcInput},
+    Artifact as _,
+};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 

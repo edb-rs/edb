@@ -24,9 +24,13 @@
 //! This design ensures rendering threads can access execution state without blocking
 //! on RPC calls or complex trace processing.
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
 use eyre::Result;
-use std::{collections::HashSet, ops::Deref, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+    sync::Arc,
+};
 use tokio::sync::RwLock;
 use tracing::debug;
 
@@ -46,6 +50,8 @@ pub struct ExecutionState {
     code: FetchCache<Address, Code>,
     next_call: FetchCache<usize, usize>,
     prev_call: FetchCache<usize, usize>,
+    storage: FetchCache<(usize, U256), U256>,
+    storage_diff: FetchCache<usize, HashMap<U256, (U256, U256)>>,
     trace_data: Trace,
 }
 
@@ -59,6 +65,8 @@ impl ManagerStateTr for ExecutionState {
             code: FetchCache::new(),
             next_call: FetchCache::new(),
             prev_call: FetchCache::new(),
+            storage: FetchCache::new(),
+            storage_diff: FetchCache::new(),
             trace_data,
         })
     }
@@ -79,6 +87,14 @@ impl ManagerStateTr for ExecutionState {
         if self.prev_call.need_update(&other.prev_call) {
             self.prev_call.update(&other.prev_call);
         }
+
+        if self.storage.need_update(&other.storage) {
+            self.storage.update(&other.storage);
+        }
+
+        if self.storage_diff.need_update(&other.storage_diff) {
+            self.storage_diff.update(&other.storage_diff);
+        }
     }
 }
 
@@ -88,6 +104,8 @@ pub enum ExecutionRequest {
     Code(usize),
     NextCall(usize),
     PrevCall(usize),
+    Storage(usize, U256),
+    StorageDiff(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -173,6 +191,22 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                     state.prev_call.insert(i, Some(prev_call));
                 }
             }
+            ExecutionRequest::Storage(id, slot) => {
+                if state.storage.contains_key(&(id, slot)) {
+                    return Ok(());
+                }
+
+                let value = rpc_client.get_storage(id, slot).await?;
+                state.storage.insert((id, slot), Some(value));
+            }
+            ExecutionRequest::StorageDiff(id) => {
+                if state.storage_diff.contains_key(&id) {
+                    return Ok(());
+                }
+
+                let diff = rpc_client.get_storage_diff(id).await?;
+                state.storage_diff.insert(id, Some(diff));
+            }
         }
 
         Ok(())
@@ -255,6 +289,36 @@ impl ExecutionManager {
         mgr
     }
 
+    pub fn get_storage(&mut self, id: usize, slot: U256) -> Option<&U256> {
+        let _ = self.pull_from_core();
+
+        if !self.state.storage.contains_key(&(id, slot)) {
+            debug!("Storage not found in cache, fetching...");
+            self.new_fetching_request(ExecutionRequest::Storage(id, slot));
+            return None;
+        }
+
+        match self.state.storage.get(&(id, slot)) {
+            Some(value) => value.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn get_storage_diff(&mut self, id: usize) -> Option<&HashMap<U256, (U256, U256)>> {
+        let _ = self.pull_from_core();
+
+        if !self.state.storage_diff.contains_key(&id) {
+            debug!("Storage diff not found in cache, fetching...");
+            self.new_fetching_request(ExecutionRequest::StorageDiff(id));
+            return None;
+        }
+
+        match self.state.storage_diff.get(&id) {
+            Some(diff) => diff.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn get_snapshot_info(&mut self, id: usize) -> Option<&SnapshotInfo> {
         let _ = self.pull_from_core();
 
@@ -268,6 +332,28 @@ impl ExecutionManager {
             Some(info) => info.as_ref(),
             _ => None,
         }
+    }
+
+    pub fn get_current_address(&mut self) -> Option<Address> {
+        let _ = self.pull_from_core();
+
+        let current_id = self.get_current_snapshot();
+        let snapshot_info = self.get_snapshot_info(current_id)?;
+        let entry_id = snapshot_info.frame_id().trace_entry_id();
+        let entry = self.get_trace().get(entry_id)?;
+
+        Some(entry.target)
+    }
+
+    pub fn get_current_bytecode_address(&mut self) -> Option<Address> {
+        let _ = self.pull_from_core();
+
+        let current_id = self.get_current_snapshot();
+        let snapshot_info = self.get_snapshot_info(current_id)?;
+        let entry_id = snapshot_info.frame_id().trace_entry_id();
+        let entry = self.get_trace().get(entry_id)?;
+
+        Some(entry.code_address)
     }
 
     pub fn get_next_call(&mut self, id: usize) -> Option<usize> {

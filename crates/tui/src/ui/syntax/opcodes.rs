@@ -113,8 +113,8 @@ fn get_opcode_patterns() -> &'static OpcodePatterns {
             // Standard EVM opcodes - comprehensive list
             opcodes: Regex::new(r"\b(STOP|ADD|MUL|SUB|DIV|SDIV|MOD|SMOD|ADDMOD|MULMOD|EXP|SIGNEXTEND|LT|GT|SLT|SGT|EQ|ISZERO|AND|OR|XOR|NOT|BYTE|SHL|SHR|SAR|KECCAK256|SHA3|ADDRESS|BALANCE|ORIGIN|CALLER|CALLVALUE|CALLDATALOAD|CALLDATASIZE|CALLDATACOPY|CODESIZE|CODECOPY|GASPRICE|EXTCODESIZE|EXTCODECOPY|RETURNDATASIZE|RETURNDATACOPY|EXTCODEHASH|BLOCKHASH|COINBASE|TIMESTAMP|NUMBER|DIFFICULTY|GASLIMIT|CHAINID|SELFBALANCE|BASEFEE|POP|MLOAD|MSTORE|MSTORE8|SLOAD|SSTORE|JUMP|JUMPI|PC|MSIZE|GAS|JUMPDEST|CREATE|CALL|CALLCODE|RETURN|DELEGATECALL|CREATE2|STATICCALL|REVERT|INVALID|SELFDESTRUCT|SUICIDE)\b").unwrap(),
 
-            // PUSH opcodes with numbers (PUSH1, PUSH2, ..., PUSH32)
-            push_opcodes: Regex::new(r"\bPUSH(?:1[0-9]|2[0-9]|3[0-2]|[1-9])\b").unwrap(),
+            // PUSH opcodes with numbers (PUSH0, PUSH1, PUSH2, ..., PUSH32)
+            push_opcodes: Regex::new(r"\bPUSH(?:0|1[0-9]|2[0-9]|3[0-2]|[1-9])\b").unwrap(),
 
             // DUP and SWAP opcodes with numbers (DUP1-DUP16, SWAP1-SWAP16)
             dup_swap_opcodes: Regex::new(r"\b(?:DUP|SWAP)(?:1[0-6]|[1-9])\b").unwrap(),

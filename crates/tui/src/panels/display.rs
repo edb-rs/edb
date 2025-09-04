@@ -93,7 +93,6 @@ enum DiffStatus {
     Unchanged,
     New,
     Modified,
-    Removed,
 }
 
 /// Display panel implementation
@@ -132,10 +131,10 @@ pub struct DisplayPanel {
     memory_chunks: Vec<MemoryChunk>,
     /// Raw calldata
     calldata: Bytes,
-    /// Storage changes (placeholder)
-    storage_changes: Vec<String>,
+    /// Storage changes (slot -> (old_value, new_value))
+    storage_changes: HashMap<U256, (U256, U256)>,
     /// Transient storage data
-    transient_storage: HashMap<(Address, U256), U256>,
+    transient_storage: HashMap<U256, U256>,
     /// Mock variables for hooked snapshots
     variables: Vec<String>,
     /// Mock breakpoints for hooked snapshots
@@ -160,7 +159,7 @@ impl DisplayPanel {
             stack_items: Vec::new(),
             memory_chunks: Vec::new(),
             calldata: Bytes::new(),
-            storage_changes: Vec::new(),
+            storage_changes: HashMap::new(),
             transient_storage: HashMap::new(),
             variables: vec![
                 "totalSupply: uint256 = 1000000".to_string(),
@@ -233,6 +232,8 @@ impl DisplayPanel {
         current_id: usize,
         dm: &mut DataManager,
     ) -> Option<()> {
+        let current_addr = dm.execution.get_current_address()?;
+
         // Get previous snapshot for diff calculation
         let prev_snapshot_detail = if current_id > 0 {
             dm.execution.get_snapshot_info(current_id - 1).and_then(|info| match info.detail() {
@@ -258,11 +259,16 @@ impl DisplayPanel {
         // Update calldata
         self.calldata = opcode_detail.calldata.clone();
 
-        // Update transient storage
-        self.update_transient_storage(&opcode_detail.transition_storage);
+        // Update transient storage (only for current address)
+        self.update_transient_storage(&opcode_detail.transition_storage, current_addr);
 
-        // Storage will be fetched via RPC - leave placeholder for now
-        self.storage_changes = vec!["Storage display will be implemented via RPC".to_string()];
+        // Get storage changes from execution manager
+        if let Some(storage_diff) = dm.execution.get_storage_diff(current_id) {
+            self.storage_changes = storage_diff.clone();
+        } else {
+            // If not available yet, keep existing or clear
+            self.storage_changes.clear();
+        }
 
         Some(())
     }
@@ -329,12 +335,14 @@ impl DisplayPanel {
     }
 
     /// Update transient storage
-    fn update_transient_storage(&mut self, tstorage: &TransientStorage) {
+    fn update_transient_storage(&mut self, tstorage: &TransientStorage, current_addr: Address) {
         self.transient_storage.clear();
 
-        // Copy transient storage data
+        // Only copy transient storage data for the current address
         for ((addr, slot), value) in tstorage.iter() {
-            self.transient_storage.insert((*addr, *slot), *value);
+            if *addr == current_addr {
+                self.transient_storage.insert(*slot, *value);
+            }
         }
     }
 
@@ -369,11 +377,15 @@ impl DisplayPanel {
                 // 32 bytes = 64 hex chars + 31 spaces + offset (8 chars) = ~103 chars
                 110
             }
-            DisplayMode::Storage => self.storage_changes.iter().map(|s| s.len()).max().unwrap_or(0),
+            DisplayMode::Storage => {
+                // Storage format: "Slot: 0x..." + "  From: 0x..." + "  To:   0x..."
+                // Each change takes 3 lines, each line ~75 chars
+                75
+            }
             DisplayMode::TransientStorage => {
-                // Format: "[0x1234...][0x5678...] = 0x9abc..."
-                // Address (42) + slot (66) + value (66) + formatting = ~180
-                180
+                // Format: "Slot: 0x... = 0x..."
+                // Slot (66) + value (66) + formatting = ~140
+                140
             }
             DisplayMode::Variables => self.variables.iter().map(|s| s.len()).max().unwrap_or(0),
             DisplayMode::Breakpoints => self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0),
@@ -447,7 +459,7 @@ impl DisplayPanel {
                     (self.calldata.len() + 31) / 32
                 }
             }
-            DisplayMode::Storage => self.storage_changes.len(),
+            DisplayMode::Storage => self.storage_changes.len() * 3, // 3 lines per change
             DisplayMode::TransientStorage => self.transient_storage.len(),
             DisplayMode::Variables => self.variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
@@ -640,10 +652,66 @@ impl DisplayPanel {
         self.render_status_and_help(frame, area, dm);
     }
 
-    /// Render storage display (placeholder)
+    /// Render storage display
     fn render_storage(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        let items: Vec<ListItem<'_>> =
-            self.storage_changes.iter().map(|msg| ListItem::new(msg.clone())).collect();
+        if self.storage_changes.is_empty() {
+            let paragraph = Paragraph::new("No storage changes").block(BorderPresets::display(
+                self.focused,
+                self.title(dm),
+                dm.theme.focused_border,
+                dm.theme.unfocused_border,
+            ));
+            frame.render_widget(paragraph, area);
+            return;
+        }
+
+        // Convert storage changes to display items (3 lines per change)
+        let mut display_items = Vec::new();
+        let mut sorted_changes: Vec<_> = self.storage_changes.iter().collect();
+        sorted_changes.sort_by_key(|(slot, _)| **slot);
+
+        for (slot, (old_value, new_value)) in sorted_changes {
+            // Line 1: Slot address
+            display_items.push(format!("Slot: {:#066x}", slot));
+            // Line 2: Old value
+            display_items.push(format!("  From: {:#066x}", old_value));
+            // Line 3: New value
+            display_items.push(format!("  To:   {:#066x}", new_value));
+        }
+
+        // Create list items with proper scrolling and selection
+        let items: Vec<ListItem<'_>> = display_items
+            .iter()
+            .enumerate()
+            .skip(self.scroll_offset)
+            .take(self.context_height)
+            .map(|(display_idx, line)| {
+                let is_selected = display_idx == self.selected_index;
+
+                // Different styling for slot vs value lines
+                let style = if display_idx % 3 == 0 {
+                    // Slot line - use accent color
+                    if is_selected && self.focused {
+                        Style::default()
+                            .bg(dm.theme.selection_bg)
+                            .fg(dm.theme.selection_fg)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(dm.theme.accent_color).add_modifier(Modifier::BOLD)
+                    }
+                } else if is_selected && self.focused {
+                    Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
+                } else if display_idx % 3 == 2 {
+                    // "To" line - highlight new values
+                    Style::default().fg(dm.theme.success_color)
+                } else {
+                    // "From" line - dim old values
+                    Style::default().fg(dm.theme.comment_color)
+                };
+
+                ListItem::new(line.clone()).style(style)
+            })
+            .collect();
 
         let list = List::new(items).block(BorderPresets::display(
             self.focused,
@@ -677,17 +745,18 @@ impl DisplayPanel {
 
         // Convert to sorted list for consistent display
         let mut tstorage_items: Vec<_> = self.transient_storage.iter().collect();
-        tstorage_items.sort_by_key(|((addr, slot), _)| (*addr, *slot));
+        tstorage_items.sort_by_key(|(slot, _)| *slot);
 
         let items: Vec<ListItem<'_>> = tstorage_items
             .iter()
             .enumerate()
             .skip(self.scroll_offset)
             .take(self.context_height)
-            .map(|(display_idx, ((addr, slot), value))| {
+            .map(|(display_idx, (slot, value))| {
                 let is_selected = display_idx == self.selected_index;
 
-                let content = format!("[{:#x}][{:#066x}] = {:#066x}", addr, slot, value);
+                // Only show slot since all entries are for current address
+                let content = format!("Slot: {:#066x} = {:#066x}", slot, value);
 
                 let style = if is_selected && self.focused {
                     Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
@@ -784,7 +853,7 @@ impl DisplayPanel {
             DisplayMode::Stack => self.stack_items.len(),
             DisplayMode::Memory => self.memory_chunks.len(),
             DisplayMode::CallData => (self.calldata.len() + 31) / 32,
-            DisplayMode::Storage => self.storage_changes.len(),
+            DisplayMode::Storage => self.storage_changes.len() * 3,
             DisplayMode::TransientStorage => self.transient_storage.len(),
             DisplayMode::Variables => self.variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
@@ -827,7 +896,7 @@ impl PanelTr for DisplayPanel {
                     (self.calldata.len() + 31) / 32
                 }
             }
-            DisplayMode::Storage => self.storage_changes.len(),
+            DisplayMode::Storage => self.storage_changes.len() * 3,
             DisplayMode::TransientStorage => self.transient_storage.len(),
             DisplayMode::Variables => self.variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
@@ -936,7 +1005,7 @@ impl PanelTr for DisplayPanel {
                             (self.calldata.len() + 31) / 32
                         }
                     }
-                    DisplayMode::Storage => self.storage_changes.len(),
+                    DisplayMode::Storage => self.storage_changes.len() * 3,
                     DisplayMode::TransientStorage => self.transient_storage.len(),
                     DisplayMode::Variables => self.variables.len(),
                     DisplayMode::Breakpoints => self.breakpoints.len(),

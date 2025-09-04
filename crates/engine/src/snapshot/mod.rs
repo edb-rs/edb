@@ -33,7 +33,10 @@ mod pretty_print;
 
 pub use analysis::SnapshotAnalysis;
 
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use edb_common::types::ExecutionFrameId;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
@@ -139,6 +142,14 @@ where
         match &self.detail {
             SnapshotDetail::Opcode(_) => None,
             SnapshotDetail::Hook(snapshot) => Some(snapshot.usid),
+        }
+    }
+
+    /// Get DB
+    pub fn db(&self) -> Arc<CacheDB<DB>> {
+        match &self.detail {
+            SnapshotDetail::Opcode(snapshot) => snapshot.database.clone(),
+            SnapshotDetail::Hook(snapshot) => snapshot.database.clone(),
         }
     }
 

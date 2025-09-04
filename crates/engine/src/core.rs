@@ -25,7 +25,7 @@
 use alloy_primitives::{Address, Bytes, TxHash};
 use eyre::Result;
 use foundry_block_explorers::Client;
-use foundry_compilers::{artifacts::Contract, solc::Solc};
+use foundry_compilers::{artifacts::Contract, solc::Solc, Artifact as _};
 use indicatif::{ProgressBar, ProgressStyle};
 use revm::{
     context::{
@@ -412,6 +412,21 @@ impl Engine {
 
         let mut recompiled_artifacts = HashMap::new();
         for (address, artifact) in artifacts {
+            println!(
+                "MDZZ {} {}",
+                address,
+                artifact
+                    .contract()
+                    .ok_or(eyre::eyre!("Failed to get contract"))?
+                    .get_bytecode_bytes()
+                    .ok_or(eyre::eyre!(
+                        "Failed to get bytecode for contract {}",
+                        artifact.contract_name()
+                    ))?
+                    .as_ref()
+                    .len()
+            );
+
             let analysis = analysis_result
                 .get(address)
                 .ok_or_else(|| eyre::eyre!("No analysis result found for address {}", address))?;

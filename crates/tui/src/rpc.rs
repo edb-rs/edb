@@ -20,7 +20,7 @@
 
 use crate::ui::spinner::Spinner;
 use alloy_json_abi::JsonAbi;
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 use edb_common::types::{Code, SnapshotInfo, Trace};
 use eyre::Result;
 use jsonrpsee::{
@@ -29,6 +29,7 @@ use jsonrpsee::{
 };
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -333,6 +334,37 @@ impl RpcClient {
             .await?;
 
         serde_json::from_value(value).map_err(|e| eyre::eyre!("Failed to parse prev call: {}", e))
+    }
+
+    /// Get storage value at a given slot
+    pub async fn get_storage(&self, snapshot_id: usize, slot: U256) -> Result<U256> {
+        let value = self
+            .request_with_spinner(
+                "edb_getStorage",
+                rpc_params!(snapshot_id, slot),
+                &format!("Getting storage for snapshot {} at slot {}", snapshot_id, slot),
+            )
+            .await?;
+
+        serde_json::from_value(value)
+            .map_err(|e| eyre::eyre!("Failed to parse storage value: {}", e))
+    }
+
+    /// Get storage diff
+    pub async fn get_storage_diff(
+        &self,
+        snapshot_id: usize,
+    ) -> Result<HashMap<U256, (U256, U256)>> {
+        let value = self
+            .request_with_spinner(
+                "edb_getStorageDiff",
+                rpc_params!(snapshot_id),
+                &format!("Getting storage diff for snapshot {}", snapshot_id),
+            )
+            .await?;
+
+        serde_json::from_value(value)
+            .map_err(|e| eyre::eyre!("Failed to parse storage diff: {}", e))
     }
 }
 

@@ -22,6 +22,7 @@ mod artifact;
 mod navigation;
 mod resolve;
 mod snapshot;
+mod storage;
 mod trace;
 
 use super::types::RpcError;
@@ -69,6 +70,8 @@ where
             "edb_getContractABI" => resolve::get_contract_abi(&self.context, params),
             "edb_getNextCall" => navigation::get_next_call(&self.context, params),
             "edb_getPrevCall" => navigation::get_prev_call(&self.context, params),
+            "edb_getStorage" => storage::get_storage(&self.context, params),
+            "edb_getStorageDiff" => storage::get_storage_diff(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,
