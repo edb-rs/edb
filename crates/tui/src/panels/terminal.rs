@@ -88,6 +88,8 @@ enum PendingCommand {
     StepForwardNoCallees(usize),
     /// Step backward without going into callees
     StepBackwardNoCallees(usize),
+    /// Goto to a specific snapshot
+    Goto(usize),
 }
 
 impl PendingCommand {
@@ -119,6 +121,10 @@ impl PendingCommand {
                     let id = dm.execution.get_snapshot_info(*src_id)?.prev_id;
                     dm.execution.get_snapshot_info(id)?;
                     dm.execution.get_code(id)?;
+                }
+                PendingCommand::Goto(id) => {
+                    dm.execution.get_snapshot_info(*id)?;
+                    dm.execution.get_code(*id)?;
                 }
             }
             Some(())
@@ -153,6 +159,7 @@ impl PendingCommand {
                 let prev_id = dm.execution.get_snapshot_info(*src_id)?.prev_id;
                 Some(format!("Stepped to Snapshot {} without going into callees", prev_id))
             }
+            PendingCommand::Goto(id) => Some(format!("Goto Snapshot {}", id)),
         }
     }
 }
@@ -395,6 +402,13 @@ impl TerminalPanel {
                 self.pending_command = Some(PendingCommand::StepForward(count));
                 self.spinner.start_loading(&format!("Stepping {} times...", count));
                 dm.execution.step(count)?;
+            }
+            "goto" | "g" => {
+                // A secret debugging cmd
+                let id = if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 0 };
+                self.pending_command = Some(PendingCommand::Goto(id));
+                self.spinner.start_loading(&format!("Going to snapshot {}...", id));
+                dm.execution.goto(id)?;
             }
             "reverse" | "rs" => {
                 let count =

@@ -1,18 +1,20 @@
 use std::collections::{HashMap, HashSet};
 
-use alloy_json_abi::Function;
 use alloy_primitives::Address;
 use edb_common::types::{ExecutionFrameId, Trace};
 use eyre::{bail, Result};
 use itertools::Itertools;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
+use tracing::debug;
 
 use crate::{
-    analysis::{AnalysisResult, UFID},
+    analysis::{AnalysisResult, StepRef, UFID},
     Snapshot, Snapshots,
 };
 
+/// Trait for analyzing snapshots.
 pub trait SnapshotAnalysis {
+    /// Given the trace and analysis result of source code, updates the snapshot analysis.
     fn analyze(&mut self, trace: &Trace, analysis: &HashMap<Address, AnalysisResult>)
         -> Result<()>;
 }
@@ -62,20 +64,23 @@ where
             if last_snapshot.is_opcode() {
                 Self::analyze_next_steps_for_opcode(snapshots_vec)?;
             } else {
-                Self::analyze_next_steps_for_opcode(snapshots_vec)?;
-                // let bytecode_address = trace
-                //     .get(entry_id)
-                //     .ok_or_else(|| {
-                //         eyre::eyre!("Trace entry {} not found for snapshot analysis", entry_id)
-                //     })?
-                //     .code_address;
-                // let analysis_result = analysis.get(&bytecode_address).ok_or_else(|| {
-                //     eyre::eyre!(
-                //         "Analysis result not found for bytecode address {}",
-                //         bytecode_address
-                //     )
-                // })?;
-                // Self::analyze_next_steps_for_source(snapshots_vec, analysis_result)?;
+                let bytecode_address = trace
+                    .get(entry_id)
+                    .ok_or_else(|| {
+                        eyre::eyre!("Trace entry {} not found for snapshot analysis", entry_id)
+                    })?
+                    .code_address;
+                let analysis_result = analysis.get(&bytecode_address).ok_or_else(|| {
+                    eyre::eyre!(
+                        "Analysis result not found for bytecode address {}",
+                        bytecode_address
+                    )
+                })?;
+                Self::analyze_next_steps_for_source(
+                    snapshots_vec,
+                    &mut holed_snapshots,
+                    analysis_result,
+                )?;
             }
         }
 
@@ -169,14 +174,22 @@ where
     // Helper function for source analysis
     fn analyze_next_steps_for_source(
         mut snapshots: Vec<&mut (ExecutionFrameId, Snapshot<DB>)>,
+        holed_snapshots: &mut HashSet<usize>,
         analysis: &AnalysisResult,
     ) -> Result<()> {
+        if snapshots.len() <= 1 {
+            return Ok(());
+        }
+
         let mut stack: Vec<CallStackEntry> = Vec::new();
         stack.push(CallStackEntry {
             func_info: FunctionInfo::Unknown,
             callsite: None,
             return_after_callsite: false,
         });
+
+        let is_entry =
+            |step: &StepRef| step.function_entry().is_some() || step.modifier_entry().is_some();
 
         for i in 0..snapshots.len().saturating_sub(1) {
             let usid = snapshots[i]
@@ -200,7 +213,8 @@ where
             let next_ufid = next_step.ufid();
 
             // Step 1: try to update the current function entry
-            let stack_entry = stack.last_mut().ok_or_else(|| eyre::eyre!("Call stack is empty"))?;
+            let stack_entry =
+                stack.last_mut().ok_or_else(|| eyre::eyre!("Call stack is empty at step 1"))?;
             if let Some(ufid) = step.function_entry() {
                 stack_entry.func_info.with_function(ufid);
             }
@@ -215,7 +229,7 @@ where
             // Step 2: check whether this step contains any valid internal call
             if step.function_calls()
                 > snapshots[i + 1].0.re_entry_count() - snapshots[i].0.re_entry_count()
-                && (next_step.function_entry().is_some() || next_step.modifier_entry().is_some())
+                && is_entry(next_step)
             {
                 // This step contains at least one valid internal call
                 stack.push(CallStackEntry {
@@ -235,9 +249,17 @@ where
             snapshots[i].1.set_next_id(next_id);
 
             // Step 4: check return
-            let stack_entry = stack.last().ok_or_else(|| eyre::eyre!("Call stack is empty"))?;
-            let will_return =
-                !stack_entry.func_info.contains_ufid(next_ufid) || step.contains_return();
+            let stack_entry =
+                stack.last().ok_or_else(|| eyre::eyre!("Call stack is empty at step 4"))?;
+            let will_return = match &stack_entry.func_info {
+                FunctionInfo::FunctionOnly(..) | FunctionInfo::ModifiedFunction { .. } => {
+                    !stack_entry.func_info.contains_ufid(next_ufid)
+                }
+                FunctionInfo::ModifierOnly(..) => {
+                    !(stack_entry.func_info.contains_ufid(next_ufid) || is_entry(next_step))
+                }
+                _ => !is_entry(next_step),
+            } || step.contains_return();
             if !will_return {
                 // There is nothing we need to do if this step will not return
                 continue;
@@ -256,39 +278,55 @@ where
                 let callsite = stack_entry.callsite.as_mut().unwrap();
                 callsite.callees = callsite.callees.saturating_sub(1);
 
-                // Check whether we are done with this callsite
-                if callsite.callees > 0 {
+                let Some(parent_entry) = stack.last() else {
+                    // We have returned from the top level, nothing more to do
+                    break;
+                };
+
+                // Check whether we are done with this callsite (will_certain_return has higher priority)
+                let will_certain_return = parent_entry.func_info.contains_ufid(next_ufid);
+                if callsite.callees > 0 && !will_certain_return {
                     stack_entry.func_info = FunctionInfo::Unknown;
                     stack.push(stack_entry);
                     break;
                 }
 
+                let continue_to_return = match &parent_entry.func_info {
+                    FunctionInfo::FunctionOnly(..) | FunctionInfo::ModifiedFunction { .. } => {
+                        !parent_entry.func_info.contains_ufid(next_ufid)
+                    }
+                    FunctionInfo::ModifierOnly(..) => {
+                        !(parent_entry.func_info.contains_ufid(next_ufid) || is_entry(next_step))
+                    }
+                    _ => !is_entry(next_step),
+                } || stack_entry.return_after_callsite;
+
                 // We can confidently update the snapshot
                 snapshots[callsite.id].1.set_next_id(next_id);
 
-                // Check whether we need to continue returning
-                let Some(parent_entry) = stack.last() else {
-                    // We have returned from the top level, nothing more to do
-                    break;
-                };
-                let continue_to_return = stack_entry.return_after_callsite
-                    || !parent_entry.func_info.contains_ufid(next_ufid);
                 if !continue_to_return {
                     break;
                 }
             }
         }
 
+        while let Some(CallStackEntry { callsite: Some(Callsite { id, .. }), .. }) = stack.pop() {
+            debug!("Add snapshot as a hole: {}", snapshots[id].1.id());
+            holed_snapshots.insert(snapshots[id].1.id());
+        }
+
         Ok(())
     }
 }
 
+#[derive(Debug)]
 struct CallStackEntry {
     func_info: FunctionInfo,
     callsite: Option<Callsite>,
     return_after_callsite: bool,
 }
 
+#[derive(Debug)]
 struct Callsite {
     // The id in the snapshot
     // NOTE: it is not snapshot id
@@ -297,6 +335,7 @@ struct Callsite {
     callees: usize,
 }
 
+#[derive(Debug)]
 enum FunctionInfo {
     Unknown,
     ModifierOnly(Vec<UFID>),
