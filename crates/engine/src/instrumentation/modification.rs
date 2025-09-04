@@ -326,6 +326,8 @@ impl SourceModifications {
             self.add_modification(instrument_action.into());
         }
 
+        #[cfg(any())]
+        // XXX (ZZ): we temporarily disable private function visibility modifications
         for private_function in &analysis.private_functions {
             let definition_str =
                 source_string_at_location(source_id, source, &private_function.src());

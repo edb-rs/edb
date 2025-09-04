@@ -1,5 +1,5 @@
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, ForStatement, StateMutability, Statement, Visibility,
+    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, Visibility,
 };
 
 /// Get the source string at the given location.
