@@ -20,7 +20,7 @@ use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, EventDefinition, ForStatement, FunctionCall,
     FunctionCallKind, FunctionDefinition, ModifierDefinition, Source, SourceUnit, StateMutability,
-    Statement, UncheckedBlock, VariableDeclaration, Visibility,
+    Statement, TypeName, UncheckedBlock, VariableDeclaration, Visibility,
 };
 
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,7 @@ use crate::{
         StepVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk, UFID,
     },
     block_or_stmt_src,
+    contains_user_defined_type_or_function_type,
     sloc_ldiff,
     sloc_rdiff,
     VariableRef,
@@ -533,6 +534,20 @@ impl Analyzer {
     fn check_state_variable_visibility(&mut self, variable: &VariableRef) -> eyre::Result<()> {
         let declaration = variable.declaration();
         if declaration.state_variable {
+            // FIXME: this is a temporary workaround on user defined struct types.
+            // Struct may not be able to be declared as a public state variable.
+            // So here when we encounter a state variable with a user defined type, we skip the visibility check.
+            // In the future, we may further consider to support user defined struct types as public state variables
+            // under the condition that it does not contain inner recursive types (array or mapping fields).
+            if declaration
+                .type_name
+                .as_ref()
+                .map(contains_user_defined_type_or_function_type)
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+
             // we need to change the visibility of the state variable to public
             if declaration.visibility != Visibility::Public {
                 self.private_state_variables.push(variable.clone());

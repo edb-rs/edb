@@ -865,4 +865,47 @@ contract TestContract {
         // The modified source should be able to be compiled and analyzed.
         let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
     }
+
+    #[test]
+    // possible fix: add `pragma abicoder v2;` to the contract
+    fn test_struct_variable_with_array_field() {
+        let source = r#"
+        contract C {
+            struct A {
+                uint[] a;
+            }
+            A internal a;
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 0);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
+
+    #[test]
+    fn test_struct_variable_with_mapping_field() {
+        let source = r#"
+        contract C {
+            struct A {
+                mapping(uint => address) a;
+            }
+            A internal a;
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 0);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
 }

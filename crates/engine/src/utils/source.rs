@@ -1,5 +1,5 @@
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, Visibility,
+    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, TypeName, Visibility,
 };
 
 /// Get the source string at the given location.
@@ -261,5 +261,37 @@ pub fn find_next_index_of_statement(source: &str, stmt: &Statement) -> Option<us
         Statement::WhileStatement(while_statement) => {
             find_next_index_of_block_or_statement(source, &while_statement.body)
         }
+    }
+}
+
+/// Check recursively if the type name contains a user defined type or a function type.
+///
+/// # Arguments
+///
+/// * `type_name` - The type name
+///
+/// # Returns
+///
+/// True if the type name contains a user defined type or a function type.
+///
+/// # Example
+///
+/// ```rust
+/// let type_name = TypeName::UserDefinedTypeName("MyType".to_string());
+/// let contains = contains_user_defined_type_or_function_type(&type_name);
+/// assert!(contains);
+/// ```
+pub fn contains_user_defined_type_or_function_type(type_name: &TypeName) -> bool {
+    match type_name {
+        TypeName::ArrayTypeName(array_type_name) => {
+            contains_user_defined_type_or_function_type(&array_type_name.base_type)
+        }
+        TypeName::ElementaryTypeName(_) => false,
+        TypeName::FunctionTypeName(_) => true,
+        TypeName::Mapping(mapping) => {
+            contains_user_defined_type_or_function_type(&mapping.key_type)
+                || contains_user_defined_type_or_function_type(&mapping.value_type)
+        }
+        TypeName::UserDefinedTypeName(_) => true,
     }
 }
