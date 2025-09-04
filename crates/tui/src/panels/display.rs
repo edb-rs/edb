@@ -21,6 +21,7 @@
 use super::{EventResponse, PanelTr, PanelType};
 use crate::data::DataManager;
 use crate::ui::borders::BorderPresets;
+use crate::ui::colors::ColorScheme;
 use crate::ui::status::StatusBar;
 use alloy_primitives::{Address, Bytes, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -28,13 +29,13 @@ use edb_common::types::{OpcodeSnapshotInfoDetail, SnapshotInfoDetail};
 use eyre::Result;
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem, Paragraph},
     Frame,
 };
 use revm::state::TransientStorage;
-use std::collections::HashMap;
+use std::{collections::HashMap, mem};
 use tracing::debug;
 
 /// Display modes for the panel
@@ -95,12 +96,26 @@ enum DiffStatus {
     Modified,
 }
 
+/// Style for storage display items
+#[derive(Debug, Clone, Copy)]
+enum StorageItemStyle {
+    StoreHeader,
+    StoreInfo,
+    StoreWrite,
+    Header,
+    SlotLine,
+    ChangeLine,
+    Normal,
+}
+
 /// Display panel implementation
 #[derive(Debug)]
 pub struct DisplayPanel {
     // ========== Display ==========
     /// Current display mode
     mode: DisplayMode,
+    /// Previous display mode before switch mode
+    prev_mode: DisplayMode,
     /// Available modes based on snapshot type
     available_modes: Vec<DisplayMode>,
     /// Selected item index
@@ -135,10 +150,18 @@ pub struct DisplayPanel {
     storage_changes: HashMap<U256, (U256, U256)>,
     /// Transient storage data
     transient_storage: HashMap<U256, U256>,
+    /// Previous opcode info for SSTORE/TSTORE detection
+    prev_opcode: Option<u8>,
+    /// Previous stack for SSTORE/TSTORE slot extraction
+    prev_stack: Option<Vec<U256>>,
     /// Mock variables for hooked snapshots
     variables: Vec<String>,
     /// Mock breakpoints for hooked snapshots
     breakpoints: Vec<String>,
+    /// Cached display line count for storage mode
+    storage_display_lines: usize,
+    /// Cached display line count for transient storage mode
+    tstorage_display_lines: usize,
 }
 
 impl DisplayPanel {
@@ -146,6 +169,7 @@ impl DisplayPanel {
     pub fn new() -> Self {
         Self {
             mode: DisplayMode::Stack,
+            prev_mode: DisplayMode::Variables,
             available_modes: vec![DisplayMode::Stack],
             selected_index: 0,
             scroll_offset: 0,
@@ -161,6 +185,8 @@ impl DisplayPanel {
             calldata: Bytes::new(),
             storage_changes: HashMap::new(),
             transient_storage: HashMap::new(),
+            prev_opcode: None,
+            prev_stack: None,
             variables: vec![
                 "totalSupply: uint256 = 1000000".to_string(),
                 "balances[msg.sender]: uint256 = 500000".to_string(),
@@ -170,6 +196,8 @@ impl DisplayPanel {
                 "Line 42: Transfer.sol - require(balance >= amount)".to_string(),
                 "Line 58: Token.sol - emit Transfer(from, to, amount)".to_string(),
             ],
+            storage_display_lines: 0,
+            tstorage_display_lines: 0,
         }
     }
 
@@ -202,7 +230,7 @@ impl DisplayPanel {
 
                 // Switch to Stack mode if not already in an opcode mode
                 if !self.available_modes.contains(&self.mode) {
-                    self.mode = DisplayMode::Stack;
+                    mem::swap(&mut self.prev_mode, &mut self.mode);
                     self.selected_index = 0;
                     self.scroll_offset = 0;
                 }
@@ -213,7 +241,8 @@ impl DisplayPanel {
 
                 // Switch to Variables mode if not already in a hook mode
                 if !self.available_modes.contains(&self.mode) {
-                    self.mode = DisplayMode::Variables;
+                    // Swap prev_mode and mode
+                    mem::swap(&mut self.prev_mode, &mut self.mode);
                     self.selected_index = 0;
                     self.scroll_offset = 0;
                 }
@@ -235,14 +264,29 @@ impl DisplayPanel {
         let current_addr = dm.execution.get_current_address()?;
 
         // Get previous snapshot for diff calculation
-        let prev_snapshot_detail = if current_id > 0 {
-            dm.execution.get_snapshot_info(current_id - 1).and_then(|info| match info.detail() {
+        let prev_snapshot_id = dm.execution.get_snapshot_info(current_id)?.prev_id();
+
+        // Get storage changes from execution manager
+        let storage_changes = dm.execution.get_storage_diff(current_id)?;
+
+        // At this point, we have collected all the information and we can update
+        // data safely
+        self.storage_changes = storage_changes.clone();
+
+        let prev_snapshot_detail =
+            dm.execution.get_snapshot_info(prev_snapshot_id).and_then(|info| match info.detail() {
                 SnapshotInfoDetail::Opcode(detail) => Some(detail.clone()),
                 _ => None,
-            })
+            });
+
+        // Store previous opcode and stack for SSTORE/TSTORE detection
+        if let Some(prev_detail) = &prev_snapshot_detail {
+            self.prev_opcode = Some(prev_detail.opcode);
+            self.prev_stack = Some(prev_detail.stack.clone());
         } else {
-            None
-        };
+            self.prev_opcode = None;
+            self.prev_stack = None;
+        }
 
         // Update stack with diff
         self.update_stack_diff(
@@ -261,14 +305,6 @@ impl DisplayPanel {
 
         // Update transient storage (only for current address)
         self.update_transient_storage(&opcode_detail.transition_storage, current_addr);
-
-        // Get storage changes from execution manager
-        if let Some(storage_diff) = dm.execution.get_storage_diff(current_id) {
-            self.storage_changes = storage_diff.clone();
-        } else {
-            // If not available yet, keep existing or clear
-            self.storage_changes.clear();
-        }
 
         Some(())
     }
@@ -355,7 +391,7 @@ impl DisplayPanel {
                     .iter()
                     .map(|item| {
                         let index_str = format!("[{:2}]", item.index);
-                        let value_str = self.format_u256_with_decode(&item.value);
+                        let value_str = self.format_value_with_decode(&item.value);
                         let diff_indicator = match item.diff_status {
                             DiffStatus::New => " [NEW]",
                             DiffStatus::Modified => " [CHG]",
@@ -378,14 +414,50 @@ impl DisplayPanel {
                 110
             }
             DisplayMode::Storage => {
-                // Storage format: "Slot: 0x..." + "  From: 0x..." + "  To:   0x..."
-                // Each change takes 3 lines, each line ~75 chars
-                75
+                // Calculate actual max width by checking all storage items
+                let mut max_width = 0;
+
+                // Check SSTORE/TSTORE operation headers if they exist
+                if self.prev_opcode == Some(0x55) || self.prev_opcode == Some(0x5D) {
+                    max_width = max_width.max(20); // "▶ SSTORE Operation" etc.
+                }
+
+                // Check storage changes
+                for (slot, (old_value, new_value)) in &self.storage_changes {
+                    let slot_line = format!("• Slot: {:#066x}", slot);
+                    let old_line = format!("  Old:  {}", self.format_value_with_decode(old_value));
+                    let new_line = format!("  New:  {}", self.format_value_with_decode(new_value));
+
+                    max_width = max_width.max(slot_line.len());
+                    max_width = max_width.max(old_line.len());
+                    max_width = max_width.max(new_line.len());
+                }
+
+                // Add some buffer for headers
+                let header_width = "─── All Storage Changes ───".len();
+                max_width.max(header_width).max(80) // At least 80 chars
             }
             DisplayMode::TransientStorage => {
-                // Format: "Slot: 0x... = 0x..."
-                // Slot (66) + value (66) + formatting = ~140
-                140
+                // Calculate actual max width by checking all transient storage items
+                let mut max_width = 0;
+
+                // Check TSTORE operation headers if they exist
+                if self.prev_opcode == Some(0x5D) {
+                    max_width = max_width.max(20); // "▶ TSTORE Operation"
+                }
+
+                // Check transient storage items
+                for (slot, value) in &self.transient_storage {
+                    let slot_line = format!("• Slot: {:#066x}", slot);
+                    let val_line = format!("  Val:  {}", self.format_value_with_decode(value));
+
+                    max_width = max_width.max(slot_line.len());
+                    max_width = max_width.max(val_line.len());
+                }
+
+                // Add some buffer for headers
+                let header_width = "─── Transient Storage ───".len();
+                max_width.max(header_width).max(80) // At least 80 chars
             }
             DisplayMode::Variables => self.variables.iter().map(|s| s.len()).max().unwrap_or(0),
             DisplayMode::Breakpoints => self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0),
@@ -417,23 +489,90 @@ impl DisplayPanel {
         }
     }
 
-    /// Format a U256 value as hex with decoded string
-    fn format_u256_with_decode(&self, value: &U256) -> String {
+    /// Format a U256 value with hex, optional decimal, and ASCII decode
+    fn format_value_with_decode(&self, value: &U256) -> String {
         let hex_str = format!("{:#066x}", value);
 
-        // Try to decode as ASCII/UTF-8
+        // Small number decode (with consistent padding)
+        let num_part = if *value < U256::from(1_000_000u64) {
+            format!("({:>7})", value) // Right-align in 7 chars for consistency
+        } else {
+            "         ".to_string() // 9 spaces to match "(1000000)" width
+        };
+
+        // ASCII decode
         let bytes = value.to_be_bytes::<32>();
         let mut decoded = String::new();
-        for byte in bytes.iter() {
+
+        // Only show ASCII if there are printable characters
+        for byte in bytes.iter().rev() {
+            // Start from least significant bytes
             if byte.is_ascii_graphic() || *byte == b' ' {
                 decoded.push(*byte as char);
             } else {
-                decoded.push('.'); // Show all non-printable bytes (including 0) as dots
+                decoded.push('.');
             }
         }
 
-        // Always show the decoded string (no trimming of leading zeros)
-        format!("{} {}", hex_str, decoded)
+        format!("{} {} {}", hex_str, num_part, decoded.chars().rev().collect::<String>())
+    }
+
+    /// Calculate the number of display lines for storage
+    fn calculate_storage_display_lines(&self, dm: &mut DataManager) -> usize {
+        let mut count = 0;
+
+        // Check for SSTORE/TSTORE indicator
+        if let Some(current_snapshot) = self.current_execution_snapshot {
+            if let Some(info) = dm.execution.get_snapshot_info(current_snapshot) {
+                let prev_snapshot_id = info.prev_id();
+                if let Some(prev_info) = dm.execution.get_snapshot_info(prev_snapshot_id) {
+                    if let SnapshotInfoDetail::Opcode(detail) = prev_info.detail() {
+                        if (detail.opcode == 0x55 || detail.opcode == 0x5D)
+                            && !detail.stack.is_empty()
+                        {
+                            count += 7; // SSTORE/TSTORE operation lines (simpler format)
+                        }
+                    }
+                }
+            }
+        }
+
+        if !self.storage_changes.is_empty() {
+            if count > 0 {
+                count += 2; // Header lines for "Storage Changes"
+            }
+            count += self.storage_changes.len() * 4; // 4 lines per change (slot, old, new, separator)
+        }
+
+        count.max(1) // At least 1 line
+    }
+
+    /// Calculate the number of display lines for transient storage
+    fn calculate_tstorage_display_lines(&self, dm: &mut DataManager) -> usize {
+        let mut count = 0;
+
+        // Check for TSTORE indicator
+        if let Some(current_snapshot) = self.current_execution_snapshot {
+            if let Some(info) = dm.execution.get_snapshot_info(current_snapshot) {
+                let prev_snapshot_id = info.prev_id();
+                if let Some(prev_info) = dm.execution.get_snapshot_info(prev_snapshot_id) {
+                    if let SnapshotInfoDetail::Opcode(detail) = prev_info.detail() {
+                        if detail.opcode == 0x5D && !detail.stack.is_empty() {
+                            count += 5; // TSTORE operation lines (simpler format)
+                        }
+                    }
+                }
+            }
+        }
+
+        if !self.transient_storage.is_empty() {
+            if count > 0 {
+                count += 2; // Header lines
+            }
+            count += self.transient_storage.len() * 3; // 3 lines per item (slot, value, separator)
+        }
+
+        count.max(1) // At least 1 line
     }
 
     /// Move selection up with auto-scrolling
@@ -459,8 +598,8 @@ impl DisplayPanel {
                     (self.calldata.len() + 31) / 32
                 }
             }
-            DisplayMode::Storage => self.storage_changes.len() * 3, // 3 lines per change
-            DisplayMode::TransientStorage => self.transient_storage.len(),
+            DisplayMode::Storage => self.storage_display_lines,
+            DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
         };
@@ -501,7 +640,7 @@ impl DisplayPanel {
 
                 // Format the stack item
                 let index_str = format!("[{:2}]", item.index);
-                let value_str = self.format_u256_with_decode(&item.value);
+                let value_str = self.format_value_with_decode(&item.value);
 
                 // Add diff indicator
                 let diff_indicator = match item.diff_status {
@@ -521,9 +660,9 @@ impl DisplayPanel {
 
                 // Highlight based on diff status
                 if item.diff_status == DiffStatus::New {
-                    style = style.fg(Color::Green);
+                    style = style.fg(dm.theme.success_color);
                 } else if item.diff_status == DiffStatus::Modified {
-                    style = style.fg(Color::Yellow);
+                    style = style.fg(dm.theme.warning_color);
                 }
 
                 ListItem::new(content).style(style)
@@ -568,7 +707,8 @@ impl DisplayPanel {
                 let offset_str = format!("0x{:04x}:", chunk.offset);
 
                 // Format bytes with highlighting
-                let byte_spans = format_bytes_with_decode(&chunk.data, &chunk.changed_bytes);
+                let byte_spans =
+                    format_bytes_with_decode(&chunk.data, &chunk.changed_bytes, &dm.theme);
 
                 let mut line = vec![Span::raw(offset_str), Span::raw(" ")];
                 line.extend(byte_spans);
@@ -616,7 +756,7 @@ impl DisplayPanel {
             let offset_str = format!("0x{:04x}:", offset);
 
             // Format bytes (hex only for calldata, no ASCII decoding)
-            let byte_spans = format_bytes_hex_only(chunk, &[]);
+            let byte_spans = format_bytes_hex_only(chunk, &[], &dm.theme);
 
             let mut line = vec![Span::raw(offset_str), Span::raw(" ")];
             line.extend(byte_spans);
@@ -654,7 +794,87 @@ impl DisplayPanel {
 
     /// Render storage display
     fn render_storage(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        if self.storage_changes.is_empty() {
+        // Update cached display line count
+        self.storage_display_lines = self.calculate_storage_display_lines(dm);
+
+        let mut display_items = Vec::new();
+        let mut item_styles = Vec::new();
+
+        // Get current snapshot ID
+        let current_snapshot = if let Some(id) = self.current_execution_snapshot {
+            id
+        } else {
+            // No snapshot available
+            let paragraph =
+                Paragraph::new("No snapshot data available").block(BorderPresets::display(
+                    self.focused,
+                    self.title(dm),
+                    dm.theme.focused_border,
+                    dm.theme.unfocused_border,
+                ));
+            frame.render_widget(paragraph, area);
+            return;
+        };
+
+        // Get previous snapshot info to check for SSTORE/TSTORE
+        let prev_snapshot_id = if let Some(info) = dm.execution.get_snapshot_info(current_snapshot)
+        {
+            info.prev_id()
+        } else {
+            0
+        };
+
+        let prev_snapshot_detail =
+            dm.execution.get_snapshot_info(prev_snapshot_id).and_then(|info| match info.detail() {
+                SnapshotInfoDetail::Opcode(detail) => Some(detail.clone()),
+                _ => None,
+            });
+
+        // Check for SSTORE (0x55) operation
+        if let Some(prev_detail) = prev_snapshot_detail {
+            let is_sstore = prev_detail.opcode == 0x55;
+
+            if is_sstore && !prev_detail.stack.is_empty() {
+                let target_slot = prev_detail.stack[prev_detail.stack.len() - 1]; // Top of stack is the slot
+                let value_to_write = if prev_detail.stack.len() > 1 {
+                    Some(prev_detail.stack[prev_detail.stack.len() - 2]) // Second item is the value
+                } else {
+                    None
+                };
+
+                // Query the storage value before the operation
+                let prev_storage = dm.execution.get_storage(prev_snapshot_id, target_slot).cloned();
+
+                // Simple header with operation name
+                display_items.push("▶ SSTORE Operation".to_string());
+                item_styles.push(StorageItemStyle::StoreHeader);
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+
+                // Target slot
+                display_items.push(format!("  Slot: {:#066x}", target_slot));
+                item_styles.push(StorageItemStyle::StoreInfo);
+
+                // Previous value
+                if let Some(prev_val) = prev_storage {
+                    display_items
+                        .push(format!("  Old:  {}", self.format_value_with_decode(&prev_val)));
+                    item_styles.push(StorageItemStyle::Normal);
+                }
+
+                // Value being written
+                if let Some(val) = value_to_write {
+                    display_items.push(format!("  New:  {}", self.format_value_with_decode(&val)));
+                    item_styles.push(StorageItemStyle::StoreWrite);
+                }
+
+                // Add separator
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+            }
+        }
+
+        if self.storage_changes.is_empty() && display_items.is_empty() {
             let paragraph = Paragraph::new("No storage changes").block(BorderPresets::display(
                 self.focused,
                 self.title(dm),
@@ -665,48 +885,82 @@ impl DisplayPanel {
             return;
         }
 
-        // Convert storage changes to display items (3 lines per change)
-        let mut display_items = Vec::new();
-        let mut sorted_changes: Vec<_> = self.storage_changes.iter().collect();
-        sorted_changes.sort_by_key(|(slot, _)| **slot);
+        // Regular storage changes with clean formatting
+        if !self.storage_changes.is_empty() {
+            if !display_items.is_empty() {
+                display_items.push("─── All Storage Changes ───".to_string());
+                item_styles.push(StorageItemStyle::Header);
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+            }
 
-        for (slot, (old_value, new_value)) in sorted_changes {
-            // Line 1: Slot address
-            display_items.push(format!("Slot: {:#066x}", slot));
-            // Line 2: Old value
-            display_items.push(format!("  From: {:#066x}", old_value));
-            // Line 3: New value
-            display_items.push(format!("  To:   {:#066x}", new_value));
+            let mut sorted_changes: Vec<_> = self.storage_changes.iter().collect();
+            sorted_changes.sort_by_key(|(slot, _)| **slot);
+
+            for (slot, (old_value, new_value)) in sorted_changes {
+                // Slot line
+                display_items.push(format!("• Slot: {:#066x}", slot));
+                item_styles.push(StorageItemStyle::SlotLine);
+
+                // Old value
+                display_items.push(format!("  Old:  {}", self.format_value_with_decode(old_value)));
+                item_styles.push(StorageItemStyle::Normal);
+
+                // New value with arrow
+                display_items.push(format!("  New:  {}", self.format_value_with_decode(new_value)));
+                item_styles.push(StorageItemStyle::ChangeLine);
+
+                // Add small separator between items
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+            }
         }
 
         // Create list items with proper scrolling and selection
         let items: Vec<ListItem<'_>> = display_items
             .iter()
+            .zip(item_styles.iter())
             .enumerate()
             .skip(self.scroll_offset)
             .take(self.context_height)
-            .map(|(display_idx, line)| {
+            .map(|(display_idx, (line, item_style))| {
                 let is_selected = display_idx == self.selected_index;
 
-                // Different styling for slot vs value lines
-                let style = if display_idx % 3 == 0 {
-                    // Slot line - use accent color
-                    if is_selected && self.focused {
-                        Style::default()
-                            .bg(dm.theme.selection_bg)
-                            .fg(dm.theme.selection_fg)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
+                let style = match item_style {
+                    StorageItemStyle::StoreHeader => {
+                        Style::default().fg(dm.theme.warning_color).add_modifier(Modifier::BOLD)
+                    }
+                    StorageItemStyle::StoreInfo => Style::default().fg(dm.theme.info_color),
+                    StorageItemStyle::StoreWrite => {
+                        Style::default().fg(dm.theme.success_color).add_modifier(Modifier::BOLD)
+                    }
+                    StorageItemStyle::Header => {
                         Style::default().fg(dm.theme.accent_color).add_modifier(Modifier::BOLD)
                     }
-                } else if is_selected && self.focused {
-                    Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
-                } else if display_idx % 3 == 2 {
-                    // "To" line - highlight new values
-                    Style::default().fg(dm.theme.success_color)
-                } else {
-                    // "From" line - dim old values
-                    Style::default().fg(dm.theme.comment_color)
+                    StorageItemStyle::SlotLine => {
+                        if is_selected && self.focused {
+                            Style::default()
+                                .bg(dm.theme.selection_bg)
+                                .fg(dm.theme.selection_fg)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(dm.theme.accent_color).add_modifier(Modifier::BOLD)
+                        }
+                    }
+                    StorageItemStyle::ChangeLine => {
+                        if is_selected && self.focused {
+                            Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
+                        } else {
+                            Style::default().fg(dm.theme.success_color)
+                        }
+                    }
+                    StorageItemStyle::Normal => {
+                        if is_selected && self.focused {
+                            Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
+                        } else {
+                            Style::default().fg(dm.theme.comment_color)
+                        }
+                    }
                 };
 
                 ListItem::new(line.clone()).style(style)
@@ -731,7 +985,77 @@ impl DisplayPanel {
         area: Rect,
         dm: &mut DataManager,
     ) {
-        if self.transient_storage.is_empty() {
+        // Update cached display line count
+        self.tstorage_display_lines = self.calculate_tstorage_display_lines(dm);
+
+        let mut display_items = Vec::new();
+        let mut item_styles = Vec::new();
+
+        // Get current snapshot ID
+        let current_snapshot = if let Some(id) = self.current_execution_snapshot {
+            id
+        } else {
+            // No snapshot available
+            let paragraph =
+                Paragraph::new("No snapshot data available").block(BorderPresets::display(
+                    self.focused,
+                    self.title(dm),
+                    dm.theme.focused_border,
+                    dm.theme.unfocused_border,
+                ));
+            frame.render_widget(paragraph, area);
+            return;
+        };
+
+        // Get previous snapshot info to check for TSTORE
+        let prev_snapshot_id = if let Some(info) = dm.execution.get_snapshot_info(current_snapshot)
+        {
+            info.prev_id()
+        } else {
+            0
+        };
+
+        let prev_snapshot_detail =
+            dm.execution.get_snapshot_info(prev_snapshot_id).and_then(|info| match info.detail() {
+                SnapshotInfoDetail::Opcode(detail) => Some(detail.clone()),
+                _ => None,
+            });
+
+        // Check for TSTORE (0x5D) operation
+        if let Some(prev_detail) = prev_snapshot_detail {
+            let is_tstore = prev_detail.opcode == 0x5D;
+
+            if is_tstore && !prev_detail.stack.is_empty() {
+                let target_slot = prev_detail.stack[prev_detail.stack.len() - 1]; // Top of stack is the slot
+                let value_to_write = if prev_detail.stack.len() > 1 {
+                    Some(prev_detail.stack[prev_detail.stack.len() - 2]) // Second item is the value
+                } else {
+                    None
+                };
+
+                // Add special TSTORE indicator
+                display_items.push(format!("▶ TSTORE Operation"));
+                item_styles.push(StorageItemStyle::StoreHeader);
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+
+                // Target slot
+                display_items.push(format!("  Slot: {:#066x}", target_slot));
+                item_styles.push(StorageItemStyle::StoreInfo);
+
+                // Value being written
+                if let Some(val) = value_to_write {
+                    display_items.push(format!("  New:  {}", self.format_value_with_decode(&val)));
+                    item_styles.push(StorageItemStyle::StoreWrite);
+                }
+
+                // Add separator
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+            }
+        }
+
+        if self.transient_storage.is_empty() && display_items.is_empty() {
             let paragraph =
                 Paragraph::new("No transient storage data").block(BorderPresets::display(
                     self.focused,
@@ -743,28 +1067,80 @@ impl DisplayPanel {
             return;
         }
 
-        // Convert to sorted list for consistent display
-        let mut tstorage_items: Vec<_> = self.transient_storage.iter().collect();
-        tstorage_items.sort_by_key(|(slot, _)| *slot);
+        // Regular transient storage items with clean formatting
+        if !self.transient_storage.is_empty() {
+            if !display_items.is_empty() {
+                display_items.push("─── Transient Storage ───".to_string());
+                item_styles.push(StorageItemStyle::Header);
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+            }
 
-        let items: Vec<ListItem<'_>> = tstorage_items
+            // Convert to sorted list for consistent display
+            let mut tstorage_items: Vec<_> = self.transient_storage.iter().collect();
+            tstorage_items.sort_by_key(|(slot, _)| *slot);
+
+            for (slot, value) in tstorage_items {
+                // Slot and value with clean formatting
+                display_items.push(format!("• Slot: {:#066x}", slot));
+                item_styles.push(StorageItemStyle::SlotLine);
+
+                display_items.push(format!("  Val:  {}", self.format_value_with_decode(value)));
+                item_styles.push(StorageItemStyle::ChangeLine);
+
+                // Add separator
+                display_items.push(String::new());
+                item_styles.push(StorageItemStyle::Normal);
+            }
+        }
+
+        let items: Vec<ListItem<'_>> = display_items
             .iter()
+            .zip(item_styles.iter())
             .enumerate()
             .skip(self.scroll_offset)
             .take(self.context_height)
-            .map(|(display_idx, (slot, value))| {
+            .map(|(display_idx, (line, item_style))| {
                 let is_selected = display_idx == self.selected_index;
 
-                // Only show slot since all entries are for current address
-                let content = format!("Slot: {:#066x} = {:#066x}", slot, value);
-
-                let style = if is_selected && self.focused {
-                    Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
-                } else {
-                    Style::default()
+                let style = match item_style {
+                    StorageItemStyle::StoreHeader => {
+                        Style::default().fg(dm.theme.warning_color).add_modifier(Modifier::BOLD)
+                    }
+                    StorageItemStyle::StoreInfo => Style::default().fg(dm.theme.info_color),
+                    StorageItemStyle::StoreWrite => {
+                        Style::default().fg(dm.theme.success_color).add_modifier(Modifier::BOLD)
+                    }
+                    StorageItemStyle::Header => {
+                        Style::default().fg(dm.theme.accent_color).add_modifier(Modifier::BOLD)
+                    }
+                    StorageItemStyle::SlotLine => {
+                        if is_selected && self.focused {
+                            Style::default()
+                                .bg(dm.theme.selection_bg)
+                                .fg(dm.theme.selection_fg)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(dm.theme.accent_color).add_modifier(Modifier::BOLD)
+                        }
+                    }
+                    StorageItemStyle::ChangeLine => {
+                        if is_selected && self.focused {
+                            Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
+                        } else {
+                            Style::default().fg(dm.theme.success_color)
+                        }
+                    }
+                    StorageItemStyle::Normal => {
+                        if is_selected && self.focused {
+                            Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
+                        } else {
+                            Style::default().fg(dm.theme.comment_color)
+                        }
+                    }
                 };
 
-                ListItem::new(content).style(style)
+                ListItem::new(line.clone()).style(style)
             })
             .collect();
 
@@ -853,8 +1229,8 @@ impl DisplayPanel {
             DisplayMode::Stack => self.stack_items.len(),
             DisplayMode::Memory => self.memory_chunks.len(),
             DisplayMode::CallData => (self.calldata.len() + 31) / 32,
-            DisplayMode::Storage => self.storage_changes.len() * 3,
-            DisplayMode::TransientStorage => self.transient_storage.len(),
+            DisplayMode::Storage => self.storage_display_lines,
+            DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
         };
@@ -896,8 +1272,8 @@ impl PanelTr for DisplayPanel {
                     (self.calldata.len() + 31) / 32
                 }
             }
-            DisplayMode::Storage => self.storage_changes.len() * 3,
-            DisplayMode::TransientStorage => self.transient_storage.len(),
+            DisplayMode::Storage => self.storage_display_lines,
+            DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
         };
@@ -933,11 +1309,7 @@ impl PanelTr for DisplayPanel {
         }
     }
 
-    fn handle_key_event(
-        &mut self,
-        event: KeyEvent,
-        _dm: &mut DataManager,
-    ) -> Result<EventResponse> {
+    fn handle_key_event(&mut self, event: KeyEvent, dm: &mut DataManager) -> Result<EventResponse> {
         if !self.focused || event.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
         }
@@ -1005,8 +1377,8 @@ impl PanelTr for DisplayPanel {
                             (self.calldata.len() + 31) / 32
                         }
                     }
-                    DisplayMode::Storage => self.storage_changes.len() * 3,
-                    DisplayMode::TransientStorage => self.transient_storage.len(),
+                    DisplayMode::Storage => self.storage_display_lines,
+                    DisplayMode::TransientStorage => self.tstorage_display_lines,
                     DisplayMode::Variables => self.variables.len(),
                     DisplayMode::Breakpoints => self.breakpoints.len(),
                 };
@@ -1034,7 +1406,11 @@ impl PanelTr for DisplayPanel {
 
 // Helper functions
 /// Format bytes as hex with ASCII decode (like xxd)
-fn format_bytes_with_decode<'a>(bytes: &'a [u8], highlight_indices: &'a [usize]) -> Vec<Span<'a>> {
+fn format_bytes_with_decode<'a>(
+    bytes: &'a [u8],
+    highlight_indices: &'a [usize],
+    theme: &ColorScheme,
+) -> Vec<Span<'a>> {
     let mut spans = Vec::new();
 
     // Hex part
@@ -1043,7 +1419,7 @@ fn format_bytes_with_decode<'a>(bytes: &'a [u8], highlight_indices: &'a [usize])
         if highlight_indices.contains(&i) {
             spans.push(Span::styled(
                 hex,
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.warning_color).add_modifier(Modifier::BOLD),
             ));
         } else {
             spans.push(Span::raw(hex));
@@ -1063,7 +1439,7 @@ fn format_bytes_with_decode<'a>(bytes: &'a [u8], highlight_indices: &'a [usize])
         };
 
         if highlight_indices.contains(&i) {
-            spans.push(Span::styled(ch.to_string(), Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(ch.to_string(), Style::default().fg(theme.warning_color)));
         } else {
             spans.push(Span::raw(ch.to_string()));
         }
@@ -1073,7 +1449,11 @@ fn format_bytes_with_decode<'a>(bytes: &'a [u8], highlight_indices: &'a [usize])
 }
 
 /// Format bytes as hex only (no ASCII decode) - for calldata
-fn format_bytes_hex_only<'a>(bytes: &'a [u8], highlight_indices: &'a [usize]) -> Vec<Span<'a>> {
+fn format_bytes_hex_only<'a>(
+    bytes: &'a [u8],
+    highlight_indices: &'a [usize],
+    theme: &ColorScheme,
+) -> Vec<Span<'a>> {
     let mut spans = Vec::new();
 
     // Hex part only
@@ -1082,7 +1462,7 @@ fn format_bytes_hex_only<'a>(bytes: &'a [u8], highlight_indices: &'a [usize]) ->
         if highlight_indices.contains(&i) {
             spans.push(Span::styled(
                 hex,
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.warning_color).add_modifier(Modifier::BOLD),
             ));
         } else {
             spans.push(Span::raw(hex));

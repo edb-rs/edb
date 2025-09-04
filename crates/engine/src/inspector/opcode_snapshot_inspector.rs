@@ -286,7 +286,6 @@ where
         };
 
         // Create snapshot (stack is always cloned as it changes frequently)
-        #[allow(deprecated)]
         let snapshot = OpcodeSnapshot {
             pc: interp.bytecode.pc(),
             address,

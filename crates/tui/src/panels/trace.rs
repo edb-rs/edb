@@ -35,6 +35,7 @@ use ratatui::{
     widgets::{List, ListItem, Paragraph},
     Frame,
 };
+use revm::context::entry;
 use revm::{
     context::CreateScheme,
     interpreter::{CallScheme, InstructionResult},
@@ -384,6 +385,11 @@ impl TracePanelInner {
         false
     }
 
+    /// Check if this entry has children
+    fn has_children(&self, entry: &TraceEntry, trace: &Trace) -> bool {
+        trace.iter().any(|e| e.parent_id == Some(entry.id) && self.is_entry_visible(e, trace))
+    }
+
     /// Check if an ancestor at a given depth is the last child
     fn is_ancestor_last_child(
         &self,
@@ -579,6 +585,15 @@ impl TracePanelInner {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(result_char, Style::default().fg(result_color)));
 
+        // Add ether value if present
+        if entry.value > 0 {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("{} ETH", dm.resolver.resolve_ether(entry.value)),
+                Style::default().fg(dm.theme.warning_color),
+            ));
+        }
+
         Line::from(spans)
     }
 
@@ -592,20 +607,21 @@ impl TracePanelInner {
         let trace = dm.execution.get_trace();
         if let Some(event) = entry.events.get(event_idx) {
             // Detail line: vertical connector + spaces + dot
+            let child_line = if self.has_children(entry, trace) { "│" } else { " " };
             let full_indent = if entry.depth == 0 {
                 // Root level details - check if this root entry has more siblings
                 if self.is_last_child(entry, trace) {
-                    "      ".to_string() // Last root entry, no vertical line
+                    format!("    {} ", child_line)
                 } else {
-                    "  │   ".to_string() // More root entries follow, show vertical line
+                    format!("  │ {} ", child_line)
                 }
             } else {
                 // Child level details - always start with 2 spaces, then tree indent, then connector
                 let tree_indent = self.build_tree_indent_clean(entry, trace);
                 if self.is_last_child(entry, trace) {
-                    format!("  {}      ", tree_indent) // Parent is last child, no vertical line
+                    format!("  {}  {}   ", tree_indent, child_line)
                 } else {
-                    format!("  {}│     ", tree_indent) // Parent has more siblings, continue vertical line
+                    format!("  {}│ {}   ", tree_indent, child_line)
                 }
             };
 
@@ -637,20 +653,21 @@ impl TracePanelInner {
     fn format_return_line(&mut self, entry: &TraceEntry, dm: &mut DataManager) -> Line<'static> {
         let trace = dm.execution.get_trace();
         // Detail line: vertical connector + spaces + dot
+        let child_line = if self.has_children(entry, trace) { "│" } else { " " };
         let full_indent = if entry.depth == 0 {
             // Root level details - check if this root entry has more siblings
             if self.is_last_child(entry, trace) {
-                "      ".to_string() // Last root entry, no vertical line
+                format!("    {} ", child_line)
             } else {
-                "  │   ".to_string() // More root entries follow, show vertical line
+                format!("  │ {} ", child_line)
             }
         } else {
             // Child level details - always start with 2 spaces, then tree indent, then connector
             let tree_indent = self.build_tree_indent_clean(entry, trace);
             if self.is_last_child(entry, trace) {
-                format!("  {}      ", tree_indent) // Parent is last child, no vertical line
+                format!("  {}  {}   ", tree_indent, child_line)
             } else {
-                format!("  {}│     ", tree_indent) // Parent has more siblings, continue vertical line
+                format!("  {}│ {}   ", tree_indent, child_line)
             }
         };
 

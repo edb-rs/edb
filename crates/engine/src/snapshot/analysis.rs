@@ -62,19 +62,20 @@ where
             if last_snapshot.is_opcode() {
                 Self::analyze_next_steps_for_opcode(snapshots_vec)?;
             } else {
-                let bytecode_address = trace
-                    .get(entry_id)
-                    .ok_or_else(|| {
-                        eyre::eyre!("Trace entry {} not found for snapshot analysis", entry_id)
-                    })?
-                    .code_address;
-                let analysis_result = analysis.get(&bytecode_address).ok_or_else(|| {
-                    eyre::eyre!(
-                        "Analysis result not found for bytecode address {}",
-                        bytecode_address
-                    )
-                })?;
-                Self::analyze_next_steps_for_source(snapshots_vec, analysis_result)?;
+                Self::analyze_next_steps_for_opcode(snapshots_vec)?;
+                // let bytecode_address = trace
+                //     .get(entry_id)
+                //     .ok_or_else(|| {
+                //         eyre::eyre!("Trace entry {} not found for snapshot analysis", entry_id)
+                //     })?
+                //     .code_address;
+                // let analysis_result = analysis.get(&bytecode_address).ok_or_else(|| {
+                //     eyre::eyre!(
+                //         "Analysis result not found for bytecode address {}",
+                //         bytecode_address
+                //     )
+                // })?;
+                // Self::analyze_next_steps_for_source(snapshots_vec, analysis_result)?;
             }
         }
 

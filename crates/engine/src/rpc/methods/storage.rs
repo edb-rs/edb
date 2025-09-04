@@ -9,7 +9,7 @@ use revm::{
     Database, DatabaseCommit, DatabaseRef,
 };
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{error_codes, methods::snapshot, EngineContext, RpcError};
 
