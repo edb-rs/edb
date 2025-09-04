@@ -156,7 +156,7 @@ impl App {
     /// Create a new application instance
     pub async fn new(rpc_client: Arc<RpcClient>, _config: LayoutConfig) -> Result<Self> {
         let layout_manager = LayoutManager::new();
-        let current_panel = PanelType::Terminal;
+        let current_panel = PanelType::Trace;
 
         // Initialize panels without managers (they will receive DataManager as parameter)
         let mut panels: HashMap<PanelType, Panel> = HashMap::new();

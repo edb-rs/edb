@@ -25,7 +25,7 @@ use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_primitives::Address;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use edb_common::types::{Code, SnapshotInfo, SnapshotInfoDetail};
+use edb_common::types::{Code, SnapshotInfoDetail};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -34,6 +34,8 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
+use std::mem;
+use std::path::PathBuf;
 use tracing::{debug, info};
 
 /// Code display mode
@@ -59,8 +61,8 @@ pub struct FileInfo {
 /// Server-controlled display preferences
 #[derive(Debug, Clone)]
 pub struct CodeDisplayInfo {
-    /// Current displayed bytecode address
-    pub bytecode_address: Address,
+    /// Current location
+    pub location: DisplayLocation,
     /// Whether source code is available from server
     pub has_source_code: bool,
     /// Server's preferred display mode
@@ -69,6 +71,13 @@ pub struct CodeDisplayInfo {
     pub available_files: Vec<String>,
     /// Enhanced file information with metadata
     pub file_info: Vec<FileInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum DisplayLocation {
+    Unknown,
+    Opcode(Address),
+    Hook(Address, Option<PathBuf>),
 }
 
 /// Code panel implementation (stub)
@@ -137,7 +146,7 @@ impl CodePanel {
     /// Create a new code panel
     pub fn new() -> Self {
         let display_info = CodeDisplayInfo {
-            bytecode_address: Address::default(),
+            location: DisplayLocation::Unknown,
             has_source_code: true, // This address has source code
             mode: CodeMode::Source,
             available_files: vec![],
@@ -311,41 +320,19 @@ impl CodePanel {
         }
     }
 
-    /// Get sorted file list for display (execution files first, then alphabetical)
-    fn get_sorted_files(&self) -> Vec<(usize, &FileInfo)> {
-        let mut files: Vec<(usize, &FileInfo)> =
-            self.display_info.file_info.iter().enumerate().collect();
-
-        files.sort_by(|(_, a), (_, b)| {
-            // First, sort by execution (files with execution come first)
-            match (a.has_execution, b.has_execution) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => {
-                    // Then sort alphabetically by filename
-                    let a_name = a.path.split('/').last().unwrap_or(&a.path);
-                    let b_name = b.path.split('/').last().unwrap_or(&b.path);
-                    a_name.cmp(b_name)
-                }
-            }
-        });
-
-        files
-    }
-
     /// Render the file selector panel
     fn render_file_selector(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Calculate file selector context height for viewport calculations
         self.file_selector_context_height = area.height.saturating_sub(2) as usize; // Account for borders
 
-        let sorted_files = self.get_sorted_files();
-
-        let items: Vec<ListItem<'_>> = sorted_files
+        let items: Vec<ListItem<'_>> = self
+            .display_info
+            .file_info
             .iter()
             .enumerate()
             .skip(self.file_selector_scroll_offset) // Skip items before viewport
             .take(self.file_selector_context_height) // Take only visible items
-            .map(|(display_idx, (_, file_info))| {
+            .map(|(display_idx, file_info)| {
                 let filename = file_info.path.split('/').last().unwrap_or(&file_info.path);
 
                 // Determine file status for enhanced icon display
@@ -377,7 +364,7 @@ impl CodePanel {
                     .title(format!(
                         "📁 Files ({}/{})",
                         self.file_selector_index + 1,
-                        sorted_files.len()
+                        self.display_info.file_info.len()
                     ))
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(dm.theme.success_color)),
@@ -745,6 +732,7 @@ impl CodePanel {
             return Some(()); // No change
         }
 
+        debug!("The current snapshot {:?}", id);
         let exec_source_offset = dm.execution.get_snapshot_info(id)?.offset();
         let exec_opcode_pc = dm.execution.get_snapshot_info(id)?.pc();
         let execution_path = dm.execution.get_snapshot_info(id)?.path().cloned();
@@ -752,13 +740,14 @@ impl CodePanel {
         let code = dm.execution.get_code(id)?;
         let bytecode_address = code.bytecode_address();
 
-        // We reset the selected path id here, and only update it as Some when we
-        // are about to show new code.
-        self.current_selected_path_id = None;
+        // We reset the selected path id here, to force a source refresh
+        let mut current_selected_path_id = mem::take(&mut self.current_selected_path_id);
+
         match code {
             Code::Source(info) => {
-                if self.display_info.bytecode_address != bytecode_address {
-                    info!("Code address changed to {:?}", bytecode_address);
+                let location = DisplayLocation::Hook(bytecode_address, execution_path.clone());
+                if self.display_info.location != location {
+                    info!("Display location changed to {:?}", location);
 
                     self.display_info.has_source_code = true;
                     self.display_info.mode = CodeMode::Source;
@@ -781,16 +770,7 @@ impl CodePanel {
                     self.display_info.available_files.sort();
                     self.display_info.file_info.sort_by(|a, b| a.path.cmp(&b.path));
 
-                    self.display_info.bytecode_address = bytecode_address;
-
-                    // update selected path index
-                    self.selected_path_index = self
-                        .display_info
-                        .file_info
-                        .iter()
-                        .position(|p| p.has_execution)
-                        .unwrap_or(0);
-                    self.current_selected_path_id = Some(self.selected_path_index);
+                    self.display_info.location = location;
 
                     self.sources = info
                         .sources
@@ -802,9 +782,27 @@ impl CodePanel {
                         .collect();
                     self.opcodes.clear();
 
+                    // update current_selected_path_id as None to force updating source lines
+                    current_selected_path_id = None;
+                }
+
+                // Since the id has changed, it means we have to update the selected_path_index
+                self.selected_path_index =
+                    self.display_info.file_info.iter().position(|p| p.has_execution).unwrap_or(0);
+
+                // Fresh source if current_selected_path_id is not the same as selected_path_index
+                if current_selected_path_id != Some(self.selected_path_index) {
                     self.source_lines = self
                         .sources
-                        .get(&self.display_info.available_files[self.selected_path_index])
+                        // .get(&self.display_info.available_files[self.selected_path_index])
+                        .get(
+                            self.display_info
+                                .file_info
+                                .iter()
+                                .find(|info| info.has_execution)
+                                .map(|info| &info.path)
+                                .expect("This has to exist"),
+                        )
                         .map_or(vec![], |source| source.lines().map(|l| l.to_string()).collect());
                     self.opcode_lines.clear();
 
@@ -813,7 +811,7 @@ impl CodePanel {
                     self.horizontal_offset = 0; // Reset horizontal scroll when content changes
                 }
 
-                // move user cursor
+                // Move user cursor
                 let execution_path = &self.display_info.available_files[self.selected_path_index];
                 let execution_line = self
                     .sources
@@ -824,14 +822,15 @@ impl CodePanel {
                 self.move_to(execution_line);
             }
             Code::Opcode(info) => {
-                if self.display_info.bytecode_address != bytecode_address {
-                    info!("Code address changed to {:?}", bytecode_address);
+                let location = DisplayLocation::Opcode(bytecode_address);
+                if self.display_info.location != location {
+                    info!("Display location changed to {:?}", location);
                     self.display_info.has_source_code = false;
                     self.display_info.mode = CodeMode::Opcodes;
                     self.display_info.available_files.clear();
                     self.display_info.file_info.clear();
 
-                    self.display_info.bytecode_address = bytecode_address;
+                    self.display_info.location = location;
 
                     self.selected_path_index = 0;
 
@@ -950,9 +949,6 @@ impl CodePanel {
                     self.current_execution_line = Some(execution_line);
                 }
             }
-
-            // Simply sync the execution line with the user cursor
-            self.current_execution_line = self.user_cursor_line;
         }
 
         Some(())
