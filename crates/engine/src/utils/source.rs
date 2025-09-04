@@ -208,7 +208,7 @@ pub fn find_next_index_of_statement(source: &str, stmt: &Statement) -> Option<us
     match stmt {
         Statement::Block(block) => find_next_index_of_source_location(&block.src),
         Statement::Break(break_stmt) => {
-            find_next_semicolon_after_source_location(source, &break_stmt.src)
+            find_next_semicolon_after_source_location(source, &break_stmt.src).map(|i| i + 1)
         }
         Statement::Continue(continue_stmt) => {
             find_next_semicolon_after_source_location(source, &continue_stmt.src).map(|i| i + 1)
