@@ -70,6 +70,8 @@ pub struct SourceAnalysis {
     pub private_state_variables: Vec<VariableRef>,
     /// List of all functions in this file.
     pub functions: Vec<FunctionRef>,
+    /// List of all state variables in this file.
+    pub state_variables: Vec<VariableRef>,
     /// Functions that should be made public
     pub private_functions: Vec<FunctionRef>,
     /// Functions that should be made mutable (i.e., neither pure nor view)
@@ -401,6 +403,8 @@ pub struct Analyzer {
     current_function: Option<FunctionRef>,
     /// List of all functions in this file.
     functions: Vec<FunctionRef>,
+    /// List of all state variables in this file.
+    state_variables: Vec<VariableRef>,
     /// State variables that should be made public
     private_state_variables: Vec<VariableRef>,
     /// Functions that should be made public
@@ -459,6 +463,7 @@ impl Analyzer {
             global_scope,
             steps,
             private_state_variables: self.private_state_variables,
+            state_variables: self.state_variables,
             functions,
             private_functions: self.private_functions,
             immutable_functions: self.immutable_functions,
@@ -552,6 +557,7 @@ impl Analyzer {
             if declaration.visibility != Visibility::Public {
                 self.private_state_variables.push(variable.clone());
             }
+            self.state_variables.push(variable.clone());
         }
         Ok(())
     }

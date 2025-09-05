@@ -106,6 +106,10 @@ impl VariableRef {
         self.inner.write()
     }
 
+    pub fn id(&self) -> UVID {
+        self.read().id()
+    }
+
     pub fn declaration(&self) -> &VariableDeclaration {
         self.declaration.get_or_init(|| self.inner.read().declaration())
     }

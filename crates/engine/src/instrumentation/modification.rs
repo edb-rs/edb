@@ -1,16 +1,16 @@
 use std::{collections::BTreeMap, fmt::Display};
 
 use crate::{
-    analysis::{stmt_src, SourceAnalysis},
-    find_next_index_of_source_location, find_next_index_of_statement,
-    find_next_semicolon_after_source_location, mutability_to_str, slice_source_location,
-    source_string_at_location, source_string_at_location_unchecked, visibility_to_str,
-    AnalysisResult, USID, UVID,
+    analysis::{stmt_src, SourceAnalysis, VariableRef},
+    find_next_index_of_statement,
+    instrumentation::codegen,
+    mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str, USID,
+    UVID,
 };
 
 use eyre::Result;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, Visibility,
+    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, TypeName, Visibility,
 };
 
 const NORMAL_PRIORITY: u8 = 127;
@@ -287,6 +287,25 @@ impl SourceModifications {
                 }
             };
 
+        for state_variable in &analysis.state_variables {
+            let Some(view_function) = codegen::generate_view_method(state_variable) else {
+                // The state variable contains user-defined types.
+                continue;
+            };
+
+            let src = &state_variable.declaration().src;
+            let loc = src.start.unwrap_or(0) + src.length.unwrap_or(0) + 1; // XXX (ZZ): we may need to check last char
+            let instrument_action = InstrumentAction {
+                source_id,
+                loc,
+                content: InstrumentContent::Plain(view_function),
+                priority: NORMAL_PRIORITY,
+            };
+            self.add_modification(instrument_action.into());
+        }
+
+        // We will manually generate view functions for private state variables
+        #[cfg(any())]
         let add_visibility =
             |src: SourceLocation, add: &str, at_index: usize| -> InstrumentAction {
                 let new_visibility_str = format!(" {add} ");
@@ -299,6 +318,8 @@ impl SourceModifications {
                 }
             };
 
+        // We will manually generate view functions for private state variables
+        #[cfg(any())]
         for private_state_variable in &analysis.private_state_variables {
             let declaration_str = source_string_at_location(
                 source_id,
@@ -326,8 +347,8 @@ impl SourceModifications {
             self.add_modification(instrument_action.into());
         }
 
+        // We temporarily disable private function visibility modifications
         #[cfg(any())]
-        // XXX (ZZ): we temporarily disable private function visibility modifications
         for private_function in &analysis.private_functions {
             let definition_str =
                 source_string_at_location(source_id, source, &private_function.src());
