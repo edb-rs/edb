@@ -29,8 +29,9 @@ use thiserror::Error;
 use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
-        visitor::VisitorAction, Function, FunctionRef, ScopeNode, Step, StepHook, StepRef,
-        StepVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk, UFID,
+        visitor::VisitorAction, Function, FunctionRef, FunctionTypeNameRef, ScopeNode, Step,
+        StepHook, StepRef, StepVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk,
+        UFID,
     },
     block_or_stmt_src,
     contains_user_defined_type_or_function_type,
@@ -76,6 +77,8 @@ pub struct SourceAnalysis {
     pub private_functions: Vec<FunctionRef>,
     /// Functions that should be made mutable (i.e., neither pure nor view)
     pub immutable_functions: Vec<FunctionRef>,
+    /// Variables that are defined as function types
+    pub function_types: Vec<FunctionTypeNameRef>,
 }
 
 impl SourceAnalysis {
@@ -411,6 +414,8 @@ pub struct Analyzer {
     private_functions: Vec<FunctionRef>,
     /// Functions that should be made mutable (i.e., neither pure nor view)
     immutable_functions: Vec<FunctionRef>,
+    /// Function types defined in this file.
+    function_types: Vec<FunctionTypeNameRef>,
 }
 
 impl Analyzer {
@@ -467,6 +472,7 @@ impl Analyzer {
             functions,
             private_functions: self.private_functions,
             immutable_functions: self.immutable_functions,
+            function_types: self.function_types,
         })
     }
 }
@@ -495,6 +501,9 @@ impl Analyzer {
             return Ok(());
         }
 
+        // collect function types from this variable declaration
+        self.collect_function_types_from_variable(declaration)?;
+
         // add a new variable to the current scope
         let scope = self.current_scope();
         let uvid = UVID::next();
@@ -502,6 +511,9 @@ impl Analyzer {
         let variable: VariableRef =
             Variable::Plain { uvid, declaration: declaration.clone(), state_variable }.into();
         self.check_state_variable_visibility(&variable)?;
+        if state_variable {
+            self.state_variables.push(variable.clone());
+        }
         scope.write().variables.push(variable);
 
         if let Some(step) = self.current_step.as_mut() {
@@ -536,6 +548,54 @@ impl Analyzer {
         Ok(())
     }
 
+    /// Collects function types from a variable declaration.
+    ///
+    /// This function recursively walks through the type structure of a variable declaration
+    /// and collects any FunctionTypeName instances found within the type hierarchy.
+    ///
+    /// # Arguments
+    /// * `declaration` - The variable declaration to analyze
+    ///
+    /// # Returns
+    /// * `Result<(), eyre::Report>` - Ok if successful, Err if an error occurs during analysis
+    fn collect_function_types_from_variable(
+        &mut self,
+        declaration: &VariableDeclaration,
+    ) -> eyre::Result<()> {
+        if let Some(type_name) = &declaration.type_name {
+            self.collect_function_types_recursive(type_name);
+        }
+        Ok(())
+    }
+
+    /// Recursively collects function types from a TypeName.
+    ///
+    /// This function traverses the type hierarchy and adds any FunctionTypeName
+    /// instances to the function_types collection.
+    ///
+    /// # Arguments
+    /// * `type_name` - The type to analyze for function types
+    fn collect_function_types_recursive(&mut self, type_name: &TypeName) {
+        match type_name {
+            TypeName::FunctionTypeName(function_type) => {
+                // Found a function type - add it to our collection
+                self.function_types.push((*function_type.clone()).into());
+            }
+            TypeName::ArrayTypeName(array_type) => {
+                // Recursively check the array's base type
+                self.collect_function_types_recursive(&array_type.base_type);
+            }
+            TypeName::Mapping(mapping) => {
+                // Recursively check both key and value types
+                self.collect_function_types_recursive(&mapping.key_type);
+                self.collect_function_types_recursive(&mapping.value_type);
+            }
+            TypeName::ElementaryTypeName(_) | TypeName::UserDefinedTypeName(_) => {
+                // These types don't contain function types, so nothing to do
+            }
+        }
+    }
+
     fn check_state_variable_visibility(&mut self, variable: &VariableRef) -> eyre::Result<()> {
         let declaration = variable.declaration();
         if declaration.state_variable {
@@ -557,7 +617,6 @@ impl Analyzer {
             if declaration.visibility != Visibility::Public {
                 self.private_state_variables.push(variable.clone());
             }
-            self.state_variables.push(variable.clone());
         }
         Ok(())
     }
@@ -938,7 +997,7 @@ impl Visitor for Analyzer {
 
     fn visit_modifier_definition(
         &mut self,
-        definition: &foundry_compilers::artifacts::ModifierDefinition,
+        definition: &ModifierDefinition,
     ) -> eyre::Result<VisitorAction> {
         // enter a new modifier
         self.enter_new_modifier(definition)?;
@@ -1432,6 +1491,60 @@ contract TestContract {
         for step in &analysis.steps {
             let s = source_string_at_location_unchecked(source, &step.read().src);
             println!("step: {}", s);
+        }
+    }
+
+    #[test]
+    fn test_function_type_collection() {
+        let source = r#"
+        contract TestContract {
+            // Function type as state variable
+            function(uint256) returns (bool) private callback;
+            
+            // Function type in array
+            function(uint256) external pure returns (bool)[] private validators;
+            
+            // Function type in mapping
+            mapping(address => function(uint256) returns (bool)) private userCallbacks;
+            
+            // Function with function type parameters (internal function)
+            function setCallback(function(uint256) returns (bool) _callback) internal {
+                callback = _callback;
+            }
+            
+            // Modifier with function type parameter  
+            modifier onlyValidated(function(uint256) returns (bool) _validator) {
+                require(_validator(123), "Not validated");
+                _;
+            }
+        }
+        "#;
+
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        // Should collect function types from:
+        // 1. State variable 'callback'
+        // 2. Array element type in 'validators'
+        // 3. Mapping value type in 'userCallbacks'
+        // 4. Function parameter in 'setCallback'
+        // 5. Modifier parameter in 'onlyValidated'
+        // Total: at least 5 function types
+        assert!(
+            analysis.function_types.len() >= 5,
+            "Expected at least 5 function types, found: {}",
+            analysis.function_types.len()
+        );
+
+        println!("Collected {} function types", analysis.function_types.len());
+
+        // Print each function type for inspection
+        for (i, func_type) in analysis.function_types.iter().enumerate() {
+            println!(
+                "Function type {}: visibility={:?}, stateMutability={:?}",
+                i + 1,
+                func_type.visibility(),
+                func_type.state_mutability()
+            );
         }
     }
 }

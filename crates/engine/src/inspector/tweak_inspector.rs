@@ -145,6 +145,7 @@ where
         if self.found_target
             && matches!(inputs.scheme, CreateScheme::Custom { address } if address == self.target_address)
         {
+            println!("MDZZ We are here! {:#?}", outcome);
             if outcome.result.is_ok() {
                 // Get the deployed bytecode from the context
                 if let Some(created_address) = outcome.address {

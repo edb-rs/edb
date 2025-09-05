@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, FunctionDefinition, ModifierDefinition, StateMutability, Visibility,
+    ast::SourceLocation, FunctionDefinition, FunctionTypeName, ModifierDefinition, StateMutability,
+    Visibility,
 };
 use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -82,6 +83,72 @@ impl<'de> Deserialize<'de> for FunctionRef {
     {
         let function = Function::deserialize(deserializer)?;
         Ok(Self::new(function))
+    }
+}
+
+/// A reference-counted pointer to a FunctionTypeName for efficient sharing across multiple contexts.
+///
+/// This type alias provides thread-safe reference counting for FunctionTypeName instances,
+/// allowing them to be shared between different parts of the analysis system
+/// without copying the entire function data.
+#[derive(Debug, Clone)]
+pub struct FunctionTypeNameRef {
+    inner: Arc<RwLock<FunctionTypeName>>,
+}
+
+impl From<FunctionTypeName> for FunctionTypeNameRef {
+    fn from(function_type: FunctionTypeName) -> Self {
+        Self::new(function_type)
+    }
+}
+
+impl FunctionTypeNameRef {
+    /// Creates a new FunctionTypeNameRef from a FunctionTypeName.
+    pub fn new(inner: FunctionTypeName) -> Self {
+        Self { inner: Arc::new(RwLock::new(inner)) }
+    }
+}
+
+impl FunctionTypeNameRef {
+    pub(crate) fn read(&self) -> RwLockReadGuard<'_, FunctionTypeName> {
+        self.inner.read()
+    }
+
+    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, FunctionTypeName> {
+        self.inner.write()
+    }
+}
+
+impl FunctionTypeNameRef {
+    pub fn visibility(&self) -> Visibility {
+        self.read().visibility.clone()
+    }
+
+    pub fn state_mutability(&self) -> StateMutability {
+        self.read().state_mutability.clone()
+    }
+
+    pub fn src(&self) -> SourceLocation {
+        self.read().src.clone()
+    }
+}
+
+impl Serialize for FunctionTypeNameRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.inner.read().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FunctionTypeNameRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let function_type = FunctionTypeName::deserialize(deserializer)?;
+        Ok(Self::new(function_type))
     }
 }
 

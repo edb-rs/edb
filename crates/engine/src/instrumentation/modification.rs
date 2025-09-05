@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display};
+use std::{collections::BTreeMap, fmt::Display, os::macos::raw::stat};
 
 use crate::{
     analysis::{stmt_src, SourceAnalysis, VariableRef},
@@ -10,7 +10,8 @@ use crate::{
 
 use eyre::Result;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, TypeName, Visibility,
+    ast::SourceLocation, BlockOrStatement, Mutability, StateMutability, Statement, TypeName,
+    Visibility,
 };
 
 const NORMAL_PRIORITY: u8 = 127;
@@ -293,6 +294,11 @@ impl SourceModifications {
                 continue;
             };
 
+            if state_variable.declaration().mutability == Some(Mutability::Constant) {
+                // We do not need to output constant state variables
+                continue;
+            }
+
             let src = &state_variable.declaration().src;
             let loc = src.start.unwrap_or(0) + src.length.unwrap_or(0) + 1; // XXX (ZZ): we may need to check last char
             let instrument_action = InstrumentAction {
@@ -384,6 +390,24 @@ impl SourceModifications {
                     ) {
                         self.add_modification(remove_action.into());
                     }
+                }
+            }
+        }
+
+        for function_type in &analysis.function_types {
+            let function_type_str =
+                source_string_at_location(source_id, source, &function_type.src());
+
+            println!("MDZZ {}", function_type_str);
+            let mutability = function_type.state_mutability();
+            if matches!(mutability, StateMutability::Pure | StateMutability::View) {
+                // Remove the existing visibility of the function type
+                if let Some(remove_action) = remove_visibility(
+                    function_type_str,
+                    function_type.src(),
+                    mutability_to_str(&mutability),
+                ) {
+                    self.add_modification(remove_action.into());
                 }
             }
         }
