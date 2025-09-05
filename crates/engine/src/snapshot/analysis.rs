@@ -5,7 +5,7 @@ use edb_common::types::{ExecutionFrameId, Trace};
 use eyre::{bail, Result};
 use itertools::Itertools;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
-use tracing::debug;
+use tracing::{debug, error, warn};
 
 use crate::{
     analysis::{AnalysisResult, StepRef, UFID},
@@ -212,9 +212,20 @@ where
                 .ok_or_else(|| eyre::eyre!("No step found for USID {}", u64::from(next_usid)))?;
             let next_ufid = next_step.ufid();
 
+            // Step 0: To avoid annoying crash, we always add a placeholder stack entry
+            if stack.is_empty() {
+                error!("Call stack is empty at Snapshot {} (step 0)", snapshots[i].1.id());
+                stack.push(CallStackEntry {
+                    func_info: FunctionInfo::Unknown,
+                    callsite: None,
+                    return_after_callsite: false,
+                });
+            }
+
             // Step 1: try to update the current function entry
-            let stack_entry =
-                stack.last_mut().ok_or_else(|| eyre::eyre!("Call stack is empty at step 1"))?;
+            let stack_entry = stack.last_mut().ok_or_else(|| {
+                eyre::eyre!("Call stack is empty at step 1 (which is impossible)")
+            })?;
             if let Some(ufid) = step.function_entry() {
                 stack_entry.func_info.with_function(ufid);
             }
@@ -222,8 +233,8 @@ where
                 stack_entry.func_info.with_modifier(ufid);
             }
             if !stack_entry.func_info.is_valid() {
-                // The stack has become invalid, we return errors
-                bail!("Invalid function info in call stack");
+                // We output the error but do not stop here.
+                error!("Invalid function info in call stack");
             }
 
             // Step 2: check whether this step contains any valid internal call
@@ -249,11 +260,14 @@ where
             snapshots[i].1.set_next_id(next_id);
 
             // Step 4: check return
-            let stack_entry =
-                stack.last().ok_or_else(|| eyre::eyre!("Call stack is empty at step 4"))?;
+            let Some(stack_entry) = stack.last() else {
+                error!("Call stack is empty at Snapshot {} (step 4)", snapshots[i].1.id());
+                continue;
+            };
+
             let will_return = match &stack_entry.func_info {
                 FunctionInfo::FunctionOnly(..) | FunctionInfo::ModifiedFunction { .. } => {
-                    !stack_entry.func_info.contains_ufid(next_ufid)
+                    !stack_entry.func_info.contains_ufid(next_ufid) || is_entry(next_step)
                 }
                 FunctionInfo::ModifierOnly(..) => {
                     !(stack_entry.func_info.contains_ufid(next_ufid) || is_entry(next_step))
@@ -267,8 +281,11 @@ where
 
             // Step 5: handle returning chain
             loop {
-                let mut stack_entry =
-                    stack.pop().ok_or_else(|| eyre::eyre!("Call stack is empty"))?;
+                let Some(mut stack_entry) = stack.pop() else {
+                    error!("Call stack is empty at Snapshot {} (step 5)", snapshots[i].1.id());
+                    break;
+                };
+
                 if stack_entry.callsite.is_none() {
                     // We have returned from the top level, nothing more to do
                     break;
@@ -283,9 +300,10 @@ where
                     break;
                 };
 
-                // Check whether we are done with this callsite (will_certain_return has higher priority)
-                let will_certain_return = parent_entry.func_info.contains_ufid(next_ufid);
-                if callsite.callees > 0 && !will_certain_return {
+                // Check whether we are done with this callsite (callsite_certainly_done has higher priority)
+                let callsite_certainly_done =
+                    parent_entry.func_info.contains_ufid(next_ufid) && !is_entry(next_step);
+                if callsite.callees > 0 && !callsite_certainly_done {
                     stack_entry.func_info = FunctionInfo::Unknown;
                     stack.push(stack_entry);
                     break;
@@ -293,7 +311,7 @@ where
 
                 let continue_to_return = match &parent_entry.func_info {
                     FunctionInfo::FunctionOnly(..) | FunctionInfo::ModifiedFunction { .. } => {
-                        !parent_entry.func_info.contains_ufid(next_ufid)
+                        !parent_entry.func_info.contains_ufid(next_ufid) || is_entry(next_step)
                     }
                     FunctionInfo::ModifierOnly(..) => {
                         !(parent_entry.func_info.contains_ufid(next_ufid) || is_entry(next_step))
@@ -359,6 +377,13 @@ impl FunctionInfo {
 
     fn is_valid(&self) -> bool {
         !matches!(self, FunctionInfo::INVALID)
+    }
+
+    fn certainly_in_body(&self) -> bool {
+        match self {
+            FunctionInfo::FunctionOnly(..) | FunctionInfo::ModifiedFunction { .. } => true,
+            _ => false,
+        }
     }
 
     fn with_modifier(&mut self, modifier: UFID) {

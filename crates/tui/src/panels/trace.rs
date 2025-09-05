@@ -587,9 +587,9 @@ impl TracePanelInner {
 
         // Add ether value if present
         if entry.value > 0 {
-            spans.push(Span::raw(" "));
+            spans.push(Span::raw("  "));
             spans.push(Span::styled(
-                format!("{} ETH", dm.resolver.resolve_ether(entry.value)),
+                format!("[{} ETH]", dm.resolver.resolve_ether(entry.value)),
                 Style::default().fg(dm.theme.warning_color),
             ));
         }
