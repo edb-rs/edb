@@ -45,7 +45,9 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{macros::universal_id, StepHook, VariableScope, VariableScopeRef, UVID};
+use crate::analysis::{
+    macros::universal_id, StepHook, VariableRef, VariableScope, VariableScopeRef, UVID,
+};
 
 universal_id! {
     /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
@@ -239,7 +241,9 @@ pub struct Step {
     /// Function calls made in this step
     pub function_calls: Vec<FunctionCall>,
     /// Variables declared in this step
-    pub declared_variables: Vec<VariableDeclaration>,
+    pub declared_variables: Vec<VariableRef>,
+    /// Variables updated in this step
+    pub updated_variables: Vec<VariableRef>,
     /// The scope of this step
     pub scope: VariableScopeRef,
     /// Hooks to execute before this step
@@ -275,6 +279,7 @@ impl Step {
             src,
             function_calls: vec![],
             declared_variables: vec![],
+            updated_variables: vec![],
             scope,
             pre_hooks: vec![],
             post_hooks: vec![],

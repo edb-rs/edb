@@ -281,17 +281,48 @@ pub fn find_next_index_of_statement(source: &str, stmt: &Statement) -> Option<us
 /// let contains = contains_user_defined_type_or_function_type(&type_name);
 /// assert!(contains);
 /// ```
-pub fn contains_user_defined_type_or_function_type(type_name: &TypeName) -> bool {
+pub fn contains_user_defined_type(type_name: &TypeName) -> bool {
     match type_name {
         TypeName::ArrayTypeName(array_type_name) => {
-            contains_user_defined_type_or_function_type(&array_type_name.base_type)
+            contains_user_defined_type(&array_type_name.base_type)
         }
         TypeName::ElementaryTypeName(_) => false,
-        TypeName::FunctionTypeName(_) => true,
+        TypeName::FunctionTypeName(_) => false,
         TypeName::Mapping(mapping) => {
-            contains_user_defined_type_or_function_type(&mapping.key_type)
-                || contains_user_defined_type_or_function_type(&mapping.value_type)
+            contains_user_defined_type(&mapping.key_type)
+                || contains_user_defined_type(&mapping.value_type)
         }
         TypeName::UserDefinedTypeName(_) => true,
+    }
+}
+
+/// Check recursively if the type name contains a function type.
+///
+/// # Arguments
+///
+/// * `type_name` - The type name
+///
+/// # Returns
+///
+/// True if the type name contains a function type.
+///
+/// # Example
+///
+/// ```rust
+/// let type_name = TypeName::FunctionTypeName("MyFunction".to_string());
+/// let contains = contains_function_type(&type_name);
+/// assert!(contains);
+/// ```
+pub fn contains_function_type(type_name: &TypeName) -> bool {
+    match type_name {
+        TypeName::FunctionTypeName(_) => true,
+        TypeName::ArrayTypeName(array_type_name) => {
+            contains_function_type(&array_type_name.base_type)
+        }
+        TypeName::ElementaryTypeName(_) => false,
+        TypeName::Mapping(mapping) => {
+            contains_function_type(&mapping.key_type) || contains_function_type(&mapping.value_type)
+        }
+        TypeName::UserDefinedTypeName(_) => false,
     }
 }

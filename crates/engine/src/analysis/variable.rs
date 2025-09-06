@@ -113,6 +113,15 @@ impl VariableRef {
     pub fn declaration(&self) -> &VariableDeclaration {
         self.declaration.get_or_init(|| self.inner.read().declaration())
     }
+
+    pub fn base(&self) -> VariableRef {
+        let inner = self.inner.read();
+        if let Some(base) = inner.base() {
+            base
+        } else {
+            self.clone()
+        }
+    }
 }
 
 impl Serialize for VariableRef {
@@ -190,9 +199,9 @@ pub enum Variable {
         /// The base variable being sliced.
         base: VariableRef,
         /// The start index expression.
-        start: Expression,
+        start: Option<Expression>,
         /// The end index expression.
-        end: Expression,
+        end: Option<Expression>,
     },
 }
 
@@ -212,6 +221,21 @@ impl Variable {
             Self::Member { base, .. } => base.read().declaration(),
             Self::Index { base, .. } => base.read().declaration(),
             Self::IndexRange { base, .. } => base.read().declaration(),
+        }
+    }
+
+    pub fn base(&self) -> Option<VariableRef> {
+        match self {
+            Self::Plain { .. } => None,
+            Self::Member { base, .. }
+            | Self::Index { base, .. }
+            | Self::IndexRange { base, .. } => {
+                if let Some(base) = base.read().base() {
+                    Some(base)
+                } else {
+                    Some(base.clone())
+                }
+            }
         }
     }
 

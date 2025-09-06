@@ -18,9 +18,10 @@ use std::{collections::BTreeMap, path::PathBuf};
 
 use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, Block, ContractDefinition, EventDefinition, ForStatement, FunctionCall,
-    FunctionCallKind, FunctionDefinition, ModifierDefinition, Source, SourceUnit, StateMutability,
-    Statement, TypeName, UncheckedBlock, VariableDeclaration, Visibility,
+    ast::SourceLocation, Assignment, Block, ContractDefinition, EventDefinition, Expression,
+    ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition, ModifierDefinition, Source,
+    SourceUnit, StateMutability, Statement, TypeName, UncheckedBlock, VariableDeclaration,
+    Visibility,
 };
 
 use serde::{Deserialize, Serialize};
@@ -34,7 +35,7 @@ use crate::{
         UFID,
     },
     block_or_stmt_src,
-    contains_user_defined_type_or_function_type,
+    contains_user_defined_type,
     sloc_ldiff,
     sloc_rdiff,
     VariableRef,
@@ -221,7 +222,22 @@ impl SourceAnalysis {
             if !step.read().declared_variables.is_empty() {
                 println!(
                     "  Declared variables: {}",
-                    self.format_declared_variables(&step.read().declared_variables)
+                    self.format_declared_variables(
+                        step.read()
+                            .declared_variables
+                            .iter()
+                            .map(|v| v.declaration().clone())
+                            .collect::<Vec<_>>()
+                            .as_slice()
+                    )
+                );
+            }
+
+            // Display updated variables
+            if !step.read().updated_variables.is_empty() {
+                println!(
+                    "  Updated variables: {}",
+                    self.format_updated_variables(&step.read().updated_variables)
                 );
             }
             println!();
@@ -308,6 +324,11 @@ impl SourceAnalysis {
             })
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// Formats a list of updated variables with detailed information.
+    fn format_updated_variables(&self, variables: &[VariableRef]) -> String {
+        variables.iter().map(|var| var.read().pretty_display()).collect::<Vec<_>>().join(", ")
     }
 
     /// Extracts the source code for a given source location.
@@ -406,6 +427,8 @@ pub struct Analyzer {
     current_function: Option<FunctionRef>,
     /// List of all functions in this file.
     functions: Vec<FunctionRef>,
+    /// A mapping from the `VariableDeclaration` AST node ID to the variable reference.
+    variables: HashMap<usize, VariableRef>,
     /// List of all state variables in this file.
     state_variables: Vec<VariableRef>,
     /// State variables that should be made public
@@ -514,11 +537,14 @@ impl Analyzer {
         if state_variable {
             self.state_variables.push(variable.clone());
         }
-        scope.write().variables.push(variable);
+        scope.write().variables.push(variable.clone());
+
+        // add the variable to the variable_declarations map
+        self.variables.insert(declaration.id, variable.clone());
 
         if let Some(step) = self.current_step.as_mut() {
             // add the variable to the current step
-            step.write().declared_variables.push(declaration.clone());
+            step.write().declared_variables.push(variable.clone());
 
             // after the step is executed, the variable becomes in scope
             step.write().post_hooks.push(StepHook::VariableInScope(uvid));
@@ -604,12 +630,7 @@ impl Analyzer {
             // So here when we encounter a state variable with a user defined type, we skip the visibility check.
             // In the future, we may further consider to support user defined struct types as public state variables
             // under the condition that it does not contain inner recursive types (array or mapping fields).
-            if declaration
-                .type_name
-                .as_ref()
-                .map(contains_user_defined_type_or_function_type)
-                .unwrap_or(false)
-            {
+            if declaration.type_name.as_ref().map(contains_user_defined_type).unwrap_or(false) {
                 return Ok(());
             }
 
@@ -924,8 +945,89 @@ impl Analyzer {
     }
 }
 
-/* State variable  analysis */
-impl Analyzer {}
+/* Variable update analysis */
+impl Analyzer {
+    fn record_assignment(&mut self, variable: &Assignment) -> eyre::Result<VisitorAction> {
+        fn get_varaiable(this: &Analyzer, expr: &Expression) -> Option<VariableRef> {
+            match expr {
+                Expression::Identifier(identifier) => {
+                    if let Some(declaration_id) = &identifier.referenced_declaration {
+                        if declaration_id >= &0 {
+                            if let Some(variable) = this.variables.get(&(*declaration_id as usize))
+                            {
+                                return Some(variable.clone());
+                            }
+                        }
+                    }
+                    None
+                }
+                Expression::IndexAccess(index_access) => {
+                    if let Some(base_variable) = get_varaiable(this, &index_access.base_expression)
+                    {
+                        if let Some(index) = &index_access.index_expression {
+                            let var = Variable::Index { base: base_variable, index: index.clone() };
+                            return Some(var.into());
+                        }
+                    }
+                    None
+                }
+                Expression::IndexRangeAccess(index_range_access) => {
+                    if let Some(base_variable) =
+                        get_varaiable(this, &index_range_access.base_expression)
+                    {
+                        let var = Variable::IndexRange {
+                            base: base_variable,
+                            start: index_range_access.start_expression.clone(),
+                            end: index_range_access.end_expression.clone(),
+                        };
+                        return Some(var.into());
+                    }
+                    None
+                }
+                Expression::MemberAccess(member_access) => {
+                    if let Some(base_variable) = get_varaiable(this, &member_access.expression) {
+                        let var = Variable::Member {
+                            base: base_variable,
+                            member: member_access.member_name.clone(),
+                        };
+                        return Some(var.into());
+                    }
+                    None
+                }
+                Expression::TupleExpression(_) => unreachable!(),
+                _ => None,
+            }
+        }
+
+        let updated_variables: Vec<VariableRef> = match &variable.lhs {
+            Expression::Identifier(_)
+            | Expression::IndexAccess(_)
+            | Expression::IndexRangeAccess(_)
+            | Expression::MemberAccess(_) => {
+                if let Some(var) = get_varaiable(self, &variable.lhs) {
+                    vec![var]
+                } else {
+                    vec![]
+                }
+            }
+            Expression::TupleExpression(tuple_expression) => {
+                let mut vars = vec![];
+                for comp in tuple_expression.components.iter().flatten() {
+                    if let Some(var) = get_varaiable(self, comp) {
+                        vars.push(var);
+                    }
+                }
+                vars
+            }
+            _ => vec![],
+        };
+
+        if let Some(step) = self.current_step.as_mut() {
+            step.write().updated_variables.extend(updated_variables);
+        }
+        Ok(VisitorAction::Continue)
+    }
+}
 
 impl Visitor for Analyzer {
     fn visit_source_unit(&mut self, source_unit: &SourceUnit) -> eyre::Result<VisitorAction> {
@@ -1084,6 +1186,11 @@ impl Visitor for Analyzer {
         self.declare_variable(declaration)?;
         Ok(VisitorAction::Continue)
     }
+
+    fn visit_assignment(&mut self, assignment: &Assignment) -> eyre::Result<VisitorAction> {
+        // record updated variables
+        self.record_assignment(assignment)
+    }
 }
 
 /// A walker wrapping [`Analyzer`] that only walks a single step.
@@ -1164,7 +1271,7 @@ pub(crate) mod tests {
     /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
     pub(crate) fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
         // Compile the source code to get the AST
-        let version = Version::parse("0.8.19").unwrap();
+        let version = Version::parse("0.8.0").unwrap();
         let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Source compilation should succeed: {}", result.unwrap_err());
 
@@ -1199,6 +1306,12 @@ pub(crate) mod tests {
                 .iter()
                 .filter(|s| matches!(s.read().variant, StepVariant::$variant { .. }))
                 .count()
+        };
+    }
+
+    macro_rules! count_updated_variables {
+        ($analysis:expr) => {
+            $analysis.steps.iter().map(|s| s.read().updated_variables.len()).sum::<usize>()
         };
     }
 
@@ -1500,19 +1613,19 @@ contract TestContract {
         contract TestContract {
             // Function type as state variable
             function(uint256) returns (bool) private callback;
-            
+
             // Function type in array
             function(uint256) external pure returns (bool)[] private validators;
-            
+
             // Function type in mapping
             mapping(address => function(uint256) returns (bool)) private userCallbacks;
-            
+
             // Function with function type parameters (internal function)
             function setCallback(function(uint256) returns (bool) _callback) internal {
                 callback = _callback;
             }
-            
-            // Modifier with function type parameter  
+
+            // Modifier with function type parameter
             modifier onlyValidated(function(uint256) returns (bool) _validator) {
                 require(_validator(123), "Not validated");
                 _;
@@ -1546,5 +1659,29 @@ contract TestContract {
                 func_type.state_mutability()
             );
         }
+    }
+
+    #[test]
+    fn test_variable_assignment() {
+        let source = r#"
+        contract TestContract {
+            struct S {
+                uint256 a;
+                uint[] b;
+                mapping(address => uint256) c;
+            }
+            S[] internal s;
+            function foo(bool b) public {
+                uint256 x = 1;
+                x = 2;
+
+                s[x].c[msg.sender] = 3;
+                s[x].b[0] = 4;
+                s[x].a = x;
+            }
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+        assert_eq!(count_updated_variables!(analysis), 4);
     }
 }
