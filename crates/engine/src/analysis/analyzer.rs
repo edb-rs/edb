@@ -233,6 +233,14 @@ impl SourceAnalysis {
                 );
             }
 
+            // Display accessible variables
+            if !step.read().accessible_variables.is_empty() {
+                println!(
+                    "  Accessible variables: {}",
+                    self.format_updated_variables(&step.read().accessible_variables)
+                );
+            }
+
             // Display updated variables
             if !step.read().updated_variables.is_empty() {
                 println!(
@@ -703,11 +711,13 @@ impl Analyzer {
 
         macro_rules! step {
             ($variant:ident, $stmt:expr, $loc:expr) => {{
+                let variables_in_scope = current_scope.read().variables_recursive();
                 let new_step: StepRef = Step::new(
                     current_function.ufid(),
                     StepVariant::$variant($stmt),
                     $loc,
                     current_scope.clone(),
+                    variables_in_scope.clone(),
                 )
                 .into();
                 self.current_step = Some(new_step.clone());
@@ -846,12 +856,14 @@ impl Analyzer {
 
         // step is the function header
         let current_scope = self.current_scope();
+        let accessible_variables = current_scope.read().variables_recursive().clone();
         let loc = sloc_ldiff(function.src, function.body.as_ref().unwrap().src);
         let new_step: StepRef = Step::new(
             current_function.ufid(),
             StepVariant::FunctionEntry(function.clone()),
             loc,
             current_scope.clone(),
+            accessible_variables,
         )
         .into();
         self.current_step = Some(new_step.clone());
@@ -887,12 +899,14 @@ impl Analyzer {
 
         // step is the modifier header
         let current_scope = self.current_scope();
+        let accessible_variables = current_scope.read().variables_recursive();
         let loc = sloc_ldiff(modifier.src, modifier.body.as_ref().unwrap().src);
         let new_step: StepRef = Step::new(
             current_function.ufid(),
             StepVariant::ModifierEntry(modifier.clone()),
             loc,
             current_scope.clone(),
+            accessible_variables,
         )
         .into();
         self.current_step = Some(new_step.clone());
@@ -1683,5 +1697,35 @@ contract TestContract {
         "#;
         let (_sources, analysis) = compile_and_analyze(source);
         assert_eq!(count_updated_variables!(analysis), 4);
+    }
+
+    #[test]
+    fn test_variable_accessible() {
+        let source = r#"
+        contract TestContract {
+            uint256[] internal s;
+            function foo(bool b) public {
+                uint256 x = 1;
+                x = 2;
+
+                if (b) {
+                    uint y = x;
+                    x = 3;
+                }
+
+                uint z = s[x];
+            }
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        // no step should have `z` in its accessible variables
+        for step in &analysis.steps {
+            assert!(!step
+                .read()
+                .accessible_variables
+                .iter()
+                .any(|v| v.read().declaration().name == "z"));
+        }
     }
 }

@@ -84,6 +84,7 @@ universal_id! {
 pub struct VariableRef {
     inner: Arc<RwLock<Variable>>,
     /* cached readonly fields*/
+    name: OnceCell<String>,
     declaration: OnceCell<VariableDeclaration>,
 }
 
@@ -95,7 +96,11 @@ impl From<Variable> for VariableRef {
 
 impl VariableRef {
     pub fn new(inner: Variable) -> Self {
-        Self { inner: Arc::new(RwLock::new(inner)), declaration: OnceCell::new() }
+        Self {
+            inner: Arc::new(RwLock::new(inner)),
+            declaration: OnceCell::new(),
+            name: OnceCell::new(),
+        }
     }
 
     pub(crate) fn read(&self) -> RwLockReadGuard<'_, Variable> {
@@ -107,7 +112,7 @@ impl VariableRef {
     }
 
     pub fn id(&self) -> UVID {
-        self.read().id()
+        self.inner.read().id()
     }
 
     pub fn declaration(&self) -> &VariableDeclaration {
@@ -320,12 +325,17 @@ impl VariableScopeRef {
         self.variables.get_or_init(|| self.inner.read().variables.clone())
     }
 
+    /// Returns all variables in this scope and its parent scopes recursively. The variables are cached.
     pub fn variables_recursive(&self) -> &Vec<VariableRef> {
         self.variables_recursive.get_or_init(|| {
             let mut variables = self.variables().clone();
-            for child in self.children() {
-                variables.extend(child.variables_recursive().iter().cloned());
-            }
+            variables.extend(
+                self.inner
+                    .read()
+                    .parent
+                    .as_ref()
+                    .map_or(vec![], |parent| parent.variables_recursive().clone()),
+            );
             variables
         })
     }
@@ -348,7 +358,7 @@ impl<'de> Deserialize<'de> for VariableScopeRef {
     {
         // Deserialize as VariableScope and wrap it in VariableScopeRef
         let scope = VariableScope::deserialize(deserializer)?;
-        Ok(VariableScopeRef::new(scope))
+        Ok(Self::new(scope))
     }
 }
 /// Represents the scope and visibility information for a variable.
@@ -386,6 +396,15 @@ impl VariableScope {
     /// Returns the source location of this scope's AST node.
     pub fn src(&self) -> SourceLocation {
         self.node.src()
+    }
+
+    /// Returns all variables in this scope and its parent scopes recursively. The variables are not cached.
+    pub fn variables_recursive(&self) -> Vec<VariableRef> {
+        let mut variables = self.variables.clone();
+        variables.extend(
+            self.parent.clone().map_or(vec![], |parent| parent.variables_recursive().clone()),
+        );
+        variables
     }
 
     /// Returns a human-readable string representation of the scope hierarchy.

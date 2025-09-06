@@ -240,6 +240,8 @@ pub struct Step {
     pub src: SourceLocation,
     /// Function calls made in this step
     pub function_calls: Vec<FunctionCall>,
+    /// Variables accessible in this step (excluding those declared in this step)
+    pub accessible_variables: Vec<VariableRef>,
     /// Variables declared in this step
     pub declared_variables: Vec<VariableRef>,
     /// Variables updated in this step
@@ -270,6 +272,7 @@ impl Step {
         variant: StepVariant,
         src: SourceLocation,
         scope: VariableScopeRef,
+        accessible_variables: Vec<VariableRef>,
     ) -> Self {
         let usid = USID::next();
         let mut this = Self {
@@ -278,6 +281,7 @@ impl Step {
             variant,
             src,
             function_calls: vec![],
+            accessible_variables,
             declared_variables: vec![],
             updated_variables: vec![],
             scope,
