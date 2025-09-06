@@ -174,6 +174,12 @@ EDB/
 └── CONTRIBUTING.md            # Contribution guidelines
 ```
 
+## 📝 TODO
+
+- [ ] Conditional breakpoints
+- [ ] Complex type local variable watcher (user-defined type, etc.)
+- [ ] Customized watcher
+
 ## 🚀 Getting Started
 
 ### Initial Setup
@@ -356,10 +362,10 @@ use eyre::{Result, eyre, Context};
 pub fn risky_operation() -> Result<Value> {
     let data = fetch_data()
         .context("Failed to fetch data")?;
-    
+
     let processed = process_data(data)
         .map_err(|e| eyre!("Processing failed: {}", e))?;
-    
+
     Ok(processed)
 }
 ```
@@ -448,7 +454,7 @@ pub struct MyInspector {
 
 impl Inspector for MyInspector {
     type CTX = Context;
-    
+
     fn step(&mut self, interp: &mut Interpreter, ctx: &mut Self::CTX) {
         // Capture state
     }
@@ -475,7 +481,7 @@ impl Panel for MyPanel {
     fn render(&mut self, f: &mut Frame, area: Rect) {
         // Render logic
     }
-    
+
     fn handle_input(&mut self, key: KeyEvent) -> Result<()> {
         // Input handling
     }
