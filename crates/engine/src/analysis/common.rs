@@ -63,7 +63,9 @@ use std::collections::HashMap;
 use tracing::warn;
 
 use crate::{
-    analysis::{AnalysisError, Analyzer, FunctionRef, SourceAnalysis, StepRef, UFID},
+    analysis::{
+        AnalysisError, Analyzer, ContractRef, FunctionRef, SourceAnalysis, StepRef, UCID, UFID,
+    },
     ASTPruner, Artifact, VariableRef, USID, UVID,
 };
 
@@ -99,6 +101,8 @@ use crate::{
 pub struct AnalysisResult {
     /// Maps source index to their corresponding source analysis results
     pub sources: HashMap<u32, SourceAnalysis>,
+    /// Maps unique contract identifiers to their contract references
+    pub ucid_to_contract: HashMap<UCID, ContractRef>,
     /// Maps unique function identifiers to their function references
     pub ufid_to_function: HashMap<UFID, FunctionRef>,
     /// Maps unique step identifiers to their source step references for quick lookup
@@ -200,17 +204,25 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
         .collect::<Result<Vec<_>, AnalysisError>>()?;
 
     // build lookup tables
+    let mut ucid_to_contract = HashMap::new();
     let mut ufid_to_function = HashMap::new();
     let mut usid_to_step = HashMap::new();
     let mut uvid_to_variable = HashMap::new();
     for result in source_results.iter() {
+        ucid_to_contract.extend(result.contract_table().into_iter());
         ufid_to_function.extend(result.function_table().into_iter());
         usid_to_step.extend(result.step_table().into_iter());
         uvid_to_variable.extend(result.variable_table().into_iter());
     }
     let sources = source_results.into_iter().map(|s| (s.id, s)).collect();
 
-    Ok(AnalysisResult { sources, ufid_to_function, usid_to_step, uvid_to_variable })
+    Ok(AnalysisResult {
+        sources,
+        ucid_to_contract,
+        ufid_to_function,
+        usid_to_step,
+        uvid_to_variable,
+    })
 }
 
 #[cfg(test)]

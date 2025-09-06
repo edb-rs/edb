@@ -46,17 +46,12 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::{
-    macros::universal_id, StepHook, VariableRef, VariableScope, VariableScopeRef, UVID,
+    macros::universal_id, StepHook, VariableRef, VariableScope, VariableScopeRef, UFID, UVID,
 };
 
 universal_id! {
     /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
     USID => 0
-}
-
-universal_id! {
-    /// A Universal Function Identifier (UFID) is a unique identifier for a function in contract execution.
-    UFID => 0
 }
 
 /// A reference-counted pointer to a Step for efficient sharing across multiple contexts.

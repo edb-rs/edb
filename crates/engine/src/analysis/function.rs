@@ -8,7 +8,12 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{StepRef, UFID};
+use crate::analysis::{macros::universal_id, ContractRef, StepRef};
+
+universal_id! {
+    /// A Universal Function Identifier (UFID) is a unique identifier for a function in contract execution.
+    UFID => 0
+}
 
 /// A reference-counted pointer to a Function for efficient sharing across multiple contexts.
 ///
@@ -157,6 +162,8 @@ impl<'de> Deserialize<'de> for FunctionTypeNameRef {
 pub struct Function {
     /// The unique function identifier.
     pub ufid: UFID,
+    /// The contract that this function belongs to.
+    pub contract: Option<ContractRef>,
     /// The function or modifier definition.
     pub definition: FunctionVariant,
     /// List of steps in this function.
@@ -194,23 +201,25 @@ impl FunctionVariant {
     pub fn state_mutability(&self) -> Option<&StateMutability> {
         match self {
             FunctionVariant::Function(definition) => definition.state_mutability.as_ref(),
-            FunctionVariant::Modifier(definition) => None,
+            FunctionVariant::Modifier(_) => None,
         }
     }
 }
 
 impl Function {
-    pub fn new_function(definition: FunctionDefinition) -> Self {
+    pub fn new_function(contract: Option<ContractRef>, definition: FunctionDefinition) -> Self {
         Self {
             ufid: UFID::next(),
+            contract,
             definition: FunctionVariant::Function(definition),
             steps: vec![],
         }
     }
 
-    pub fn new_modifier(definition: ModifierDefinition) -> Self {
+    pub fn new_modifier(contract: ContractRef, definition: ModifierDefinition) -> Self {
         Self {
             ufid: UFID::next(),
+            contract: Some(contract),
             definition: FunctionVariant::Modifier(definition),
             steps: vec![],
         }

@@ -30,9 +30,9 @@ use thiserror::Error;
 use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
-        visitor::VisitorAction, Function, FunctionRef, FunctionTypeNameRef, ScopeNode, Step,
-        StepHook, StepRef, StepVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk,
-        UFID,
+        visitor::VisitorAction, Contract, ContractRef, Function, FunctionRef, FunctionTypeNameRef,
+        ScopeNode, Step, StepHook, StepRef, StepVariant, Variable, VariableScope, VariableScopeRef,
+        Visitor, Walk, UCID, UFID,
     },
     block_or_stmt_src,
     contains_user_defined_type,
@@ -70,6 +70,8 @@ pub struct SourceAnalysis {
     pub steps: Vec<StepRef>,
     /// State variables that should be made public
     pub private_state_variables: Vec<VariableRef>,
+    /// List of all contracts in this file.
+    pub contracts: Vec<ContractRef>,
     /// List of all functions in this file.
     pub functions: Vec<FunctionRef>,
     /// List of all state variables in this file.
@@ -125,6 +127,14 @@ impl SourceAnalysis {
         let mut table = HashMap::default();
         for function in &self.functions {
             table.insert(function.read().ufid, function.clone());
+        }
+        table
+    }
+
+    pub fn contract_table(&self) -> HashMap<UCID, ContractRef> {
+        let mut table = HashMap::default();
+        for contract in &self.contracts {
+            table.insert(contract.read().ucid, contract.clone());
         }
         table
     }
@@ -433,6 +443,9 @@ pub struct Analyzer {
     finished_steps: Vec<StepRef>,
     current_step: Option<StepRef>,
     current_function: Option<FunctionRef>,
+    current_contract: Option<ContractRef>,
+    /// List of all contracts in this file.
+    contracts: Vec<ContractRef>,
     /// List of all functions in this file.
     functions: Vec<FunctionRef>,
     /// A mapping from the `VariableDeclaration` AST node ID to the variable reference.
@@ -498,6 +511,7 @@ impl Analyzer {
             unit: source_unit.clone(),
             global_scope,
             steps,
+            contracts: self.contracts,
             private_state_variables: self.private_state_variables,
             state_variables: self.state_variables,
             functions,
@@ -651,6 +665,23 @@ impl Analyzer {
     }
 }
 
+/* Contract analysis utils */
+impl Analyzer {
+    fn enter_new_contract(&mut self, contract: &ContractDefinition) -> eyre::Result<VisitorAction> {
+        assert!(self.current_contract.is_none(), "Contract cannot be nested");
+        let new_contract: ContractRef = Contract::new(contract.clone()).into();
+        self.current_contract = Some(new_contract.clone());
+        Ok(VisitorAction::Continue)
+    }
+
+    fn exit_current_contract(&mut self) -> eyre::Result<()> {
+        assert!(self.current_contract.is_some(), "current contract should be set");
+        let contract = self.current_contract.take().unwrap();
+        self.contracts.push(contract);
+        Ok(())
+    }
+}
+
 /* Function analysis utils */
 impl Analyzer {
     fn current_function(&self) -> FunctionRef {
@@ -659,7 +690,8 @@ impl Analyzer {
 
     fn enter_new_function(&mut self, function: &FunctionDefinition) -> eyre::Result<VisitorAction> {
         assert!(self.current_function.is_none(), "Function cannot be nested");
-        let new_func: FunctionRef = Function::new_function(function.clone()).into();
+        let new_func: FunctionRef =
+            Function::new_function(self.current_contract.clone(), function.clone()).into();
         self.check_function_visibility_and_mutability(&new_func)?;
         self.current_function = Some(new_func.clone());
         Ok(VisitorAction::Continue)
@@ -674,8 +706,11 @@ impl Analyzer {
 
     fn enter_new_modifier(&mut self, modifier: &ModifierDefinition) -> eyre::Result<VisitorAction> {
         assert!(self.current_function.is_none(), "Function cannot be nested");
-        let new_func: FunctionRef = Function::new_modifier(modifier.clone()).into();
-        self.current_function = Some(new_func.clone());
+        let current_contract =
+            self.current_contract.as_ref().expect("current contract should be set");
+        let new_func: FunctionRef =
+            Function::new_modifier(current_contract.clone(), modifier.clone()).into();
+        self.current_function = Some(new_func);
         Ok(VisitorAction::Continue)
     }
 
@@ -1064,6 +1099,9 @@ impl Visitor for Analyzer {
         &mut self,
         _definition: &ContractDefinition,
     ) -> eyre::Result<VisitorAction> {
+        // enter a new contract
+        self.enter_new_contract(_definition)?;
+
         // enter a contract scope
         self.enter_new_scope(ScopeNode::ContractDefinition(_definition.clone()))?;
         Ok(VisitorAction::Continue)
@@ -1075,6 +1113,9 @@ impl Visitor for Analyzer {
     ) -> eyre::Result<()> {
         // exit the contract scope
         self.exit_current_scope(_definition.src)?;
+
+        // exit the contract
+        self.exit_current_contract()?;
         Ok(())
     }
 
@@ -1727,5 +1768,31 @@ contract TestContract {
                 .iter()
                 .any(|v| v.read().declaration().name == "z"));
         }
+    }
+
+    #[test]
+    fn test_contract_collection() {
+        let source = r#"
+        function foo() {
+        }
+        contract TestContract {
+            function bar() public {
+            }
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let foo_func = analysis
+            .functions
+            .iter()
+            .find(|c| c.read().definition.name() == "foo")
+            .expect("foo function should be found");
+        let bar_func = analysis
+            .functions
+            .iter()
+            .find(|c| c.read().definition.name() == "bar")
+            .expect("bar function should be found");
+        assert!(foo_func.read().contract.is_none());
+        assert!(bar_func.read().contract.as_ref().is_some_and(|c| c.name() == "TestContract"));
     }
 }

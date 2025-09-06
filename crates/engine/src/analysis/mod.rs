@@ -22,6 +22,9 @@ pub use analyzer::*;
 mod common;
 pub use common::*;
 
+mod contract;
+pub use contract::*;
+
 mod function;
 pub use function::*;
 
