@@ -1,6 +1,8 @@
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, TypeName, Visibility,
+    ast::SourceLocation, Block, BlockOrStatement, StateMutability, Statement, TypeName, Visibility,
 };
+
+use crate::analysis::stmt_src;
 
 /// Get the source string at the given location.
 ///
@@ -192,6 +194,41 @@ pub fn find_next_index_of_block_or_statement(
         BlockOrStatement::Statement(statement) => find_next_index_of_statement(source, statement),
         BlockOrStatement::Block(block) => find_next_index_of_source_location(&block.src),
     }
+}
+
+/// Find the index of the first statement in the `BlockOrStatement`.
+///
+/// # Arguments
+///
+/// * `block_or_statement` - The `BlockOrStatement`
+///
+/// # Returns
+///
+/// The index of the first statement in the `BlockOrStatement`.
+pub fn find_index_of_first_statement_in_block_or_statement(
+    block_or_statement: &BlockOrStatement,
+) -> Option<usize> {
+    match block_or_statement {
+        BlockOrStatement::Statement(statement) => stmt_src(statement).start,
+        BlockOrStatement::Block(block) => find_index_of_first_statement_in_block(block),
+    }
+}
+
+/// Find the index of the first statement in the `Block`.
+///
+/// # Arguments
+///
+/// * `block` - The `Block`
+///
+/// # Returns
+///
+/// The index of the first statement in the `Block`.
+pub fn find_index_of_first_statement_in_block(block: &Block) -> Option<usize> {
+    block.statements.first().map_or(
+        // if the block has no statements, the index of the first statement is the start of the block '{' plus 1
+        block.src.start.map(|s| s + 1),
+        |stmt| stmt_src(stmt).start,
+    )
 }
 
 /// Find the index of the next character immediately after the `Statement`.

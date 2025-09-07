@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, fmt::Display, os::macos::raw::stat};
 
 use crate::{
     analysis::{stmt_src, SourceAnalysis, VariableRef},
+    contains_function_type, contains_user_defined_type, find_index_of_first_statement_in_block,
+    find_index_of_first_statement_in_block_or_statement, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
     mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str, USID,
@@ -264,7 +266,8 @@ impl SourceModifications {
         // Collect the before step hook modifications for each step.
         self.collect_before_step_hook_modifications(source, analysis)?;
 
-        // TODO: Collect the variable update hook modifications for each step.
+        // Collect the variable update hook modifications for each step.
+        self.collect_variable_update_hook_modifications(source, analysis)?;
 
         Ok(())
     }
@@ -522,7 +525,8 @@ impl SourceModifications {
                         continue;
                     };
                     // the first char of function body is the '{', so we insert after that.
-                    body.src.start.expect("function body start location not found") + 1
+                    find_index_of_first_statement_in_block(&body)
+                        .expect("function body start location not found")
                 }
                 crate::analysis::StepVariant::ModifierEntry(modifier_definition) => {
                     // the before step hook should be instrumented before the first statement of the modifier
@@ -530,7 +534,8 @@ impl SourceModifications {
                         // skip the step if the modifier has no body
                         continue;
                     };
-                    body.src.start.expect("modifier body start location not found") + 1
+                    find_index_of_first_statement_in_block(&body)
+                        .expect("modifier body start location not found")
                 }
                 crate::analysis::StepVariant::Statement(statement) => {
                     // the before step hook should be instrumented before the statement
@@ -573,6 +578,144 @@ impl SourceModifications {
             self.add_modification(instrument_action.into());
         }
 
+        Ok(())
+    }
+
+    fn collect_variable_update_hook_modifications(
+        &mut self,
+        source: &str,
+        analysis: &SourceAnalysis,
+    ) -> Result<()> {
+        let source_id = self.source_id;
+        for step in &analysis.steps {
+            let updated_variables = &step.read().updated_variables;
+            let locs: Vec<usize> = match step.variant() {
+                crate::analysis::StepVariant::FunctionEntry(function_definition) => {
+                    // the variable update hook should be instrumented before the first statement of the function
+                    let Some(body) = &function_definition.body else {
+                        // skip the step if the function has no body
+                        continue;
+                    };
+                    // the first char of function body is the '{', so we insert after that.
+                    vec![body.src.start.expect("function body start location not found") + 1]
+                }
+                crate::analysis::StepVariant::ModifierEntry(modifier_definition) => {
+                    // the variable update hook should be instrumented before the first statement of the modifier
+                    let Some(body) = &modifier_definition.body else {
+                        // skip the step if the modifier has no body
+                        continue;
+                    };
+                    vec![body.src.start.expect("modifier body start location not found") + 1]
+                }
+                crate::analysis::StepVariant::Statement(statement) => {
+                    match statement {
+                        Statement::Block(_)
+                        | Statement::UncheckedBlock(_)
+                        | Statement::DoWhileStatement(_)
+                        | Statement::ForStatement(_)
+                        | Statement::IfStatement(_)
+                        | Statement::TryStatement(_)
+                        | Statement::WhileStatement(_) => {
+                            unreachable!("should not be a statement step")
+                        }
+                        Statement::Break(_)
+                        | Statement::Continue(_)
+                        | Statement::PlaceholderStatement(_)
+                        | Statement::Return(_)
+                        | Statement::RevertStatement(_) => {
+                            // these statement does not have any variable update, so we skip it
+                            vec![]
+                        }
+                        Statement::EmitStatement(emit_statement) => {
+                            // the variable update hook should be instrumented after the emit statement
+                            find_next_index_of_source_location(&emit_statement.src)
+                                .map(|loc| vec![loc])
+                                .unwrap_or_default()
+                        }
+                        Statement::ExpressionStatement(expression_statement) => {
+                            // the variable update hook should be instrumented after the expression statement
+                            find_next_index_of_source_location(&expression_statement.src)
+                                .map(|loc| vec![loc])
+                                .unwrap_or_default()
+                        }
+                        Statement::InlineAssembly(inline_assembly) => {
+                            // the variable update hook should be instrumented after the inline assembly statement
+                            find_next_index_of_source_location(&inline_assembly.src)
+                                .map(|loc| vec![loc])
+                                .unwrap_or_default()
+                        }
+                        Statement::VariableDeclarationStatement(variable_declaration_statement) => {
+                            // the variable update hook should be instrumented after the variable declaration statement
+                            find_next_index_of_source_location(&variable_declaration_statement.src)
+                                .map(|loc| vec![loc])
+                                .unwrap_or_default()
+                        }
+                    }
+                }
+                crate::analysis::StepVariant::Statements(statements) => {
+                    // the variable update hook should be instrumented after the statments
+                    statements
+                        .last()
+                        .and_then(|stmt| {
+                            find_next_index_of_statement(source, stmt).map(|loc| vec![loc])
+                        })
+                        .unwrap_or_default()
+                }
+                crate::analysis::StepVariant::IfCondition(if_statement) => {
+                    // the variable update hook should be instrumented before the first statement of both the true and false bodies
+                    let mut locs = find_index_of_first_statement_in_block_or_statement(
+                        &if_statement.true_body,
+                    )
+                    .map(|loc| vec![loc])
+                    .unwrap_or_default();
+                    if let Some(false_loc) = if_statement.false_body.as_ref().and_then(|body| {
+                        find_index_of_first_statement_in_block_or_statement(body)
+                            .map(|loc| vec![loc])
+                    }) {
+                        locs.extend(false_loc.into_iter());
+                    }
+                    locs
+                }
+                crate::analysis::StepVariant::ForLoop(for_statement) => {
+                    // the variable update hook should be instrumented before the first statement of the for statement
+                    find_index_of_first_statement_in_block_or_statement(&for_statement.body)
+                        .map(|loc| vec![loc])
+                        .unwrap_or_default()
+                }
+                crate::analysis::StepVariant::WhileLoop(while_statement) => {
+                    // the variable update hook should be instrumented before the first statement of the while statement
+                    find_index_of_first_statement_in_block_or_statement(&while_statement.body)
+                        .map(|loc| vec![loc])
+                        .unwrap_or_default()
+                }
+                crate::analysis::StepVariant::DoWhileLoop(do_while_statement) => {
+                    // the variable update hook should be instrumented before the do-while statement
+                    find_next_index_of_source_location(&do_while_statement.src)
+                        .map(|loc| vec![loc])
+                        .unwrap_or_default()
+                }
+                crate::analysis::StepVariant::Try(try_statement) => {
+                    // the variable update hook should be instrumented before the first statement in all catch blocks
+                    try_statement
+                        .clauses
+                        .iter()
+                        .filter_map(|clause| find_index_of_first_statement_in_block(&clause.block))
+                        .collect()
+                }
+            };
+            for loc in locs {
+                for updated_variable in updated_variables {
+                    let uvid = updated_variable.id();
+                    let instrument_action = InstrumentAction {
+                        source_id,
+                        loc,
+                        content: InstrumentContent::VariableUpdateHook(uvid),
+                        priority: NORMAL_PRIORITY,
+                    };
+                    self.add_modification(instrument_action.into());
+                }
+            }
+        }
         Ok(())
     }
 }
