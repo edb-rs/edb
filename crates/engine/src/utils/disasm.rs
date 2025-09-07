@@ -26,7 +26,7 @@
 //! - Proper instruction boundary detection
 //! - Invalid opcodes identification
 
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, U256};
 use revm::bytecode::opcode::OpCode;
 
 /// A single disassembled instruction with its associated data
@@ -186,7 +186,7 @@ pub fn disassemble(bytecode: &Bytes) -> DisassemblyResult {
 /// * `instruction` - The PUSH instruction to extract value from
 ///
 /// # Returns
-/// The immediate value as a u128, or 0 if not a PUSH instruction
+/// The immediate value as a U256, or None if not a PUSH instruction
 ///
 /// # Examples
 /// ```rust
@@ -200,16 +200,16 @@ pub fn disassemble(bytecode: &Bytes) -> DisassemblyResult {
 /// );
 /// assert_eq!(extract_push_value(&push_inst), 0x42);
 /// ```
-pub fn extract_push_value(instruction: &DisassemblyInstruction) -> u128 {
+pub fn extract_push_value(instruction: &DisassemblyInstruction) -> Option<U256> {
     if !instruction.is_push() || instruction.push_data.is_empty() {
-        return 0;
+        return None;
     }
 
-    let mut value = 0u128;
+    let mut value = U256::ZERO;
     for &byte in &instruction.push_data {
-        value = value.wrapping_shl(8).wrapping_add(byte as u128);
+        value = value.wrapping_shl(8).wrapping_add(U256::from(byte));
     }
-    value
+    Some(value)
 }
 
 /// Format a disassembly instruction as a human-readable string
@@ -314,21 +314,21 @@ mod tests {
             unsafe { OpCode::new_unchecked(0x60) },
             vec![0x42],
         );
-        assert_eq!(extract_push_value(&push1), 0x42);
+        assert_eq!(extract_push_value(&push1), Some(U256::from(0x42)));
 
         let push2 = DisassemblyInstruction::with_push_data(
             0,
             unsafe { OpCode::new_unchecked(0x61) },
             vec![0x12, 0x34],
         );
-        assert_eq!(extract_push_value(&push2), 0x1234);
+        assert_eq!(extract_push_value(&push2), Some(U256::from(0x1234)));
 
         let push4 = DisassemblyInstruction::with_push_data(
             0,
             unsafe { OpCode::new_unchecked(0x63) },
             vec![0x12, 0x34, 0x56, 0x78],
         );
-        assert_eq!(extract_push_value(&push4), 0x12345678);
+        assert_eq!(extract_push_value(&push4), Some(U256::from(0x12345678)));
     }
 
     #[test]

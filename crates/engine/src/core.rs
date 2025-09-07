@@ -25,7 +25,10 @@
 use alloy_primitives::{Address, Bytes, TxHash};
 use eyre::Result;
 use foundry_block_explorers::Client;
-use foundry_compilers::{artifacts::Contract, solc::Solc};
+use foundry_compilers::{
+    artifacts::{Contract, SolcInput},
+    solc::Solc,
+};
 use indicatif::{ProgressBar, ProgressStyle};
 use revm::{
     context::{
@@ -177,7 +180,8 @@ impl Engine {
 
         // Step 6: Replace original bytecode with instrumented versions
         info!("Tweaking bytecode");
-        let contracts_in_tx = self.tweak_bytecode(&mut ctx, &recompiled_artifacts, tx_hash).await?;
+        let contracts_in_tx =
+            self.tweak_bytecode(&mut ctx, &artifacts, &recompiled_artifacts, tx_hash).await?;
 
         // Step 7: Re-execute the transaction with snapshot collection
         info!("Re-executing transaction with snapshot collection");
@@ -475,6 +479,7 @@ impl Engine {
         &self,
         ctx: &mut EdbContext<DB>,
         artifacts: &HashMap<Address, Artifact>,
+        recompiled_artifacts: &HashMap<Address, Artifact>,
         tx_hash: TxHash,
     ) -> Result<Vec<Address>>
     where
@@ -487,7 +492,7 @@ impl Engine {
 
         let mut contracts_in_tx = Vec::new();
 
-        for (address, artifact) in artifacts {
+        for (address, recompiled_artifact) in recompiled_artifacts {
             let creation_tx_hash = tweaker.get_creation_tx(address).await?;
             if creation_tx_hash == tx_hash {
                 debug!("Skip tweaking contract {}, since it was created by the transaction under investigation", address);
@@ -495,9 +500,13 @@ impl Engine {
                 continue;
             }
 
-            tweaker.tweak(address, artifact, self.quick).await.map_err(|e| {
-                eyre::eyre!("Failed to tweak bytecode for contract {}: {}", address, e)
-            })?;
+            let artifact = artifacts
+                .get(address)
+                .ok_or_else(|| eyre::eyre!("No original artifact found for address {}", address))?;
+
+            tweaker.tweak(address, artifact, recompiled_artifact, self.quick).await.map_err(
+                |e| eyre::eyre!("Failed to tweak bytecode for contract {}: {}", address, e),
+            )?;
         }
 
         Ok(contracts_in_tx)
@@ -749,8 +758,8 @@ fn format_compiler_errors(
 /// Dump source code to a temporary directory for debugging
 fn dump_source_for_debugging(
     address: &Address,
-    original_input: &foundry_compilers::artifacts::SolcInput,
-    instrumented_input: &foundry_compilers::artifacts::SolcInput,
+    original_input: &SolcInput,
+    instrumented_input: &SolcInput,
 ) -> Result<(PathBuf, PathBuf)> {
     use std::io::Write;
 

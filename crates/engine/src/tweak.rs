@@ -32,7 +32,7 @@ use revm::{
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
 
-use crate::{next_etherscan_api_key, Artifact, TweakInspectorBuilder};
+use crate::{next_etherscan_api_key, Artifact, TweakInspector};
 
 /// A utility for modifying deployed contract bytecode by replaying their creation transactions
 /// with replacement bytecode from compiled artifacts.
@@ -82,8 +82,15 @@ where
     /// # Returns
     ///
     /// Returns `Ok(())` if the bytecode was successfully replaced, or an error if the operation failed.
-    pub async fn tweak(&mut self, addr: &Address, artifact: &Artifact, quick: bool) -> Result<()> {
-        let tweaked_code = self.get_tweaked_code(addr, artifact, quick).await?;
+    pub async fn tweak(
+        &mut self,
+        addr: &Address,
+        artifact: &Artifact,
+        recompiled_artifact: &Artifact,
+        quick: bool,
+    ) -> Result<()> {
+        let tweaked_code =
+            self.get_tweaked_code(addr, artifact, recompiled_artifact, quick).await?;
 
         let db = self.ctx.db_mut();
 
@@ -103,6 +110,7 @@ where
         &self,
         addr: &Address,
         artifact: &Artifact,
+        recompiled_artifact: &Artifact,
         quick: bool,
     ) -> Result<Bytes> {
         let creation_tx_hash = self.get_creation_tx(addr).await?;
@@ -113,22 +121,15 @@ where
         relax_context_constraints(&mut replay_ctx, &mut creation_tx_env);
 
         // Get init code
-        let init_code = artifact
-            .contract()
-            .ok_or(eyre::eyre!("Failed to get contract"))?
-            .get_bytecode_bytes()
-            .ok_or(eyre::eyre!("Failed to get bytecode for contract {}", artifact.contract_name()))?
-            .as_ref()
-            .clone();
+        let contract = artifact.contract().ok_or(eyre::eyre!("Failed to get contract"))?;
 
-        let mut inspector = TweakInspectorBuilder::new()
-            .target_address(*addr)
-            .init_code(init_code)
-            .constructor_args(artifact.constructor_arguments().clone())
-            .build()
-            .map_err(|e| {
-                eyre::eyre!("Failed to build tweak inspector for address {}: {}", addr, e)
-            })?;
+        let recompiled_contract =
+            recompiled_artifact.contract().ok_or(eyre::eyre!("Failed to get contract"))?;
+
+        let constructor_args = recompiled_artifact.constructor_arguments();
+
+        let mut inspector =
+            TweakInspector::new(*addr, contract, recompiled_contract, constructor_args);
 
         let mut evm = replay_ctx.build_mainnet_with_inspector(&mut inspector);
 

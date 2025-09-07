@@ -398,7 +398,6 @@ impl SourceModifications {
             let function_type_str =
                 source_string_at_location(source_id, source, &function_type.src());
 
-            println!("MDZZ {}", function_type_str);
             let mutability = function_type.state_mutability();
             if matches!(mutability, StateMutability::Pure | StateMutability::View) {
                 // Remove the existing visibility of the function type
