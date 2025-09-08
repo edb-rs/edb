@@ -30,7 +30,7 @@ use tracing::{debug, info, warn};
 /// These are free public endpoints from chainlist.org, sorted by latency
 pub const DEFAULT_MAINNET_RPCS: &[&str] = &[
     "https://rpc.eth.gateway.fm",
-    "https://ethereum-rpc.publicnode.com",
+    // "https://ethereum-rpc.publicnode.com",
     "https://mainnet.gateway.tenderly.co",
     // "https://rpc.flashbots.net/fast", // disable due to flashbots' temporary issues
     // "https://rpc.flashbots.net", // disable due to flashbots' temporary issues
