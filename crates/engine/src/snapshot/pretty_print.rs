@@ -209,7 +209,7 @@ where
 
         // Show address information
         let addresses: std::collections::HashSet<_> =
-            snapshots.iter().map(|s| s.address()).collect();
+            snapshots.iter().map(|s| s.bytecode_address()).collect();
         if addresses.len() == 1 {
             println!("          └─ Address: \x1b[36m{:?}\x1b[0m", addresses.iter().next().unwrap());
         } else if !addresses.is_empty() {

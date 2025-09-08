@@ -26,13 +26,16 @@
 //! making it more efficient for tracking specific execution states.
 
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::{types::ExecutionFrameId, EdbContext};
+use edb_common::{
+    types::{ExecutionFrameId, Trace},
+    EdbContext,
+};
 use eyre::Result;
 use foundry_compilers::{artifacts::Contract, Artifact};
 use revm::{
     context::{ContextTr, CreateScheme, JournalTr, LocalContextTr},
     database::CacheDB,
-    interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome},
+    interpreter::{CallInput, CallInputs, CallOutcome, CreateInputs, CreateOutcome},
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use serde::{Deserialize, Serialize};
@@ -59,9 +62,10 @@ where
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
-    /// Contract address that triggered the hook
-    #[deprecated(note = "Use `trace` to get the address")]
-    pub address: Address,
+    /// Target address that triggered the hook
+    pub target_address: Address,
+    /// Bytecode address that the current snapshot is running
+    pub bytecode_address: Address,
     /// Database state at the hook point
     pub database: Arc<CacheDB<DB>>,
     /// User-defined snapshot ID from call data
@@ -191,12 +195,15 @@ where
 
 /// Inspector that records hook-triggered snapshots
 #[derive(Debug)]
-pub struct HookSnapshotInspector<DB>
+pub struct HookSnapshotInspector<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
+    /// The trace of the current tx
+    trace: &'a Trace,
+
     /// Collection of hook snapshots
     pub snapshots: HookSnapshots<DB>,
 
@@ -210,15 +217,16 @@ where
     creation_hooks: Vec<(Bytes, Bytes, Bytes)>,
 }
 
-impl<DB> HookSnapshotInspector<DB>
+impl<'a, DB> HookSnapshotInspector<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
     /// Create a new hook snapshot inspector
-    pub fn new() -> Self {
+    pub fn new(trace: &'a Trace) -> Self {
         Self {
+            trace,
             snapshots: HookSnapshots::default(),
             frame_stack: Vec::new(),
             current_trace_id: 0,
@@ -270,8 +278,8 @@ where
     }
 
     /// Stop tracking current execution frame and increment re-entry count
-    fn pop_frame(&mut self) {
-        if let Some(_frame_id) = self.frame_stack.pop() {
+    fn pop_frame(&mut self) -> Option<ExecutionFrameId> {
+        if let Some(frame_id) = self.frame_stack.pop() {
             // Increment re-entry count for parent frame if it exists
             if let Some(parent_frame_id) = self.frame_stack.last_mut() {
                 parent_frame_id.increment_re_entry();
@@ -281,6 +289,10 @@ where
             if let Some(current_frame_id) = self.current_frame_id() {
                 self.snapshots.add_frame_placeholder(current_frame_id);
             }
+
+            Some(frame_id)
+        } else {
+            None
         }
     }
 
@@ -291,17 +303,14 @@ where
             return;
         }
 
-        // Check if we should record for the caller address
-        let caller_address = inputs.caller;
-
         // Extract usid from call data (assume it's a single U256)
         let input_data = match &inputs.input {
-            revm::interpreter::CallInput::SharedBuffer(range) => ctx
+            CallInput::SharedBuffer(range) => ctx
                 .local()
                 .shared_memory_buffer_slice(range.clone())
                 .map(|slice| slice.to_vec())
                 .unwrap_or_else(|| Vec::new()),
-            revm::interpreter::CallInput::Bytes(bytes) => bytes.to_vec().clone(),
+            CallInput::Bytes(bytes) => bytes.to_vec().clone(),
         };
         let usid_opt = if input_data.len() >= 32 {
             U256::from_be_slice(&input_data[..32]).try_into().ok()
@@ -322,13 +331,21 @@ where
         let mut snap = ctx.db().clone();
         snap.commit(changes);
 
-        // Create hook snapshot
-        let hook_snapshot =
-            HookSnapshot { address: caller_address, database: Arc::new(snap), usid };
-
         // Update the last frame with this snapshot
         if let Some(current_frame_id) = self.current_frame_id() {
-            self.snapshots.update_last_frame_with_snapshot(current_frame_id, hook_snapshot);
+            if let Some(entry) = self.trace.get(current_frame_id.trace_entry_id()) {
+                // Create hook snapshot
+                let hook_snapshot = HookSnapshot {
+                    target_address: entry.target,
+                    bytecode_address: entry.code_address,
+                    database: Arc::new(snap),
+                    usid,
+                };
+
+                self.snapshots.update_last_frame_with_snapshot(current_frame_id, hook_snapshot);
+            } else {
+                error!("No trace entry found for frame {}", current_frame_id);
+            }
         } else {
             error!("No current frame to update with hook snapshot");
         }
@@ -393,7 +410,7 @@ where
     }
 }
 
-impl<DB> Inspector<EdbContext<DB>> for HookSnapshotInspector<DB>
+impl<'a, DB> Inspector<EdbContext<DB>> for HookSnapshotInspector<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
@@ -420,11 +437,22 @@ where
         &mut self,
         _context: &mut EdbContext<DB>,
         inputs: &CallInputs,
-        _outcome: &mut CallOutcome,
+        outcome: &mut CallOutcome,
     ) {
         // Only pop frame for non-hook calls
         if inputs.target_address != HOOK_TRIGGER_ADDRESS {
-            self.pop_frame();
+            let Some(frame_id) = self.pop_frame() else { return };
+
+            let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
+
+            println!("MDZZ we are here 1!");
+            if entry.result != Some(outcome.into()) {
+                // Mismatched call outcome
+                error!(
+                    "Call outcome mismatch at frame {}: expected {:?}, got {:?}",
+                    frame_id, entry.result, outcome
+                );
+            }
         }
     }
 
@@ -446,10 +474,23 @@ where
         &mut self,
         _context: &mut EdbContext<DB>,
         _inputs: &CreateInputs,
-        _outcome: &mut CreateOutcome,
+        outcome: &mut CreateOutcome,
     ) {
         // Stop tracking current execution frame
-        self.pop_frame();
+        let Some(frame_id) = self.pop_frame() else { return };
+
+        let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
+        println!("MDZZ we are here 2!");
+
+        // For creation, we only check the return status, not the actually bytecode, since we
+        // will instrument the code
+        if entry.result.as_ref().map(|r| r.result()) != Some(outcome.result.result) {
+            // Mismatch create outcome
+            error!(
+                "Create outcome mismatch at frame {}: expected {:?}, got {:?}",
+                frame_id, entry.result, outcome
+            );
+        }
     }
 }
 
@@ -534,7 +575,7 @@ where
                 let hook_count = hooks.len();
                 #[allow(deprecated)]
                 let addresses: std::collections::HashSet<_> =
-                    hooks.iter().map(|h| h.address).collect();
+                    hooks.iter().map(|h| h.bytecode_address).collect();
 
                 println!(
                     "\n  \x1b[32m[{:3}] Frame {}\x1b[0m (trace.{}, re-entry {})",

@@ -31,6 +31,7 @@
 mod analysis;
 mod pretty_print;
 
+use alloy_primitives::Address;
 pub use analysis::SnapshotAnalysis;
 
 use std::{
@@ -154,11 +155,18 @@ where
     }
 
     /// Get the contract address associated with this snapshot
-    #[deprecated]
-    pub fn address(&self) -> alloy_primitives::Address {
+    pub fn bytecode_address(&self) -> Address {
         match &self.detail {
-            SnapshotDetail::Opcode(snapshot) => snapshot.address,
-            SnapshotDetail::Hook(snapshot) => snapshot.address,
+            SnapshotDetail::Opcode(snapshot) => snapshot.bytecode_address,
+            SnapshotDetail::Hook(snapshot) => snapshot.bytecode_address,
+        }
+    }
+
+    /// Get the target address associated with this snapshot
+    pub fn target_address(&self) -> Address {
+        match &self.detail {
+            SnapshotDetail::Opcode(snapshot) => snapshot.target_address,
+            SnapshotDetail::Hook(snapshot) => snapshot.target_address,
         }
     }
 

@@ -62,9 +62,10 @@ where
 {
     /// Program counter (instruction offset)
     pub pc: usize,
-    /// Target address being executed (storage)
-    #[deprecated(note = "Use `trace` to get the address")]
-    pub address: Address,
+    /// Target address that triggered the hook
+    pub target_address: Address,
+    /// Bytecode address that the current snapshot is running
+    pub bytecode_address: Address,
     /// Current opcode
     pub opcode: u8,
     /// Memory state (shared via Arc when unchanged)
@@ -294,9 +295,11 @@ where
         };
 
         // Create snapshot (stack is always cloned as it changes frequently)
+        let entry = self.trace.get(frame_id.trace_entry_id());
         let snapshot = OpcodeSnapshot {
             pc: interp.bytecode.pc(),
-            address,
+            bytecode_address: entry.map(|t| t.code_address).unwrap_or(address),
+            target_address: entry.map(|t| t.target).unwrap_or(address),
             opcode: opcode.get(),
             memory: memory.clone(),
             stack: interp.stack.data().clone(),
@@ -592,7 +595,7 @@ where
         let opcode_str = format!("{}", opcode.as_str());
 
         #[allow(deprecated)]
-        let addr_short = format!("{:?}", snapshot.address);
+        let addr_short = format!("{:?}", snapshot.bytecode_address);
         let addr_display = if addr_short.len() > 10 {
             format!("{}...{}", &addr_short[0..6], &addr_short[addr_short.len() - 4..])
         } else {

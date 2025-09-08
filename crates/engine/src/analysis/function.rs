@@ -25,6 +25,7 @@ pub struct FunctionRef {
     inner: Arc<RwLock<Function>>,
     /* cached readonly fields*/
     ufid: OnceCell<UFID>,
+    contract: OnceCell<Option<ContractRef>>,
 }
 
 impl From<Function> for FunctionRef {
@@ -36,7 +37,11 @@ impl From<Function> for FunctionRef {
 impl FunctionRef {
     /// Creates a new FunctionRef from a Function.
     pub fn new(inner: Function) -> Self {
-        Self { inner: Arc::new(RwLock::new(inner)), ufid: OnceCell::new() }
+        Self {
+            inner: Arc::new(RwLock::new(inner)),
+            ufid: OnceCell::new(),
+            contract: OnceCell::new(),
+        }
     }
 }
 
@@ -53,6 +58,10 @@ impl FunctionRef {
 impl FunctionRef {
     pub fn ufid(&self) -> UFID {
         *self.ufid.get_or_init(|| self.inner.read().ufid)
+    }
+
+    pub fn contract(&self) -> Option<ContractRef> {
+        self.contract.get_or_init(|| self.inner.read().contract.clone()).clone()
     }
 
     pub fn name(&self) -> String {
