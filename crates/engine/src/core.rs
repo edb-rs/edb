@@ -47,7 +47,7 @@ use std::{
 use tracing::{debug, error, info, warn};
 
 use edb_common::{
-    relax_context_constraints, CachePath, EdbCachePath, EdbContext, ForkResult,
+    relax_context_constraints, types::Trace, CachePath, EdbCachePath, EdbContext, ForkResult,
     DEFAULT_ETHERSCAN_CACHE_TTL,
 };
 
@@ -176,6 +176,7 @@ impl Engine {
             ctx.clone(),
             tx.clone(),
             artifacts.keys().into_iter().cloned().collect(),
+            &replay_result.execution_trace,
         )?;
 
         // Step 6: Replace original bytecode with instrumented versions
@@ -383,7 +384,8 @@ impl Engine {
         &self,
         ctx: EdbContext<DB>,
         tx: TxEnv,
-        touched_addresses: HashSet<Address>,
+        excluded_addresses: HashSet<Address>,
+        trace: &Trace,
     ) -> Result<OpcodeSnapshots<DB>>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -392,8 +394,8 @@ impl Engine {
     {
         info!("Collecting opcode-level step execution results");
 
-        let mut inspector = OpcodeSnapshotInspector::new(&ctx);
-        inspector.with_excluded_addresses(touched_addresses);
+        let mut inspector = OpcodeSnapshotInspector::new(&ctx, trace);
+        inspector.with_excluded_addresses(excluded_addresses);
         let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
 
         evm.inspect_one_tx(tx)

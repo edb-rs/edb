@@ -2001,6 +2001,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types",
  "alloy-transport-http",
+ "auto_impl",
  "chrono",
  "derive_more",
  "dirs-next",

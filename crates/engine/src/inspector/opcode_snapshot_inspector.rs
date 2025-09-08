@@ -28,7 +28,10 @@
 //! reducing memory usage for large execution traces.
 
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::{types::ExecutionFrameId, EdbContext, OpcodeTr};
+use edb_common::{
+    types::{ExecutionFrameId, Trace},
+    EdbContext, OpcodeTr,
+};
 use revm::{
     bytecode::opcode::OpCode,
     context::{ContextTr, LocalContextTr},
@@ -47,6 +50,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
+use tracing::error;
 
 /// Single opcode execution snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,12 +136,15 @@ struct FrameState {
 
 /// Inspector that records detailed opcode execution snapshots
 #[derive(Debug)]
-pub struct OpcodeSnapshotInspector<DB>
+pub struct OpcodeSnapshotInspector<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
+    /// The trace of the current tx
+    trace: &'a Trace,
+
     /// Map from execution frame ID to list of snapshots
     pub snapshots: OpcodeSnapshots<DB>,
 
@@ -163,15 +170,16 @@ where
     last_opcode: Option<OpCode>,
 }
 
-impl<DB> OpcodeSnapshotInspector<DB>
+impl<'a, DB> OpcodeSnapshotInspector<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
     /// Create a new opcode snapshot inspector
-    pub fn new(ctx: &EdbContext<DB>) -> Self {
+    pub fn new(ctx: &EdbContext<DB>, trace: &'a Trace) -> Self {
         Self {
+            trace,
             snapshots: OpcodeSnapshots::<DB>::default(),
             excluded_addresses: HashSet::new(),
             frame_stack: Vec::new(),
@@ -317,7 +325,7 @@ where
     }
 
     /// Stop tracking current execution frame and increment re-entry count
-    fn pop_frame(&mut self) {
+    fn pop_frame(&mut self) -> Option<ExecutionFrameId> {
         if let Some(frame_id) = self.frame_stack.pop() {
             // Clean up frame state
             self.frame_states.remove(&frame_id);
@@ -326,6 +334,10 @@ where
             if let Some(parent_frame_id) = self.frame_stack.last_mut() {
                 parent_frame_id.increment_re_entry();
             }
+
+            Some(frame_id)
+        } else {
+            None
         }
     }
 
@@ -351,7 +363,7 @@ where
     }
 }
 
-impl<DB> Inspector<EdbContext<DB>> for OpcodeSnapshotInspector<DB>
+impl<'a, DB> Inspector<EdbContext<DB>> for OpcodeSnapshotInspector<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
@@ -382,10 +394,20 @@ where
         &mut self,
         _context: &mut EdbContext<DB>,
         _inputs: &CallInputs,
-        _outcome: &mut CallOutcome,
+        outcome: &mut CallOutcome,
     ) {
         // Stop tracking current execution frame
-        self.pop_frame();
+        let Some(frame_id) = self.pop_frame() else { return };
+
+        let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
+
+        if entry.result != Some(outcome.into()) {
+            // Mismatch in expected outcome, log error
+            error!(
+                "Call outcome mismatch in frame {:?}: expected {:?}, got {:?}",
+                frame_id, entry.result, outcome
+            );
+        }
     }
 
     fn create(
@@ -403,10 +425,20 @@ where
         &mut self,
         _context: &mut EdbContext<DB>,
         _inputs: &CreateInputs,
-        _outcome: &mut CreateOutcome,
+        outcome: &mut CreateOutcome,
     ) {
         // Stop tracking current execution frame
-        self.pop_frame();
+        let Some(frame_id) = self.pop_frame() else { return };
+
+        let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
+
+        if entry.result != Some(outcome.into()) {
+            // Mismatch in expected outcome, log error
+            error!(
+                "Create outcome mismatch in frame {:?}: expected {:?}, got {:?}",
+                frame_id, entry.result, outcome
+            );
+        }
     }
 }
 

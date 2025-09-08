@@ -46,6 +46,7 @@ reqwest = { workspace = true, features = [
 ] }
 
 # misc
+auto_impl.workspace = true
 chrono.workspace = true
 derive_more.workspace = true
 dirs-next.workspace = true
