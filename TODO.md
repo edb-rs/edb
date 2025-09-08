@@ -24,6 +24,12 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Support runtime expression evaluation
   - Add expression history and favorites
 
+- [ ] **Enhanced Code Navigation**
+  - Full Vim key binding support for code view panel
+  - Customizable key mappings
+  - Visual mode selection
+  - Search and replace with Vim patterns
+
 ### 🤖 Milestone 2: Intelligence & Decoding
 **Goal**: Enhanced contract understanding and automatic decoding capabilities
 
@@ -127,6 +133,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Gas usage heatmap
   - Storage and memory layout visualizers
   - Collaborative debugging with session sharing
+
 
 ### ✅ Milestone 10: Comprehensive Testing
 **Goal**: Ensure reliability through extensive testing

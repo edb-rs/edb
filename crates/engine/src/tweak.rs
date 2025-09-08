@@ -16,7 +16,7 @@
 
 use std::path::PathBuf;
 
-use alloy_primitives::{Address, Bytes, TxHash};
+use alloy_primitives::{address, Address, Bytes, TxHash};
 use edb_common::{
     fork_and_prepare, relax_context_constraints, Cache, CachePath, EdbCache, EdbCachePath,
     EdbContext, ForkResult,
@@ -31,6 +31,7 @@ use revm::{
     state::Bytecode,
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
+use tracing::debug;
 
 use crate::{next_etherscan_api_key, Artifact, TweakInspector};
 
@@ -114,6 +115,7 @@ where
         quick: bool,
     ) -> Result<Bytes> {
         let creation_tx_hash = self.get_creation_tx(addr).await?;
+        debug!("Creation tx: {} -> {}", creation_tx_hash, addr);
 
         // Create replay environment
         let ForkResult { context: mut replay_ctx, target_tx_env: mut creation_tx_env, .. } =

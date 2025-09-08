@@ -31,11 +31,18 @@ use edb_common::{
     EdbContext,
 };
 use eyre::Result;
-use foundry_compilers::{artifacts::Contract, Artifact};
+use foundry_compilers::{
+    artifacts::{bytecode, Contract},
+    Artifact,
+};
 use revm::{
+    bytecode::OpCode,
     context::{ContextTr, CreateScheme, JournalTr, LocalContextTr},
     database::CacheDB,
-    interpreter::{CallInput, CallInputs, CallOutcome, CreateInputs, CreateOutcome},
+    interpreter::{
+        interpreter_types::Jumps, CallInput, CallInputs, CallOutcome, CallScheme, CreateInputs,
+        CreateOutcome, Interpreter,
+    },
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use serde::{Deserialize, Serialize};
@@ -445,12 +452,15 @@ where
 
             let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
-            println!("MDZZ we are here 1!");
             if entry.result != Some(outcome.into()) {
                 // Mismatched call outcome
                 error!(
+                    target_address = inputs.target_address.to_string(),
+                    bytecode_address = inputs.bytecode_address.to_string(),
                     "Call outcome mismatch at frame {}: expected {:?}, got {:?}",
-                    frame_id, entry.result, outcome
+                    frame_id,
+                    entry.result,
+                    outcome
                 );
             }
         }
@@ -480,7 +490,6 @@ where
         let Some(frame_id) = self.pop_frame() else { return };
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
-        println!("MDZZ we are here 2!");
 
         // For creation, we only check the return status, not the actually bytecode, since we
         // will instrument the code

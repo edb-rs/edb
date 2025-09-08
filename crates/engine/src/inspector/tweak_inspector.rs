@@ -23,16 +23,19 @@ use alloy_dyn_abi::JsonAbiExt;
 use alloy_primitives::{Address, Bytes, U256};
 use edb_common::EdbContext;
 use eyre::Result;
-use foundry_compilers::{artifacts::Contract, Artifact as _};
+use foundry_compilers::{
+    artifacts::{Contract, ContractBytecode},
+    Artifact as _,
+};
 use itertools::Itertools;
 use revm::{
     bytecode::OpCode,
-    context::{CreateScheme, JournalTr},
+    context::{ContextTr, CreateScheme, Host, JournalTr},
     database::CacheDB,
-    interpreter::{CreateInputs, CreateOutcome},
+    interpreter::{interpreter_types::Jumps, CreateInputs, CreateOutcome, Interpreter},
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::utils::disasm::{disassemble, extract_push_value};
 
@@ -311,7 +314,10 @@ impl<'a> TweakInspector<'a> {
             self.extract_constructor_args(init_code).unwrap_or(self.constructor_args.clone());
 
         // Simply concatenate recompiled init code with constructor args
-        let recompiled_creation_code = self.recompiled_contract.get_bytecode_bytes()?;
+        let Some(recompiled_creation_code) = self.recompiled_contract.get_bytecode_bytes() else {
+            error!("Failed to get recompiled creation code for {}", self.target_address);
+            return None;
+        };
 
         let mut full_code = recompiled_creation_code.to_vec();
         full_code.extend_from_slice(&constructor_args);
@@ -373,7 +379,7 @@ where
 
     fn create_end(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         inputs: &CreateInputs,
         outcome: &mut CreateOutcome,
     ) {
@@ -386,6 +392,8 @@ where
                 if let Some(created_address) = outcome.address {
                     if created_address == self.target_address {
                         // Get deployed code from outcome's output (runtime bytecode)
+                        // self.deployed_code =
+                        //     context.load_account_code(created_address).map(|c| c.data.clone());
                         self.deployed_code = Some(outcome.result.output.clone());
                         info!(
                             "Successfully captured deployed bytecode for {:?}: {} bytes",
