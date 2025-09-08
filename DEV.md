@@ -174,12 +174,9 @@ EDB/
 └── CONTRIBUTING.md            # Contribution guidelines
 ```
 
-## 📝 TODO
+## 📝 Development Roadmap
 
-- [ ] Complex type local variable watcher (user-defined type, etc.). User-defined types may not be eligible for ABI encoding. Alternative methods are needed to collected the values of these variables.
-- [ ] Memory optimization: accessible variables and state snapshot in each step can be optimized using trait objects to inherit variables/state from parent instances.
-- [ ] Conditional breakpoints
-- [ ] Customized watcher
+For the complete list of planned features and improvements, please see [TODO.md](TODO.md).
 
 ## 🚀 Getting Started
 
