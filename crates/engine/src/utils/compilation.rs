@@ -21,12 +21,14 @@ use std::path::PathBuf;
 use alloy_primitives::Address;
 use edb_common::{Cache, EdbCache};
 use eyre::Result;
-use foundry_block_explorers::{errors::EtherscanError, Client};
+use foundry_block_explorers::{contract::Metadata, errors::EtherscanError, Client};
 use foundry_compilers::{
-    artifacts::{output_selection::OutputSelection, SolcInput, Source},
+    artifacts::{output_selection::OutputSelection, Libraries, SolcInput, Source, Sources},
     solc::{Solc, SolcLanguage},
 };
-use tracing::trace;
+use itertools::Itertools;
+use tracing::{debug, trace};
+use tracing_subscriber::fmt::format;
 
 use crate::{etherscan_rate_limit_guard, Artifact};
 
@@ -73,19 +75,7 @@ impl OnchainCompiler {
                 return Ok(None);
             }
 
-            // prepare the input for solc
-            let mut settings = meta.settings()?;
-            // enforce compiler output all possible outputs
-            settings.output_selection = OutputSelection::complete_output_selection();
-            trace!(addr=?addr, settings=?settings, "using settings");
-
-            // prepare the sources
-            let sources = meta
-                .sources()
-                .into_iter()
-                .map(|(k, v)| (k.into(), Source::new(v.content)))
-                .collect();
-            let input = SolcInput::new(SolcLanguage::Solidity, sources, settings);
+            let input = get_compilation_input_from_metadata(&meta, addr)?;
 
             // prepare the compiler
             let version = meta.compiler_version()?;
@@ -105,6 +95,55 @@ impl OnchainCompiler {
             Ok(output)
         }
     }
+}
+
+/// Prepare the input for solc using metadate downloaded from Etherscan.
+pub fn get_compilation_input_from_metadata(meta: &Metadata, addr: Address) -> Result<SolcInput> {
+    let mut settings = meta.settings()?;
+
+    // Enforce compiler output all possible outputs
+    settings.output_selection = OutputSelection::complete_output_selection();
+    trace!(addr=?addr, settings=?settings, "using settings");
+
+    // Prepare the sources
+    let sources: Sources =
+        meta.sources().into_iter().map(|(k, v)| (k.into(), Source::new(v.content))).collect();
+
+    // Check library
+    if !meta.library.is_empty() {
+        let prefix = if sources.keys().unique().count() == 1 {
+            sources.keys().next().unwrap().to_string_lossy().to_string()
+        } else {
+            // When multiple source files are present, the library string should include the path.
+            String::new()
+        };
+
+        let libs = meta
+            .library
+            .split(';')
+            .filter_map(|lib| {
+                debug!(lib=?lib, addr=?addr, "parsing library");
+                let mut parts = lib.split(':');
+
+                let file =
+                    if parts.clone().count() == 2 { prefix.as_str() } else { parts.next()? };
+                let name = parts.next()?;
+                let addr = parts.next()?;
+
+                if addr.starts_with("0x") {
+                    Some(format!("{}:{}:{}", file, name, addr))
+                } else {
+                    Some(format!("{}:{}:0x{}", file, name, addr))
+                }
+            })
+            .collect::<Vec<_>>();
+
+        settings.libraries = Libraries::parse(&libs)?;
+    }
+
+    let input = SolcInput::new(SolcLanguage::Solidity, sources, settings);
+
+    Ok(input)
 }
 
 #[cfg(test)]

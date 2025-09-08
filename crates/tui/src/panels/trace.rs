@@ -611,9 +611,9 @@ impl TracePanelInner {
             let full_indent = if entry.depth == 0 {
                 // Root level details - check if this root entry has more siblings
                 if self.is_last_child(entry, trace) {
-                    format!("    {} ", child_line)
+                    format!("      ")
                 } else {
-                    format!("  │ {} ", child_line)
+                    format!("  │   ")
                 }
             } else {
                 // Child level details - always start with 2 spaces, then tree indent, then connector
@@ -657,9 +657,9 @@ impl TracePanelInner {
         let full_indent = if entry.depth == 0 {
             // Root level details - check if this root entry has more siblings
             if self.is_last_child(entry, trace) {
-                format!("    {} ", child_line)
+                format!("      ")
             } else {
-                format!("  │ {} ", child_line)
+                format!("  │   ")
             }
         } else {
             // Child level details - always start with 2 spaces, then tree indent, then connector

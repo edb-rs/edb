@@ -155,7 +155,7 @@ impl StepRef {
 
         // Corner case 2: built-in statements
         static BUILT_IN_FUNCTIONS: &[&str] =
-            &["require", "assert", "keccak256", "sha256", "ripemd160", "ecrecover"];
+            &["require", "assert", "keccak256", "sha256", "ripemd160", "ecrecover", "type"];
         let built_in_n = calls
             .iter()
             .filter(|call| {

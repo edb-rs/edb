@@ -26,8 +26,8 @@ pub use disasm::*;
 mod etherscan;
 pub use etherscan::*;
 
-mod onchain_compiler;
-pub use onchain_compiler::*;
+mod compilation;
+pub use compilation::*;
 
 mod source;
 pub use source::*;
