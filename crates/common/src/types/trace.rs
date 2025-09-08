@@ -16,6 +16,7 @@
 
 use alloy_json_abi::{Function, JsonAbi};
 use alloy_primitives::{hex, Address, Bytes, Log, LogData, U256};
+use auto_impl::auto_impl;
 use revm::{
     context::{ContextTr, CreateScheme},
     interpreter::{
@@ -38,6 +39,32 @@ pub enum CallType {
     Call(CallScheme),
     /// Contract creation via CREATE opcode
     Create(CreateScheme),
+}
+
+#[auto_impl(&, &mut, Box, Rc, Arc)]
+trait IntoCallType {
+    fn into_call_type(&self) -> CallType;
+}
+
+impl IntoCallType for CallInputs {
+    fn into_call_type(&self) -> CallType {
+        CallType::Call(self.scheme)
+    }
+}
+
+impl IntoCallType for CreateInputs {
+    fn into_call_type(&self) -> CallType {
+        CallType::Create(self.scheme)
+    }
+}
+
+impl<T> From<T> for CallType
+where
+    T: IntoCallType,
+{
+    fn from(value: T) -> Self {
+        value.into_call_type()
+    }
 }
 
 /// Result of a call/creation operation
@@ -64,6 +91,92 @@ pub enum CallResult {
         /// Result
         result: InstructionResult,
     },
+}
+
+impl CallResult {
+    pub fn result(&self) -> InstructionResult {
+        match self {
+            CallResult::Success { result, .. } => *result,
+            CallResult::Revert { result, .. } => *result,
+            CallResult::Error { result, .. } => *result,
+        }
+    }
+
+    pub fn output(&self) -> &Bytes {
+        match self {
+            CallResult::Success { output, .. } => output,
+            CallResult::Revert { output, .. } => output,
+            CallResult::Error { output, .. } => output,
+        }
+    }
+}
+
+#[auto_impl(&, &mut, Box, Rc, Arc)]
+trait IntoCallResult {
+    fn into_call_result(&self) -> CallResult;
+}
+
+impl IntoCallResult for CallOutcome {
+    fn into_call_result(&self) -> CallResult {
+        if self.result.is_ok() {
+            CallResult::Success {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        } else if self.result.is_revert() {
+            CallResult::Revert {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        } else if self.result.is_error() {
+            CallResult::Error {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        } else {
+            error!("Unexpected call outcome, we use CallResult::Error");
+            CallResult::Error {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        }
+    }
+}
+
+impl IntoCallResult for CreateOutcome {
+    fn into_call_result(&self) -> CallResult {
+        if self.result.is_ok() {
+            CallResult::Success {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        } else if self.result.is_revert() {
+            CallResult::Revert {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        } else if self.result.is_error() {
+            CallResult::Error {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        } else {
+            error!("Unexpected create outcome, we use CallResult::Error");
+            CallResult::Error {
+                output: self.result.output.clone(),
+                result: self.result.result.clone(),
+            }
+        }
+    }
+}
+
+impl<T> From<T> for CallResult
+where
+    T: IntoCallResult,
+{
+    fn from(value: T) -> Self {
+        value.into_call_result()
+    }
 }
 
 /// Trace representation

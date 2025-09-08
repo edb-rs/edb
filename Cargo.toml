@@ -145,6 +145,7 @@ ratatui = "0.29"
 clap = "4"
 
 # misc
+auto_impl = "1"
 chrono = "0.4"
 delegate = "0.13"
 derive_more = "2"

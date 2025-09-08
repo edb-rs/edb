@@ -59,10 +59,9 @@ impl OnchainCompiler {
                 match etherscan_rate_limit_guard!(etherscan.contract_source_code(addr).await) {
                     Ok(meta) => meta,
                     Err(EtherscanError::ContractCodeNotVerified(_)) => {
-                        // We also cache the fact that the contract is not verified.
-                        let artifact = None;
-                        self.cache.save_cache(addr.to_string(), &artifact)?;
-                        return Ok(artifact);
+                        // We do not cache the fact that the contract is not verified, since it may be
+                        // verified later.
+                        return Ok(None);
                     }
                     Err(e) => return Err(e.into()),
                 };

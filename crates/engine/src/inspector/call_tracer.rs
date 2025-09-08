@@ -21,7 +21,7 @@
 //! without needing to re-examine transaction inputs/outputs.
 
 use alloy_primitives::{Address, Log, U256};
-use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
+use edb_common::types::{CallResult, Trace, TraceEntry};
 use revm::{
     context::ContextTr,
     interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter},
@@ -78,68 +78,6 @@ impl CallTracer {
             .and_modify(|existing| *existing |= deployed)
             .or_insert(deployed);
     }
-
-    /// Convert revm call inputs to our call type
-    fn call_type_from_inputs(inputs: &CallInputs) -> CallType {
-        CallType::Call(inputs.scheme)
-    }
-
-    /// Convert create scheme to call type
-    fn call_type_from_create_scheme(input: &CreateInputs) -> CallType {
-        CallType::Create(input.scheme)
-    }
-
-    /// Convert call outcome to result
-    fn result_from_outcome(outcome: &CallOutcome) -> CallResult {
-        if outcome.result.is_ok() {
-            CallResult::Success {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        } else if outcome.result.is_revert() {
-            CallResult::Revert {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        } else if outcome.result.is_error() {
-            CallResult::Error {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        } else {
-            error!("Unexpected call outcome, we use CallResult::Error");
-            CallResult::Error {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        }
-    }
-
-    /// Convert create outcome to result
-    fn result_from_create_outcome(outcome: &CreateOutcome) -> CallResult {
-        if outcome.result.is_ok() {
-            CallResult::Success {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        } else if outcome.result.is_revert() {
-            CallResult::Revert {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        } else if outcome.result.is_error() {
-            CallResult::Error {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        } else {
-            error!("Unexpected create outcome, we use CallResult::Error");
-            CallResult::Error {
-                output: outcome.result.output.clone(),
-                result: outcome.result.result.clone(),
-            }
-        }
-    }
 }
 
 impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
@@ -158,7 +96,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
     }
 
     fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
-        let call_type = Self::call_type_from_inputs(inputs);
+        let call_type = inputs.into();
         let target = inputs.target_address;
         let code_address = inputs.bytecode_address;
         let caller = inputs.caller;
@@ -212,7 +150,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             return;
         };
 
-        trace_entry.result = Some(Self::result_from_outcome(outcome));
+        trace_entry.result = Some(outcome.into());
 
         let target = inputs.target_address;
         let code_address = inputs.bytecode_address;
@@ -226,7 +164,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
     }
 
     fn create(&mut self, _context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
-        let call_type = Self::call_type_from_create_scheme(inputs);
+        let call_type = inputs.into();
         let caller = inputs.caller;
 
         // Mark addresses
@@ -287,7 +225,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             error!("Create stack entry mismatch");
         }
 
-        trace_entry.result = Some(Self::result_from_create_outcome(outcome));
+        trace_entry.result = Some(outcome.into());
 
         if matches!(trace_entry.result, Some(CallResult::Revert { .. })) {
             debug!("Creation failed");
