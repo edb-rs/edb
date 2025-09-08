@@ -188,7 +188,12 @@ impl Engine {
         info!("Re-executing transaction with snapshot collection");
         let hook_creation =
             self.collect_creation_hooks(&artifacts, &recompiled_artifacts, contracts_in_tx)?;
-        let hook_snapshots = self.capture_hook_snapshots(ctx.clone(), tx.clone(), hook_creation)?;
+        let hook_snapshots = self.capture_hook_snapshots(
+            ctx.clone(),
+            tx.clone(),
+            hook_creation,
+            &replay_result.execution_trace,
+        )?;
 
         // Step 8: Start RPC server with analysis results and snapshots
         info!("Starting RPC server with analysis results and snapshots");
@@ -353,6 +358,7 @@ impl Engine {
         mut ctx: EdbContext<DB>,
         mut tx: TxEnv,
         creation_hooks: Vec<(&'a Contract, &'a Contract, &'a Bytes)>,
+        trace: &Trace,
     ) -> Result<HookSnapshots<DB>>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -364,7 +370,7 @@ impl Engine {
 
         info!("Collecting hook snapshots for source code contracts");
 
-        let mut inspector = HookSnapshotInspector::new();
+        let mut inspector = HookSnapshotInspector::new(trace);
         inspector.with_creation_hooks(creation_hooks)?;
         let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
 
