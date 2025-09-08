@@ -859,7 +859,7 @@ impl Analyzer {
             }
             Statement::WhileStatement(while_statement) => {
                 // the step is the `while(...)`
-                let loc = sloc_rdiff(while_statement.src, block_or_stmt_src(&while_statement.body));
+                let loc = sloc_ldiff(while_statement.src, block_or_stmt_src(&while_statement.body));
                 step!(WhileLoop, *while_statement.clone(), loc);
 
                 // we take over the walk of the sub ast tree in the while statement step.

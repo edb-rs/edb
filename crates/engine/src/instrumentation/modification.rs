@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, fmt::Display, os::macos::raw::stat};
 use crate::{
     analysis::{stmt_src, SourceAnalysis, VariableRef},
     contains_function_type, contains_user_defined_type, find_index_of_first_statement_in_block,
-    find_index_of_first_statement_in_block_or_statement, find_next_index_of_source_location,
+    find_index_of_first_statement_in_block_or_statement,
+    find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
     mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str, USID,
@@ -511,7 +512,7 @@ impl SourceModifications {
 
     fn collect_before_step_hook_modifications(
         &mut self,
-        _source: &str,
+        source: &str,
         analysis: &SourceAnalysis,
     ) -> Result<()> {
         let source_id = self.source_id;
@@ -574,11 +575,12 @@ impl SourceModifications {
                     (loc, NORMAL_PRIORITY)
                 }
                 crate::analysis::StepVariant::DoWhileLoop(do_while_statement) => {
-                    // the before step hook should be instrumented before the do-while statement
-                    let loc = do_while_statement
-                        .src
-                        .start
-                        .expect("do-while statement start location not found");
+                    // the before step hook should be instrumented after the last statement of the do-while statement
+                    let loc = find_next_index_of_last_statement_in_block(
+                        source,
+                        &do_while_statement.body,
+                    )
+                    .expect("do-while statement last statement location not found");
                     (loc, NORMAL_PRIORITY)
                 }
                 crate::analysis::StepVariant::Try(try_statement) => {
@@ -936,6 +938,30 @@ mod tests {
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
         modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 10);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
+
+    #[test]
+    fn test_do_while_loop_step_modification() {
+        let source = r#"
+        contract C {
+            function a() public returns (uint256) {
+                do {
+                    uint x = 1;
+                    return 0;
+                } while (false);
+            }
+        }
+        "#;
+
+        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        assert_eq!(modifications.modifications.len(), 4);
         let modified_source = modifications.modify_source(source);
 
         // The modified source should be able to be compiled and analyzed.

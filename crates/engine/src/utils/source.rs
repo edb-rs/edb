@@ -231,6 +231,24 @@ pub fn find_index_of_first_statement_in_block(block: &Block) -> Option<usize> {
     )
 }
 
+/// Find the index of the next character immediately after the last statement in the `Block`.
+///
+/// # Arguments
+///
+/// * `source` - The source string
+/// * `block` - The `Block`
+///
+/// # Returns
+///
+/// The index of the next character immediately after the last statement in the `Block`.
+pub fn find_next_index_of_last_statement_in_block(source: &str, block: &Block) -> Option<usize> {
+    block.statements.last().map_or(
+        // if the block has no statements, the index of the last statement is the end of the block '}'
+        find_next_index_of_source_location(&block.src).map(|s| s - 1),
+        |stmt| find_next_index_of_statement(source, stmt),
+    )
+}
+
 /// Find the index of the next character immediately after the `Statement`.
 ///
 /// # Arguments
