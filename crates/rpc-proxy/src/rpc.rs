@@ -698,7 +698,7 @@ impl RpcHandler {
         false
     }
 
-    fn generate_cache_key(&self, request: &Value) -> String {
+    pub fn generate_cache_key(&self, request: &Value) -> String {
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request.get("params").unwrap_or(&Value::Null);
 

@@ -247,13 +247,14 @@ impl ProxyServer {
         let (shutdown_tx, _) = broadcast::channel(1);
 
         // Create registry with shutdown channel
-        let registry = Arc::new(EdbRegistry::new(grace_period, shutdown_tx.clone()));
+        let registry =
+            Arc::new(EdbRegistry::new(grace_period, heartbeat_interval, shutdown_tx.clone()));
 
         // Start background tasks (if grace period is active)
         if grace_period > 0 {
             let registry_clone = Arc::clone(&registry);
             tokio::spawn(async move {
-                registry_clone.start_heartbeat_monitor(heartbeat_interval).await;
+                registry_clone.start_heartbeat_monitor().await;
             });
         }
 
@@ -558,6 +559,79 @@ async fn handle_rpc(
                         "peak_requests_per_minute": 0 // TODO: implement peak tracking
                     }
                 });
+                Ok(Json(response))
+            }
+            "edb_deleteCache" => {
+                let params = request.get("params").unwrap_or(&serde_json::Value::Null);
+
+                let result = if params.is_array() && !params.as_array().unwrap().is_empty() {
+                    let arr = params.as_array().unwrap();
+                    let method = arr[0].as_str().unwrap_or("");
+
+                    if arr.len() == 1 {
+                        // Just method: delete all entries for this method
+                        match state.proxy.rpc_handler.cache_manager().delete_by_method(method).await
+                        {
+                            Ok(deleted_count) => {
+                                serde_json::json!({
+                                    "success": true,
+                                    "deleted_count": deleted_count,
+                                    "message": format!("Deleted {} entries for method '{}'", deleted_count, method)
+                                })
+                            }
+                            Err(e) => {
+                                warn!("Failed to delete cache entries: {}", e);
+                                serde_json::json!({
+                                    "success": false,
+                                    "error": format!("Failed to delete cache entries: {}", e)
+                                })
+                            }
+                        }
+                    } else {
+                        // Method + params: delete specific request
+                        let req = serde_json::json!({
+                            "method": method,
+                            "params": arr[1].clone()
+                        });
+                        let key = state.proxy.rpc_handler.generate_cache_key(&req);
+
+                        match state.proxy.rpc_handler.cache_manager().delete_by_key(&key).await {
+                            Ok(true) => {
+                                serde_json::json!({
+                                    "success": true,
+                                    "deleted_count": 1,
+                                    "message": "Deleted specific cache entry"
+                                })
+                            }
+                            Ok(false) => {
+                                serde_json::json!({
+                                    "success": true,
+                                    "deleted_count": 0,
+                                    "message": "Cache entry not found"
+                                })
+                            }
+                            Err(e) => {
+                                warn!("Failed to delete cache entry: {}", e);
+                                serde_json::json!({
+                                    "success": false,
+                                    "error": format!("Failed to delete cache entry: {}", e)
+                                })
+                            }
+                        }
+                    }
+                } else {
+                    serde_json::json!({
+                        "success": false,
+                        "error": "Invalid parameter format. Expected [method] or [method, params]"
+                    })
+                };
+
+                let response = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": request.get("id").unwrap_or(&serde_json::Value::from(1)),
+                    "result": result
+                });
+
                 Ok(Json(response))
             }
             "edb_shutdown" => {

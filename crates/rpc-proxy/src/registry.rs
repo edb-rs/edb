@@ -61,6 +61,7 @@ pub struct EdbRegistry {
     instances: Arc<RwLock<HashMap<u32, EdbInstance>>>,
     grace_period: u64,
     grace_period_start: Arc<RwLock<Option<u64>>>,
+    heartbeat_interval: u64,
     shutdown_tx: broadcast::Sender<()>,
 }
 
@@ -73,11 +74,16 @@ impl EdbRegistry {
     ///
     /// # Returns
     /// A new EdbRegistry instance
-    pub fn new(grace_period: u64, shutdown_tx: broadcast::Sender<()>) -> Self {
+    pub fn new(
+        grace_period: u64,
+        heartbeat_interval: u64,
+        shutdown_tx: broadcast::Sender<()>,
+    ) -> Self {
         Self {
             instances: Arc::new(RwLock::new(HashMap::new())),
             grace_period,
             grace_period_start: Arc::new(RwLock::new(None)),
+            heartbeat_interval,
             shutdown_tx,
         }
     }
@@ -162,12 +168,12 @@ impl EdbRegistry {
     ///
     /// # Arguments
     /// * `check_interval` - Seconds between heartbeat checks
-    pub async fn start_heartbeat_monitor(&self, check_interval: u64) {
+    pub async fn start_heartbeat_monitor(&self) {
         let instances = Arc::clone(&self.instances);
         let grace_period_start = Arc::clone(&self.grace_period_start);
         let grace_period = self.grace_period;
 
-        let mut interval = tokio::time::interval(Duration::from_secs(check_interval));
+        let mut interval = tokio::time::interval(Duration::from_secs(self.heartbeat_interval));
 
         loop {
             interval.tick().await;
@@ -175,7 +181,7 @@ impl EdbRegistry {
             // Clean up dead instances
             let _dead_instances = {
                 let mut instances = instances.write().await;
-                let heartbeat_timeout = check_interval * 3; // 3 missed heartbeats = dead
+                let heartbeat_timeout = self.heartbeat_interval * 3; // 3 missed heartbeats = dead
 
                 let dead_pids: Vec<u32> = instances
                     .iter()
@@ -264,6 +270,13 @@ impl EdbRegistry {
     /// Vector of process IDs for all registered instances
     pub async fn get_active_instances(&self) -> Vec<u32> {
         let instances = self.instances.read().await;
-        instances.keys().cloned().collect()
+        let heartbeat_timeout = self.heartbeat_interval * 3; // 3 missed heartbeats = dead
+        instances
+            .iter()
+            .filter(|(_, instance)| {
+                instance.is_alive(heartbeat_timeout) && Self::is_process_alive(instance.pid)
+            })
+            .map(|(pid, _)| *pid)
+            .collect()
     }
 }

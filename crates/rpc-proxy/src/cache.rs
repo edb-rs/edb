@@ -224,6 +224,67 @@ impl CacheManager {
         Ok(())
     }
 
+    /// Deletes all cache entries matching a method prefix
+    ///
+    /// # Arguments
+    /// * `method` - The method name to match (e.g., "eth_getBalance")
+    ///
+    /// # Returns  
+    /// Number of entries deleted
+    pub async fn delete_by_method(&self, method: &str) -> Result<usize> {
+        let mut cache = self.cache.write().await;
+
+        // Find all keys that start with the method prefix
+        let prefix = format!("{}:", method);
+        let keys_to_delete: Vec<String> =
+            cache.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
+
+        let deleted_count = keys_to_delete.len();
+        for key in keys_to_delete {
+            cache.remove(&key);
+        }
+
+        if deleted_count > 0 {
+            info!("Deleted {} entries for method '{}'", deleted_count, method);
+            let current_cache = cache.clone();
+            drop(cache); // Release the write lock
+            self.force_save_to_disk(current_cache).await?;
+        }
+
+        Ok(deleted_count)
+    }
+
+    /// Delete a single cache entry by key
+    pub async fn delete_by_key(&self, key: &str) -> Result<bool> {
+        let mut cache = self.cache.write().await;
+        let found = cache.remove(key).is_some();
+
+        if found {
+            let current_cache = cache.clone();
+            drop(cache);
+            self.force_save_to_disk(current_cache).await?;
+        }
+
+        Ok(found)
+    }
+
+    /// Force save current cache state to disk without merging
+    ///
+    /// This method bypasses the normal merge logic and directly overwrites
+    /// the disk cache with the provided cache state. Used after deletions
+    /// to ensure deleted entries are not restored from disk.
+    async fn force_save_to_disk(&self, cache_to_save: HashMap<String, CacheEntry>) -> Result<()> {
+        // Atomic write via temp file
+        let temp_file = self.cache_file_path.with_extension("tmp");
+        let content = serde_json::to_string_pretty(&cache_to_save)?;
+
+        fs::write(&temp_file, &content)?;
+        fs::rename(&temp_file, &self.cache_file_path)?; // Atomic on most filesystems
+
+        info!("Force saved {} cache entries to disk (no merge)", cache_to_save.len());
+        Ok(())
+    }
+
     /// Returns detailed statistics about the cache state
     ///
     /// # Returns
