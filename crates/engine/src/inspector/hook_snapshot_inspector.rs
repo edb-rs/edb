@@ -25,7 +25,7 @@
 //! HookSnapshotInspector only captures at predetermined breakpoints,
 //! making it more efficient for tracking specific execution states.
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{address, Address, Bytes, U256};
 use edb_common::{
     types::{ExecutionFrameId, Trace},
     EdbContext,
@@ -56,10 +56,10 @@ use crate::USID;
 
 /// Magic trigger address that causes snapshots to be taken
 /// 0x0000000000000000000000000000000000023333
-pub const HOOK_TRIGGER_ADDRESS: Address = Address::new([
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x02, 0x33, 0x33,
-]);
+pub const HOOK_TRIGGER_ADDRESS: Address = address!("0x0000000000000000000000000000000000023333");
+/// Magic address that records the update of a variable
+/// 0x0000000000000000000000000000000002333333
+pub const VARIABLE_UPDATE_ADDRESS: Address = address!("0x0000000000000000000000000000000002333333");
 
 /// Single hook execution snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]

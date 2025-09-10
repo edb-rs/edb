@@ -7,8 +7,8 @@ use crate::{
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
-    mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str, USID,
-    UVID,
+    mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str,
+    HOOK_TRIGGER_ADDRESS, USID, UVID, VARIABLE_UPDATE_ADDRESS,
 };
 
 use eyre::Result;
@@ -17,11 +17,12 @@ use foundry_compilers::artifacts::{
     Visibility,
 };
 
-const LOWEST_PRIORITY: u8 = 0;
-const MID_LOW_PRIORITY: u8 = 63;
-const NORMAL_PRIORITY: u8 = 127;
-const MID_HIGH_PRIORITY: u8 = 191;
-const HIGHEST_PRIORITY: u8 = 255;
+const LEFT_BRACKET_PRIORITY: u8 = 255; // used for the left bracket of the block
+const FUNCTION_ENTRY_PRIORITY: u8 = 191; // used for the before step hook of function and modifier entry
+const VISIBILITY_PRIORITY: u8 = 128; // used for the visibility of state variables and functions
+const VARIABLE_UPDATE_PRIORITY: u8 = 127; // used for the variable update hook
+const BEFORE_STEP_PRIORITY: u8 = 63; // used for the before step hook of statements other than function and modifier entry.
+const RIGHT_BRACKET_PRIORITY: u8 = 0; // used for the right bracket of the block
 
 /// The collections of modifications on a source file.
 pub struct SourceModifications {
@@ -240,19 +241,47 @@ pub enum InstrumentContent {
         function_calls: usize,
     },
     /// A `variable_update` hook. The debugger will record the value of the variable when it is updated.
-    VariableUpdateHook(UVID),
+    VariableUpdateHook {
+        /// The UVID of the variable.
+        uvid: UVID,
+        /// The variable that is updated.
+        variable: VariableRef,
+    },
 }
 
 impl Display for InstrumentContent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Plain(content) => write!(f, "{content}"),
-            Self::BeforeStepHook { usid, function_calls } => write!(
+            Self::BeforeStepHook { usid, .. } => write!(
                 f,
-                "address(0x0000000000000000000000000000000000023333).call(hex\"{:064x}\");",
+                "address({:?}).call(hex\"{:064x}\");",
+                HOOK_TRIGGER_ADDRESS,
                 u64::from(*usid),
             ),
-            Self::VariableUpdateHook(_vid) => write!(f, ""),
+            Self::VariableUpdateHook { uvid, variable } => {
+                let base_var = variable.base();
+                let base_declaration = base_var.declaration();
+                let is_state_variable = base_declaration.state_variable;
+                let base_type = &base_declaration.type_name;
+                let base_name = &base_var.declaration().name;
+                // if base_type.as_ref().is_some_and(|ty| {
+                //     !contains_user_defined_type(ty)
+                //         && !contains_function_type(ty)
+                //         && !is_state_variable
+                // }) {
+                //     write!(
+                //         f,
+                //         "address({:?}).call(abi.encode(hex\"{:064x}\", {}));",
+                //         VARIABLE_UPDATE_ADDRESS,
+                //         u64::from(*uvid),
+                //         base_name,
+                //     )
+                // } else {
+                //     write!(f, "")
+                // }
+                write!(f, "")
+            }
         }
     }
 }
@@ -311,7 +340,7 @@ impl SourceModifications {
                 source_id,
                 loc,
                 content: InstrumentContent::Plain(view_function),
-                priority: NORMAL_PRIORITY,
+                priority: VISIBILITY_PRIORITY,
             };
             self.add_modification(instrument_action.into());
         }
@@ -326,7 +355,7 @@ impl SourceModifications {
                     source_id,
                     loc: src.start.unwrap_or(0) + at_index,
                     content: InstrumentContent::Plain(new_visibility_str),
-                    priority: NORMAL_PRIORITY,
+                    priority: VISIBILITY_PRIORITY,
                 }
             };
 
@@ -433,7 +462,7 @@ impl SourceModifications {
                 source_id,
                 loc,
                 content: InstrumentContent::Plain("{".to_string()),
-                priority: HIGHEST_PRIORITY,
+                priority: LEFT_BRACKET_PRIORITY,
             }
         };
         let right_bracket = |loc: usize| -> InstrumentAction {
@@ -441,7 +470,7 @@ impl SourceModifications {
                 source_id,
                 loc,
                 content: InstrumentContent::Plain("}".to_string()),
-                priority: LOWEST_PRIORITY,
+                priority: RIGHT_BRACKET_PRIORITY,
             }
         };
         let wrap_statement_as_block = |stmt: &Statement| -> Vec<Modification> {
@@ -530,7 +559,7 @@ impl SourceModifications {
                     // the first char of function body is the '{', so we insert after that.
                     let loc = find_index_of_first_statement_in_block(body)
                         .expect("function body start location not found");
-                    (loc, MID_HIGH_PRIORITY)
+                    (loc, FUNCTION_ENTRY_PRIORITY)
                 }
                 crate::analysis::StepVariant::ModifierEntry(modifier_definition) => {
                     // the before step hook should be instrumented before the first statement of the modifier
@@ -540,31 +569,31 @@ impl SourceModifications {
                     };
                     let loc = find_index_of_first_statement_in_block(body)
                         .expect("modifier body start location not found");
-                    (loc, MID_HIGH_PRIORITY)
+                    (loc, FUNCTION_ENTRY_PRIORITY)
                 }
                 crate::analysis::StepVariant::Statement(statement) => {
                     // the before step hook should be instrumented before the statement
                     let loc =
                         stmt_src(statement).start.expect("statement start location not found");
-                    (loc, NORMAL_PRIORITY)
+                    (loc, BEFORE_STEP_PRIORITY)
                 }
                 crate::analysis::StepVariant::Statements(statements) => {
                     // the before step hook should be instrumented before the first statement
                     let loc =
                         stmt_src(&statements[0]).start.expect("statement start location not found");
-                    (loc, NORMAL_PRIORITY)
+                    (loc, BEFORE_STEP_PRIORITY)
                 }
                 crate::analysis::StepVariant::IfCondition(if_statement) => {
                     // the before step hook should be instrumented before the if statement
                     let loc =
                         if_statement.src.start.expect("if statement start location not found");
-                    (loc, NORMAL_PRIORITY)
+                    (loc, BEFORE_STEP_PRIORITY)
                 }
                 crate::analysis::StepVariant::ForLoop(for_statement) => {
                     // the before step hook should be instrumented before the for statement
                     let loc =
                         for_statement.src.start.expect("for statement start location not found");
-                    (loc, NORMAL_PRIORITY)
+                    (loc, BEFORE_STEP_PRIORITY)
                 }
                 crate::analysis::StepVariant::WhileLoop(while_statement) => {
                     // the before step hook should be instrumented before the while statement
@@ -572,7 +601,7 @@ impl SourceModifications {
                         .src
                         .start
                         .expect("while statement start location not found");
-                    (loc, NORMAL_PRIORITY)
+                    (loc, BEFORE_STEP_PRIORITY)
                 }
                 crate::analysis::StepVariant::DoWhileLoop(do_while_statement) => {
                     // the before step hook should be instrumented after the last statement of the do-while statement
@@ -581,13 +610,13 @@ impl SourceModifications {
                         &do_while_statement.body,
                     )
                     .expect("do-while statement last statement location not found");
-                    (loc, NORMAL_PRIORITY)
+                    (loc, BEFORE_STEP_PRIORITY)
                 }
                 crate::analysis::StepVariant::Try(try_statement) => {
                     // the before step hook should be instrumented before the try statement
                     let loc =
                         try_statement.src.start.expect("try statement start location not found");
-                    (loc, NORMAL_PRIORITY)
+                    (loc, BEFORE_STEP_PRIORITY)
                 }
             };
             let instrument_action = InstrumentAction {
@@ -647,27 +676,12 @@ impl SourceModifications {
                             // these statement does not have any variable update, so we skip it
                             vec![]
                         }
-                        Statement::EmitStatement(emit_statement) => {
+                        Statement::EmitStatement(_)
+                        | Statement::ExpressionStatement(_)
+                        | Statement::InlineAssembly(_)
+                        | Statement::VariableDeclarationStatement(_) => {
                             // the variable update hook should be instrumented after the emit statement
-                            find_next_index_of_source_location(&emit_statement.src)
-                                .map(|loc| vec![loc])
-                                .unwrap_or_default()
-                        }
-                        Statement::ExpressionStatement(expression_statement) => {
-                            // the variable update hook should be instrumented after the expression statement
-                            find_next_index_of_source_location(&expression_statement.src)
-                                .map(|loc| vec![loc])
-                                .unwrap_or_default()
-                        }
-                        Statement::InlineAssembly(inline_assembly) => {
-                            // the variable update hook should be instrumented after the inline assembly statement
-                            find_next_index_of_source_location(&inline_assembly.src)
-                                .map(|loc| vec![loc])
-                                .unwrap_or_default()
-                        }
-                        Statement::VariableDeclarationStatement(variable_declaration_statement) => {
-                            // the variable update hook should be instrumented after the variable declaration statement
-                            find_next_index_of_source_location(&variable_declaration_statement.src)
+                            find_next_index_of_statement(source, statement)
                                 .map(|loc| vec![loc])
                                 .unwrap_or_default()
                         }
@@ -730,8 +744,11 @@ impl SourceModifications {
                     let instrument_action = InstrumentAction {
                         source_id,
                         loc,
-                        content: InstrumentContent::VariableUpdateHook(uvid),
-                        priority: NORMAL_PRIORITY,
+                        content: InstrumentContent::VariableUpdateHook {
+                            uvid,
+                            variable: updated_variable.clone(),
+                        },
+                        priority: VARIABLE_UPDATE_PRIORITY,
                     };
                     self.add_modification(instrument_action.into());
                 }
