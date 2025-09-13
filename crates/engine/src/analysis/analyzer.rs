@@ -19,13 +19,15 @@ use std::{collections::BTreeMap, path::PathBuf};
 use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Assignment, Block, ContractDefinition, EventDefinition, Expression,
-    ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition, ModifierDefinition, Source,
-    SourceUnit, StateMutability, Statement, TypeName, UncheckedBlock, VariableDeclaration,
-    Visibility,
+    ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition, ModifierDefinition,
+    PragmaDirective, Source, SourceUnit, StateMutability, Statement, TypeName, UncheckedBlock,
+    VariableDeclaration, Visibility,
 };
 
+use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::error;
 
 use crate::{
     // new_usid, AnnotationsToChange,
@@ -64,6 +66,8 @@ pub struct SourceAnalysis {
     pub path: PathBuf,
     /// Processed source unit ready for analysis
     pub unit: SourceUnit,
+    /// Version requirement for the source file. The source file may not declare the solidity version.
+    pub version_req: Option<VersionReq>,
     /// Global variable scope of the source file
     pub global_scope: VariableScopeRef,
     /// List of analyzed execution steps in this file
@@ -438,6 +442,8 @@ impl SourceAnalysis {
 /// - `immutable_functions`: Functions that should be made mutable
 #[derive(Debug, Clone, Default)]
 pub struct Analyzer {
+    version_requirements: Vec<String>,
+
     scope_stack: Vec<VariableScopeRef>,
 
     finished_steps: Vec<StepRef>,
@@ -502,6 +508,16 @@ impl Analyzer {
         source_unit.walk(&mut self).map_err(AnalysisError::Other)?;
         assert!(self.scope_stack.len() == 1, "scope stack should have exactly one scope");
         assert!(self.current_step.is_none(), "current step should be none");
+        let version_req = if !self.version_requirements.is_empty() {
+            let compact_version_req = self.version_requirements.join(",");
+            VersionReq::parse(&compact_version_req)
+                .inspect_err(|err| {
+                    error!(source_id, ?source_path, %err, "failed to parse version requirements");
+                })
+                .ok()
+        } else {
+            None
+        };
         let global_scope = self.scope_stack.pop().expect("global scope should not be empty");
         let steps = self.finished_steps;
         let functions = self.functions;
@@ -509,6 +525,7 @@ impl Analyzer {
             id: source_id,
             path: source_path.clone(),
             unit: source_unit.clone(),
+            version_req,
             global_scope,
             steps,
             contracts: self.contracts,
@@ -1095,6 +1112,40 @@ impl Visitor for Analyzer {
         Ok(())
     }
 
+    fn visit_pragma_directive(
+        &mut self,
+        directive: &PragmaDirective,
+    ) -> eyre::Result<VisitorAction> {
+        let literals = &directive.literals;
+        if literals.len() > 1 && literals[0].trim() == "solidity" {
+            let mut version_str = vec![];
+            let mut current_req = String::new();
+            let mut i = 1;
+            while i < literals.len() {
+                let literal = &literals[i];
+                if literal.starts_with('.') {
+                    current_req.push_str(literal);
+                } else if ["=", "<", ">", "~", "^"].iter().any(|p| literal.starts_with(p)) {
+                    version_str.push(current_req);
+                    current_req = literal.clone();
+                    i += 1;
+                    current_req.push_str(&literals[i]);
+                } else {
+                    version_str.push(current_req);
+                    current_req = literal.clone();
+                }
+                i += 1;
+            }
+            version_str.push(current_req);
+
+            let version_str =
+                version_str.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(",");
+            // one source file may have multiple `pragma solidity` directives, we collect all of them
+            self.version_requirements.push(version_str);
+        }
+        Ok(VisitorAction::Continue)
+    }
+
     fn visit_contract_definition(
         &mut self,
         _definition: &ContractDefinition,
@@ -1326,7 +1377,7 @@ pub(crate) mod tests {
     /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
     pub(crate) fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
         // Compile the source code to get the AST
-        let version = Version::parse("0.8.0").unwrap();
+        let version = Version::parse("0.8.20").unwrap();
         let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Source compilation should succeed: {}", result.unwrap_err());
 
@@ -1794,5 +1845,26 @@ contract TestContract {
             .expect("bar function should be found");
         assert!(foo_func.read().contract.is_none());
         assert!(bar_func.read().contract.as_ref().is_some_and(|c| c.name() == "TestContract"));
+    }
+
+    #[test]
+    fn test_solidity_version() {
+        let source = r#"
+        pragma solidity ^0.8.0;
+        pragma solidity ^0.8.1;
+        pragma solidity >=0.7 .1 0;
+        contract C {}
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+        assert_eq!(
+            analysis.version_req,
+            Some(VersionReq::parse("^0.8.0,^0.8.1,>=0.7.1,0").unwrap())
+        );
+
+        let source = r#"
+        contract C {}
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+        assert_eq!(analysis.version_req, None);
     }
 }

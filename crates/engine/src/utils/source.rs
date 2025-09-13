@@ -1,8 +1,10 @@
+use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, BlockOrStatement, StateMutability, Statement, TypeName, Visibility,
 };
+use semver::VersionReq;
 
-use crate::analysis::stmt_src;
+use crate::analysis::{stmt_src, VariableRef};
 
 /// Get the source string at the given location.
 ///
@@ -379,5 +381,218 @@ pub fn contains_function_type(type_name: &TypeName) -> bool {
             contains_function_type(&mapping.key_type) || contains_function_type(&mapping.value_type)
         }
         TypeName::UserDefinedTypeName(_) => false,
+    }
+}
+
+/// Check recursively if the type name contains a mapping type.
+///
+/// # Arguments
+///
+/// * `type_name` - The type name
+///
+/// # Returns
+///
+/// True if the type name contains a mapping type.
+pub fn contains_mapping_type(type_name: &TypeName) -> bool {
+    match type_name {
+        TypeName::Mapping(_) => true,
+        TypeName::ArrayTypeName(array_type_name) => {
+            contains_mapping_type(&array_type_name.base_type)
+        }
+        TypeName::ElementaryTypeName(_) => false,
+        TypeName::FunctionTypeName(_) => false,
+        // TODO: the user defined type may have a mapping type, this need to be inspected in the future
+        TypeName::UserDefinedTypeName(_) => false,
+    }
+}
+
+/// Check if the abi.encode function (which is available since solidity 0.4.24) is available in the given version requirement.
+///
+/// # Arguments
+///
+/// * `version_req` - The version requirement
+///
+/// # Returns
+///
+/// True if the abi.encode function is available in the given version requirement.
+///
+/// # Example
+///
+/// ```rust
+/// let version_req = VersionReq::parse("^0.4.24").unwrap();
+/// let available = abi_encode_available(&version_req);
+/// assert!(available);
+/// ```
+pub fn abi_encode_available(version_req: &VersionReq) -> bool {
+    // abi.encode function is available since solidity 0.4.24
+    let min_version = semver::Version::parse("0.4.24").unwrap();
+
+    // If any version < 0.4.24 satisfies the requirement, then abi.encode is not available
+    !version_req.comparators.iter().all(|cmp| allows_any_version_lt(&min_version, cmp))
+}
+
+/// Check if a comparator allows any version less than the given minimum version.
+fn allows_any_version_lt(min_version: &semver::Version, comparator: &semver::Comparator) -> bool {
+    use semver::Op;
+
+    match comparator.op {
+        Op::Exact | Op::Greater | Op::GreaterEq | Op::Tilde | Op::Caret | Op::Wildcard => {
+            // Exact match: check if the exact version is < min_version
+            let exact_version = semver::Version {
+                major: comparator.major,
+                minor: comparator.minor.unwrap_or(0),
+                patch: comparator.patch.unwrap_or(0),
+                pre: semver::Prerelease::EMPTY,
+                build: semver::BuildMetadata::EMPTY,
+            };
+            exact_version < *min_version
+        }
+        Op::Less | Op::LessEq => true,
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use semver::VersionReq;
+
+    #[test]
+    fn test_abi_encode_available_exact_versions() {
+        // Test exact versions that should return true (>= 0.4.24, so no versions < 0.4.24 allowed)
+        assert!(abi_encode_available(&VersionReq::parse("=0.4.24").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("=0.4.25").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("=0.5.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("=0.5.10").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("=0.6.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("=0.7.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("=0.8.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("=0.8.19").unwrap()));
+
+        // Test exact versions that should return false (< 0.4.24, so versions < 0.4.24 are allowed)
+        assert!(!abi_encode_available(&VersionReq::parse("=0.4.23").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("=0.4.20").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("=0.3.0").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_greater_than() {
+        // Test greater than versions - these should return true because they don't allow versions < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse(">0.4.23").unwrap())); // allows 0.4.24+, no < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse(">0.4.20").unwrap())); // allows 0.4.21+, no < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse(">0.3.0").unwrap())); // allows 0.3.1+, no < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse(">0.1.0").unwrap())); // allows 0.1.1+, no < 0.4.24
+
+        // These should return true because they don't allow any version < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse(">0.4.24").unwrap())); // only allows 0.4.25+, no < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse(">0.4.25").unwrap())); // only allows 0.4.26+, no < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse(">0.5.0").unwrap())); // only allows 0.5.1+, no < 0.4.24
+    }
+
+    #[test]
+    fn test_abi_encode_available_greater_equal() {
+        // Test greater than or equal versions - these should return true because they don't allow versions < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse(">=0.4.24").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse(">=0.4.25").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse(">=0.5.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse(">=0.6.0").unwrap()));
+
+        // These should return false because the lower bound is < 0.4.24, so versions < 0.4.24 are allowed
+        assert!(!abi_encode_available(&VersionReq::parse(">=0.4.23").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse(">=0.4.20").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_less_than() {
+        // Test less than versions - these should return false because they allow versions < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse("<0.4.24").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("<0.4.23").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("<0.3.0").unwrap()));
+
+        // These should return false because they still allow versions < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse("<0.4.25").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("<0.5.0").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("<0.6.0").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_less_equal() {
+        // Test less than or equal versions - these should return false because they allow versions < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse("<=0.4.24").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("<=0.4.25").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("<=0.5.0").unwrap()));
+
+        // These should return false because the upper bound is < 0.4.24, so versions < 0.4.24 are allowed
+        assert!(!abi_encode_available(&VersionReq::parse("<=0.4.23").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("<=0.4.20").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_tilde() {
+        // Test tilde versions - these should return true because they don't allow versions < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse("~0.4.24").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("~0.4.25").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("~0.5.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("~0.5.1").unwrap()));
+
+        // These should return false because the lower bound is < 0.4.24, so versions < 0.4.24 are allowed
+        assert!(!abi_encode_available(&VersionReq::parse("~0.4.23").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("~0.4.20").unwrap()));
+
+        // Test tilde with only major version - these should return false because they allow versions < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse("~0").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("~0.3").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_caret() {
+        // Test caret versions - these should return true because they don't allow versions < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse("^0.4.24").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("^0.4.25").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("^0.5.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("^0.6.0").unwrap()));
+
+        // These should return false because the lower bound is < 0.4.24, so versions < 0.4.24 are allowed
+        assert!(!abi_encode_available(&VersionReq::parse("^0.4.23").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("^0.4.20").unwrap()));
+
+        // Test caret with only major version - these should return false because they allow versions < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse("^0").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("^0.3").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_wildcard() {
+        // Test wildcard versions - these should return true because they don't allow versions < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse("0.4.24").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("0.4.25").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse("0.5.0").unwrap()));
+
+        // These should return false because they're < 0.4.24, so versions < 0.4.24 are allowed
+        assert!(!abi_encode_available(&VersionReq::parse("0.4.23").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse("0.4.20").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_complex_ranges() {
+        // Test complex version ranges - these should return true because they don't allow versions < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse(">=0.4.24, <0.9.0").unwrap()));
+        assert!(abi_encode_available(&VersionReq::parse(">=0.5.0, <0.8.0").unwrap()));
+
+        // These should return false because they allow versions < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse(">=0.4.20, <0.4.24").unwrap()));
+        assert!(!abi_encode_available(&VersionReq::parse(">=0.3.0, <0.4.24").unwrap()));
+    }
+
+    #[test]
+    fn test_abi_encode_available_edge_cases() {
+        // Test edge cases around 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse(">=0.4.24").unwrap())); // doesn't allow < 0.4.24
+        assert!(abi_encode_available(&VersionReq::parse(">0.4.24").unwrap())); // doesn't allow < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse("<=0.4.24").unwrap())); // allows < 0.4.24
+        assert!(!abi_encode_available(&VersionReq::parse("<0.4.24").unwrap())); // allows < 0.4.24
+
+        // Test with pre-release versions (should be handled correctly)
+        assert!(abi_encode_available(&VersionReq::parse(">=0.4.24-alpha").unwrap()));
     }
 }

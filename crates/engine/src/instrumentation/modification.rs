@@ -1,9 +1,10 @@
 use std::{collections::BTreeMap, fmt::Display, os::macos::raw::stat};
 
 use crate::{
+    abi_encode_available,
     analysis::{stmt_src, SourceAnalysis, VariableRef},
-    contains_function_type, contains_user_defined_type, find_index_of_first_statement_in_block,
-    find_index_of_first_statement_in_block_or_statement,
+    contains_function_type, contains_mapping_type, contains_user_defined_type,
+    find_index_of_first_statement_in_block, find_index_of_first_statement_in_block_or_statement,
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
@@ -261,26 +262,14 @@ impl Display for InstrumentContent {
             ),
             Self::VariableUpdateHook { uvid, variable } => {
                 let base_var = variable.base();
-                let base_declaration = base_var.declaration();
-                let is_state_variable = base_declaration.state_variable;
-                let base_type = &base_declaration.type_name;
                 let base_name = &base_var.declaration().name;
-                // if base_type.as_ref().is_some_and(|ty| {
-                //     !contains_user_defined_type(ty)
-                //         && !contains_function_type(ty)
-                //         && !is_state_variable
-                // }) {
-                //     write!(
-                //         f,
-                //         "address({:?}).call(abi.encode(hex\"{:064x}\", {}));",
-                //         VARIABLE_UPDATE_ADDRESS,
-                //         u64::from(*uvid),
-                //         base_name,
-                //     )
-                // } else {
-                //     write!(f, "")
-                // }
-                write!(f, "")
+                write!(
+                    f,
+                    "address({:?}).call(abi.encode(hex\"{:064x}\", {}));",
+                    VARIABLE_UPDATE_ADDRESS,
+                    u64::from(*uvid),
+                    base_name,
+                )
             }
         }
     }
@@ -636,6 +625,12 @@ impl SourceModifications {
         source: &str,
         analysis: &SourceAnalysis,
     ) -> Result<()> {
+        if analysis.version_req.as_ref().is_some_and(|ver| !abi_encode_available(ver)) {
+            // if the abi.encode function is not available, we skip the variable update hook
+            // TODO: support solidity <0.4.24 in the future
+            return Ok(());
+        }
+
         let source_id = self.source_id;
         for step in &analysis.steps {
             let updated_variables = &step.read().updated_variables;
@@ -750,7 +745,20 @@ impl SourceModifications {
                         },
                         priority: VARIABLE_UPDATE_PRIORITY,
                     };
-                    self.add_modification(instrument_action.into());
+                    let declaration = updated_variable.declaration();
+                    let base_type = &declaration.type_name;
+                    let is_state_variable = declaration.state_variable;
+                    // we currently do not support recording variables involving user-defined types and arrays, as well as state variables.
+                    // in addition, source code with 0.4.x solidity version is not supported due to the lack of the `abi.encode` function.
+                    // TODO: support user-defined types and arrays, as well as state variables, solidity <0.4.24, in the future
+                    if base_type.as_ref().is_some_and(|ty| {
+                        !contains_user_defined_type(ty)
+                            && !contains_function_type(ty)
+                            && !contains_mapping_type(ty)
+                            && !is_state_variable
+                    }) {
+                        self.add_modification(instrument_action.into());
+                    }
                 }
             }
         }

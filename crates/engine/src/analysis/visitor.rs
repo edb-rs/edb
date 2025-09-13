@@ -45,11 +45,13 @@ use paste::paste;
 ///     }
 /// }
 /// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum VisitorAction {
     /// Continue normal AST traversal, visiting all child nodes.
     ///
     /// This is the default behavior that traverses the entire subtree
     /// starting from the current node.
+    #[default]
     Continue,
 
     /// Skip traversing the subtree of the current node.
