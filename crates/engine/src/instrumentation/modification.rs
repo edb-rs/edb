@@ -13,7 +13,7 @@ use crate::{
 
 use eyre::Result;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, Mutability, StateMutability, Statement,
+    ast::SourceLocation, BlockOrStatement, Mutability, StateMutability, Statement, StorageLocation,
 };
 use semver::Version;
 
@@ -753,7 +753,10 @@ impl SourceModifications {
                     let declaration = updated_variable.declaration();
                     let base_type = &declaration.type_name;
                     let is_state_variable = declaration.state_variable;
+                    let is_calldata_variable =
+                        declaration.storage_location == StorageLocation::Calldata;
                     // we currently do not support recording variables involving user-defined types and arrays, as well as state variables.
+                    // Variables declared as calldata are not supported too.
                     // in addition, source code with 0.4.x solidity version is not supported due to the lack of the `abi.encode` function.
                     // TODO: support user-defined types and arrays, as well as state variables, solidity <0.4.24, in the future
                     if base_type.as_ref().is_some_and(|ty| {
@@ -761,6 +764,7 @@ impl SourceModifications {
                             && !contains_function_type(ty)
                             && !contains_mapping_type(ty)
                             && !is_state_variable
+                            && !is_calldata_variable
                     }) {
                         self.add_modification(instrument_action.into());
                     }

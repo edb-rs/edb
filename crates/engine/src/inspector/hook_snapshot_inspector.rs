@@ -467,6 +467,12 @@ where
             return None; // Don't create a frame for hook calls
         }
 
+        // Check if this is a variable update call - if so, record snapshot but don't create frame
+        if inputs.target_address == VARIABLE_UPDATE_ADDRESS {
+            self.check_and_record_variable_update(inputs, context);
+            return None; // Don't create a frame for variable update calls
+        }
+
         // Start tracking new execution frame for regular calls only
         self.push_frame(self.current_trace_id);
         self.current_trace_id += 1;
@@ -480,7 +486,9 @@ where
         outcome: &mut CallOutcome,
     ) {
         // Only pop frame for non-hook calls
-        if inputs.target_address != HOOK_TRIGGER_ADDRESS {
+        if inputs.target_address != HOOK_TRIGGER_ADDRESS
+            && inputs.target_address != VARIABLE_UPDATE_ADDRESS
+        {
             let Some(frame_id) = self.pop_frame() else { return };
 
             let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
