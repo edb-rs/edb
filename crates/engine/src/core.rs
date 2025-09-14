@@ -425,7 +425,8 @@ impl Engine {
 
         let mut recompiled_artifacts = HashMap::new();
         for (address, artifact) in artifacts {
-            let compiler_version = Version::parse(artifact.compiler_version())?;
+            let compiler_version =
+                Version::parse(artifact.compiler_version().trim_start_matches('v'))?;
 
             let analysis = analysis_result
                 .get(address)
