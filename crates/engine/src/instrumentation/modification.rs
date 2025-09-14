@@ -1,22 +1,21 @@
-use std::{collections::BTreeMap, fmt::Display, os::macos::raw::stat};
+use std::{collections::BTreeMap, fmt::Display};
 
 use crate::{
-    abi_encode_available,
     analysis::{stmt_src, SourceAnalysis, VariableRef},
     contains_function_type, contains_mapping_type, contains_user_defined_type,
     find_index_of_first_statement_in_block, find_index_of_first_statement_in_block_or_statement,
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
-    mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str,
-    HOOK_TRIGGER_ADDRESS, USID, UVID, VARIABLE_UPDATE_ADDRESS,
+    mutability_to_str, slice_source_location, source_string_at_location, HOOK_TRIGGER_ADDRESS,
+    USID, UVID, VARIABLE_UPDATE_ADDRESS,
 };
 
 use eyre::Result;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, Mutability, StateMutability, Statement, TypeName,
-    Visibility,
+    ast::SourceLocation, BlockOrStatement, Mutability, StateMutability, Statement,
 };
+use semver::Version;
 
 const LEFT_BRACKET_PRIORITY: u8 = 255; // used for the left bracket of the block
 const FUNCTION_ENTRY_PRIORITY: u8 = 191; // used for the before step hook of function and modifier entry
@@ -277,7 +276,12 @@ impl Display for InstrumentContent {
 
 impl SourceModifications {
     /// Collects the modifications on the source code given the analysis result.
-    pub fn collect_modifications(&mut self, source: &str, analysis: &SourceAnalysis) -> Result<()> {
+    pub fn collect_modifications(
+        &mut self,
+        compiler_version: &Version,
+        source: &str,
+        analysis: &SourceAnalysis,
+    ) -> Result<()> {
         // Collect the modifications on the visibility and mutability of state variables and functions
         self.collect_visibility_and_mutability_modifications(source, analysis)?;
 
@@ -288,7 +292,7 @@ impl SourceModifications {
         self.collect_before_step_hook_modifications(source, analysis)?;
 
         // Collect the variable update hook modifications for each step.
-        self.collect_variable_update_hook_modifications(source, analysis)?;
+        self.collect_variable_update_hook_modifications(compiler_version, source, analysis)?;
 
         Ok(())
     }
@@ -622,10 +626,11 @@ impl SourceModifications {
 
     fn collect_variable_update_hook_modifications(
         &mut self,
+        compiler_version: &Version,
         source: &str,
         analysis: &SourceAnalysis,
     ) -> Result<()> {
-        if analysis.version_req.as_ref().is_some_and(|ver| !abi_encode_available(ver)) {
+        if compiler_version > &Version::parse("0.4.24").unwrap() {
             // if the abi.encode function is not available, we skip the variable update hook
             // TODO: support solidity <0.4.24 in the future
             return Ok(());

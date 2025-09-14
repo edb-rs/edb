@@ -19,8 +19,13 @@
 use crate::{AnalysisResult, SourceModifications};
 use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
+use semver::Version;
 
-pub fn instrument(input: &SolcInput, analysis: &AnalysisResult) -> Result<SolcInput> {
+pub fn instrument(
+    compiler_version: &Version,
+    input: &SolcInput,
+    analysis: &AnalysisResult,
+) -> Result<SolcInput> {
     let mut instrumented_input = input.clone();
     for (source_id, analysis_data) in &analysis.sources {
         let source_path = analysis_data.path.clone();
@@ -30,7 +35,7 @@ pub fn instrument(input: &SolcInput, analysis: &AnalysisResult) -> Result<SolcIn
         ))?;
 
         let mut modifications = SourceModifications::new(*source_id);
-        modifications.collect_modifications(&source.content, analysis_data)?;
+        modifications.collect_modifications(&compiler_version, &source.content, analysis_data)?;
 
         let modified_source = modifications.modify_source(&source.content);
         let instrumented_source = Source::new(modified_source);

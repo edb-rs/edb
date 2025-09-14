@@ -38,6 +38,7 @@ use revm::{
     database::CacheDB,
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
+use semver::Version;
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -424,11 +425,13 @@ impl Engine {
 
         let mut recompiled_artifacts = HashMap::new();
         for (address, artifact) in artifacts {
+            let compiler_version = Version::parse(artifact.compiler_version())?;
+
             let analysis = analysis_result
                 .get(address)
                 .ok_or_else(|| eyre::eyre!("No analysis result found for address {}", address))?;
 
-            let input = instrument(&artifact.input, analysis)?;
+            let input = instrument(&compiler_version, &artifact.input, analysis)?;
             let meta = artifact.meta.clone();
 
             // prepare the compiler
