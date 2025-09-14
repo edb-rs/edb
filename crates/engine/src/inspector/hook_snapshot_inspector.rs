@@ -25,6 +25,7 @@
 //! HookSnapshotInspector only captures at predetermined breakpoints,
 //! making it more efficient for tracking specific execution states.
 
+use alloy_dyn_abi::{DynSolType, DynSolValue};
 use alloy_primitives::{address, Address, Bytes, U256};
 use edb_common::{
     types::{ExecutionFrameId, Trace},
@@ -32,7 +33,7 @@ use edb_common::{
 };
 use eyre::Result;
 use foundry_compilers::{
-    artifacts::{bytecode, Contract},
+    artifacts::{bytecode, Contract, VariableDeclaration},
     Artifact,
 };
 use revm::{
@@ -52,7 +53,7 @@ use std::{
 };
 use tracing::{debug, error};
 
-use crate::USID;
+use crate::{analysis::UVID, USID};
 
 /// Magic trigger address that causes snapshots to be taken
 /// 0x0000000000000000000000000000000000023333
@@ -409,6 +410,37 @@ where
         }
     }
 
+    fn check_and_record_variable_update(
+        &mut self,
+        inputs: &mut CallInputs,
+        ctx: &mut EdbContext<DB>,
+    ) {
+        let input_data = match &inputs.input {
+            CallInput::SharedBuffer(range) => ctx
+                .local()
+                .shared_memory_buffer_slice(range.clone())
+                .map(|slice| slice.to_vec())
+                .unwrap_or_else(Vec::new),
+            CallInput::Bytes(bytes) => bytes.to_vec(),
+        };
+        // the variable value is encoded in this way: abi.encode(hex"{uvid}", abi.encode(variable))
+        // Here, we do the outer decoding, extracting the uvid and encoded variable value
+        let encoded_type: DynSolType =
+            "(uint256,bytes)".parse().expect("Failed to parse encoded type");
+        let Ok(DynSolValue::Tuple(values)) = encoded_type.abi_decode(&input_data) else {
+            error!(data = ?input_data, "Failed to decode variable update input data");
+            return;
+        };
+        let (uvid, _) = values[0].as_uint().expect("Failed to convert uvid");
+        let Ok(uvid) = UVID::try_from(uvid) else {
+            error!(decoded_value = ?uvid, "Failed to convert to uvid");
+            return;
+        };
+        let encoded_value = values[1].as_bytes().expect("Failed to convert encoded value");
+
+        // TODO: save the variable value
+    }
+
     /// Clear all recorded data
     pub fn clear(&mut self) {
         self.snapshots.snapshots.clear();
@@ -432,6 +464,12 @@ where
         if inputs.target_address == HOOK_TRIGGER_ADDRESS {
             self.check_and_record_hook(inputs, context);
             return None; // Don't create a frame for hook calls
+        }
+
+        // Check if this is a variable update call - if so, read variable value from the calldata
+        if inputs.target_address == VARIABLE_UPDATE_ADDRESS {
+            self.check_and_record_variable_update(inputs, context);
+            return None; // Don't create a frame for variable update calls
         }
 
         // Start tracking new execution frame for regular calls only
@@ -642,4 +680,27 @@ where
         );
         println!("\x1b[33m💡 Magic Address:\x1b[0m {HOOK_TRIGGER_ADDRESS:?}");
     }
+}
+
+/// Decode the variable value from the given abi.encoded data according to the variable declaration.
+///
+/// # Arguments
+/// * `declaration` - The variable declaration
+/// * `data` - The encoded variable value
+///
+/// # Returns
+/// The decoded variable value
+pub fn decode_variable_value(
+    declaration: &VariableDeclaration,
+    data: &[u8],
+) -> Result<DynSolValue> {
+    let Some(variable_type) = &declaration.type_descriptions.type_string else {
+        return Err(eyre::eyre!("Failed to get variable type: no type string in the declaration"));
+    };
+    let variable_type: DynSolType =
+        variable_type.parse().map_err(|e| eyre::eyre!("Failed to parse variable type: {}", e))?;
+    let value = variable_type
+        .abi_decode(data)
+        .map_err(|e| eyre::eyre!("Failed to decode variable value: {}", e))?;
+    Ok(value)
 }

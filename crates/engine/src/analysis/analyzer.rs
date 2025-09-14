@@ -1377,7 +1377,7 @@ pub(crate) mod tests {
     /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
     pub(crate) fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
         // Compile the source code to get the AST
-        let version = Version::parse("0.8.20").unwrap();
+        let version = Version::parse("0.4.24").unwrap();
         let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Source compilation should succeed: {}", result.unwrap_err());
 
@@ -1866,5 +1866,24 @@ contract TestContract {
         "#;
         let (_sources, analysis) = compile_and_analyze(source);
         assert_eq!(analysis.version_req, None);
+    }
+
+    #[test]
+    fn test_dyn_abi_using_variable_declaration() {
+        let source = r#"
+        contract C {
+            function f() public {
+                address[] memory b = new address[](0);
+            }
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+        let variables = analysis
+            .variable_table()
+            .values()
+            .map(|v| v.base().declaration().clone())
+            .collect::<Vec<_>>();
+        let variable = variables.first().unwrap();
+        assert_eq!(variable.type_descriptions.type_string.as_ref().unwrap(), "address[]");
     }
 }
