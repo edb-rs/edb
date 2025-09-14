@@ -1377,7 +1377,7 @@ pub(crate) mod tests {
     /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
     pub(crate) fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
         // Compile the source code to get the AST
-        let version = Version::parse("0.4.24").unwrap();
+        let version = Version::parse("0.8.20").unwrap();
         let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Source compilation should succeed: {}", result.unwrap_err());
 

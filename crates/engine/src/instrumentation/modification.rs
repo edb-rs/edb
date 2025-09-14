@@ -630,7 +630,7 @@ impl SourceModifications {
         source: &str,
         analysis: &SourceAnalysis,
     ) -> Result<()> {
-        if compiler_version > &Version::parse("0.4.24").unwrap() {
+        if compiler_version < &Version::parse("0.4.24").unwrap() {
             // if the abi.encode function is not available, we skip the variable update hook
             // TODO: support solidity <0.4.24 in the future
             return Ok(());
