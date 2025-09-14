@@ -994,18 +994,14 @@ impl Analyzer {
             return Ok(());
         }
 
-        macro_rules! finish_stmt {
-            () => {{
-                let step = self.current_step.take().unwrap();
-                self.finished_steps.push(step);
-            }};
-        }
-
         match statement {
             Statement::Block(_)
             | Statement::PlaceholderStatement(_)
             | Statement::UncheckedBlock(_) => {}
-            _ => finish_stmt!(),
+            _ => {
+                let step = self.current_step.take().unwrap();
+                self.finished_steps.push(step);
+            }
         }
         Ok(())
     }
@@ -1092,6 +1088,20 @@ impl Analyzer {
             step.write().updated_variables.extend(updated_variables);
         }
         Ok(VisitorAction::Continue)
+    }
+
+    /// Record a declared variable's initial value to the current step's updated variables.
+    fn record_declared_varaible(&mut self, declaration: &VariableDeclaration) -> eyre::Result<()> {
+        let Some(step) = self.current_step.as_mut() else {
+            return Ok(());
+        };
+        if declaration.name.is_empty() {
+            // if the variable has no name, we skip the variable declaration
+            return Ok(());
+        }
+        let variable: VariableRef = self.variables.get(&declaration.id).unwrap().clone();
+        step.write().updated_variables.push(variable);
+        Ok(())
     }
 }
 
@@ -1290,6 +1300,8 @@ impl Visitor for Analyzer {
     ) -> eyre::Result<VisitorAction> {
         // declare a variable
         self.declare_variable(declaration)?;
+        // record the declared variable
+        self.record_declared_varaible(declaration)?;
         Ok(VisitorAction::Continue)
     }
 
@@ -1318,6 +1330,7 @@ impl<'a> Visitor for AnalyzerSingleStepWalker<'a> {
         declaration: &VariableDeclaration,
     ) -> eyre::Result<VisitorAction> {
         self.analyzer.declare_variable(declaration)?;
+        self.analyzer.record_declared_varaible(declaration)?;
         Ok(VisitorAction::Continue)
     }
 }
@@ -1789,6 +1802,19 @@ contract TestContract {
         "#;
         let (_sources, analysis) = compile_and_analyze(source);
         assert_eq!(count_updated_variables!(analysis), 4);
+    }
+
+    #[test]
+    fn test_variable_declaration_is_updated() {
+        let source = r#"
+        contract TestContract {
+            function foo() public {
+                uint256 x = 1;
+            }
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+        assert_eq!(count_updated_variables!(analysis), 1);
     }
 
     #[test]

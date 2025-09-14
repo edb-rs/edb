@@ -211,7 +211,10 @@ pub fn find_index_of_first_statement_in_block_or_statement(
     block_or_statement: &BlockOrStatement,
 ) -> Option<usize> {
     match block_or_statement {
-        BlockOrStatement::Statement(statement) => stmt_src(statement).start,
+        BlockOrStatement::Statement(statement) => match statement {
+            Statement::Block(block) => find_index_of_first_statement_in_block(block),
+            _ => stmt_src(statement).start,
+        },
         BlockOrStatement::Block(block) => find_index_of_first_statement_in_block(block),
     }
 }

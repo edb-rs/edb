@@ -467,12 +467,6 @@ where
             return None; // Don't create a frame for hook calls
         }
 
-        // Check if this is a variable update call - if so, read variable value from the calldata
-        if inputs.target_address == VARIABLE_UPDATE_ADDRESS {
-            self.check_and_record_variable_update(inputs, context);
-            return None; // Don't create a frame for variable update calls
-        }
-
         // Start tracking new execution frame for regular calls only
         self.push_frame(self.current_trace_id);
         self.current_trace_id += 1;

@@ -1173,4 +1173,32 @@ contract TestContract {
         // The modified source should be able to be compiled and analyzed.
         let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
     }
+
+    #[test]
+    fn test_variable_update_hook_modification_for_for_loop() {
+        let source = r#"
+        contract C {
+            function a() public returns (uint256) {
+                for (uint i = 0; i < 10; i++) {
+                    return i;
+                }
+            }
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
+        modifications
+            .collect_variable_update_hook_modifications(
+                &Version::parse("0.8.0").unwrap(),
+                source,
+                &analysis,
+            )
+            .unwrap();
+        assert_eq!(modifications.modifications.len(), 1);
+        let modified_source = modifications.modify_source(source);
+
+        // The modified source should be able to be compiled and analyzed.
+        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
+    }
 }
