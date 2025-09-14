@@ -264,7 +264,7 @@ impl Display for InstrumentContent {
                 let base_name = &base_var.declaration().name;
                 write!(
                     f,
-                    "address({:?}).call(abi.encode(hex\"{:064x}\", abi.encode({})));",
+                    "address({:?}).call(abi.encode({}, abi.encode({})));",
                     VARIABLE_UPDATE_ADDRESS,
                     u64::from(*uvid),
                     base_name,

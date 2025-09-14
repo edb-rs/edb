@@ -423,12 +423,13 @@ where
                 .unwrap_or_else(Vec::new),
             CallInput::Bytes(bytes) => bytes.to_vec(),
         };
-        // the variable value is encoded in this way: abi.encode(hex"{uvid}", abi.encode(variable))
+        // the variable value is encoded in this way: abi.encode(uvid, abi.encode(variable))
         // Here, we do the outer decoding, extracting the uvid and encoded variable value
         let encoded_type: DynSolType =
             "(uint256,bytes)".parse().expect("Failed to parse encoded type");
-        let Ok(DynSolValue::Tuple(values)) = encoded_type.abi_decode(&input_data) else {
-            error!(data = ?input_data, "Failed to decode variable update input data");
+        let Ok(DynSolValue::Tuple(values)) = encoded_type.abi_decode_params(&input_data).inspect_err(|f| {
+            error!(data = ?hex::encode(&input_data), error = ?f, "Failed to decode variable update input data");
+        }) else {
             return;
         };
         let (uvid, _) = values[0].as_uint().expect("Failed to convert uvid");
