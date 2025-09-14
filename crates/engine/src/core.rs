@@ -443,6 +443,8 @@ impl Engine {
             let output = match compiler.compile_exact(&input) {
                 Ok(output) => output,
                 Err(e) => {
+                    // TODO: there is a know bug causing "stack too deep" error when instrumenting and recompiling transaction 0x1282e09bb5118f619da81b6a24c97999e7057ee9975628562c7cecbb4aa9f5af. Fix this in the future.
+
                     // Dump source code for debugging
                     let (original_dir, instrumented_dir) =
                         dump_source_for_debugging(address, &artifact.input, &input)?;
