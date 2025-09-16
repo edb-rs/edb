@@ -405,10 +405,24 @@ impl TerminalPanel {
             }
             "goto" | "g" => {
                 // A secret debugging cmd
-                let id = if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 0 };
+                let mut id =
+                    if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 0 };
+                id = dm.execution.get_sanitized_id(id);
                 self.pending_command = Some(PendingCommand::Goto(id));
                 self.spinner.start_loading(&format!("Going to snapshot {}...", id));
                 dm.execution.goto(id)?;
+            }
+            "info" => {
+                // A secret debugging cmd
+                let id = dm.execution.get_current_snapshot();
+                if let Some(info) = dm.execution.get_snapshot_info(id) {
+                    let info_str = format!("{:#?}", info);
+                    for line in info_str.lines() {
+                        self.add_output(&format!("{}", line));
+                    }
+                } else {
+                    self.add_error(&format!("No snapshot info found for id {}", id));
+                }
             }
             "reverse" | "rs" => {
                 let count =

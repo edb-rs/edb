@@ -16,6 +16,8 @@
 
 //! Common utilities for instrumentation
 
+use std::sync::Arc;
+
 use crate::{AnalysisResult, SourceModifications};
 use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
@@ -35,7 +37,11 @@ pub fn instrument(
         ))?;
 
         let mut modifications = SourceModifications::new(*source_id);
-        modifications.collect_modifications(&compiler_version, &source.content, analysis_data)?;
+        modifications.collect_modifications(
+            Arc::new(compiler_version.clone()),
+            &source.content,
+            analysis_data,
+        )?;
 
         let modified_source = modifications.modify_source(&source.content);
         let instrumented_source = Source::new(modified_source);

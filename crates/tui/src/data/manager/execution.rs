@@ -289,9 +289,14 @@ impl ExecutionManager {
         mgr
     }
 
+    pub fn get_sanitized_id(&self, id: usize) -> usize {
+        id.max(0).min(self.state.snapshot_count - 1)
+    }
+
     pub fn get_storage(&mut self, id: usize, slot: U256) -> Option<&U256> {
         let _ = self.pull_from_core();
 
+        let id = self.get_sanitized_id(id);
         if !self.state.storage.contains_key(&(id, slot)) {
             debug!("Storage not found in cache, fetching...");
             self.new_fetching_request(ExecutionRequest::Storage(id, slot));
@@ -307,6 +312,7 @@ impl ExecutionManager {
     pub fn get_storage_diff(&mut self, id: usize) -> Option<&HashMap<U256, (U256, U256)>> {
         let _ = self.pull_from_core();
 
+        let id = self.get_sanitized_id(id);
         if !self.state.storage_diff.contains_key(&id) {
             debug!("Storage diff not found in cache, fetching...");
             self.new_fetching_request(ExecutionRequest::StorageDiff(id));
@@ -322,6 +328,7 @@ impl ExecutionManager {
     pub fn get_snapshot_info(&mut self, id: usize) -> Option<&SnapshotInfo> {
         let _ = self.pull_from_core();
 
+        let id = self.get_sanitized_id(id);
         if !self.state.snapshot_info.contains_key(&id) {
             debug!("Snapshot info not found in cache, fetching...");
             self.new_fetching_request(ExecutionRequest::SnapshotInfo(id));
@@ -359,6 +366,7 @@ impl ExecutionManager {
     pub fn get_next_call(&mut self, id: usize) -> Option<usize> {
         let _ = self.pull_from_core();
 
+        let id = self.get_sanitized_id(id);
         if !self.state.next_call.contains_key(&id) {
             debug!("Next call info not found in cache, fetching...");
             self.new_fetching_request(ExecutionRequest::NextCall(id));
@@ -374,6 +382,7 @@ impl ExecutionManager {
     pub fn get_prev_call(&mut self, id: usize) -> Option<usize> {
         let _ = self.pull_from_core();
 
+        let id = self.get_sanitized_id(id);
         if !self.state.prev_call.contains_key(&id) {
             debug!("Prev call info not found in cache, fetching...");
             self.new_fetching_request(ExecutionRequest::PrevCall(id));
@@ -401,6 +410,7 @@ impl ExecutionManager {
     pub fn get_code(&mut self, id: usize) -> Option<&Code> {
         let _ = self.pull_from_core();
 
+        let id = self.get_sanitized_id(id);
         let Some(entry_id) =
             self.get_snapshot_info(id).map(|info| info.frame_id().trace_entry_id())
         else {
@@ -521,8 +531,9 @@ impl ExecutionManager {
             return Ok(());
         }
 
-        let _ = self.goto_snapshot(id);
-        let _ = self.display_snapshot(id);
+        let goto_id = id.max(0).min(self.state.snapshot_count - 1);
+        let _ = self.goto_snapshot(goto_id);
+        let _ = self.display_snapshot(goto_id);
 
         Ok(())
     }

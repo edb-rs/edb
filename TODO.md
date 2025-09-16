@@ -51,7 +51,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Optimize accessible variables storage per step
   - Reduce redundant state snapshot storage
 
-- [ ] **Improved Snapshot System**
+- [x] **Improved Snapshot System**
   - Replace `call` opcode approach with bytecode pattern injection
   - Implement custom inspector for pattern-based snapshots
   - Remove function mutability requirements

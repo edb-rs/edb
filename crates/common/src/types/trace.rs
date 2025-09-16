@@ -68,7 +68,7 @@ where
 }
 
 /// Result of a call/creation operation
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CallResult {
     /// Call succeeded
     Success {
@@ -92,6 +92,39 @@ pub enum CallResult {
         result: InstructionResult,
     },
 }
+
+impl PartialEq for CallResult {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                CallResult::Success { output: out1, result: res1 },
+                CallResult::Success { output: out2, result: res2 },
+            ) => {
+                if out1.is_empty() && out2.is_empty() {
+                    // When the return data is empty, we allow STOP equals to RETURN
+                    (res1 == res2)
+                        || (matches!(res1, InstructionResult::Stop)
+                            && matches!(res2, InstructionResult::Return))
+                        || (matches!(res2, InstructionResult::Stop)
+                            && matches!(res1, InstructionResult::Return))
+                } else {
+                    out1 == out2 && res1 == res2
+                }
+            }
+            (
+                CallResult::Revert { output: out1, result: res1 },
+                CallResult::Revert { output: out2, result: res2 },
+            ) => out1 == out2 && res1 == res2,
+            (
+                CallResult::Error { output: out1, result: res1 },
+                CallResult::Error { output: out2, result: res2 },
+            ) => out1 == out2 && res1 == res2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for CallResult {}
 
 impl CallResult {
     pub fn result(&self) -> InstructionResult {

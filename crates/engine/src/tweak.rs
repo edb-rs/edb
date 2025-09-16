@@ -31,7 +31,7 @@ use revm::{
     state::Bytecode,
     Database, DatabaseCommit, DatabaseRef, InspectEvm, MainBuilder,
 };
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::{next_etherscan_api_key, Artifact, TweakInspector};
 
@@ -92,6 +92,9 @@ where
     ) -> Result<()> {
         let tweaked_code =
             self.get_tweaked_code(addr, artifact, recompiled_artifact, quick).await?;
+        if tweaked_code.is_empty() {
+            error!(addr=?addr, quick=?quick, "Tweaked code is empty");
+        }
 
         let db = self.ctx.db_mut();
 

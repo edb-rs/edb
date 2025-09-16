@@ -1,26 +1,69 @@
-use foundry_compilers::artifacts::{Mutability, TypeName};
+use foundry_compilers::artifacts::{Mutability, StorageLocation, TypeName};
+use semver::Version;
 
 use crate::{
     analysis::{VariableRef, USID, UVID},
-    HOOK_TRIGGER_ADDRESS, VARIABLE_UPDATE_ADDRESS,
+    contains_function_type, contains_mapping_type, contains_user_defined_type, VersionRef,
+    MAGIC_SNAPSHOT_NUMBER, MAGIC_VARIABLE_UPDATE_NUMBER,
 };
 
 static EDB_STATE_VAR_FLAG: &str = "_edb_state_var_";
 
-pub fn generate_step_hook(usid: USID) -> String {
-    format!("address({:?}).call(hex\"{:064x}\");", HOOK_TRIGGER_ADDRESS, u64::from(usid),)
+pub fn generate_step_hook(version: &VersionRef, usid: USID) -> Option<String> {
+    // Solidity 0.4 does not support abi.encode, so we use a "0.4-compatible" way to encode the parameters.
+    if **version < Version::parse("0.5.0").unwrap() {
+        Some(format!(
+            "require(keccak256(uint256({}), uint256({})) != bytes32(uint256(0x2333)));",
+            MAGIC_SNAPSHOT_NUMBER,
+            u64::from(usid)
+        ))
+    } else {
+        Some(format!(
+            "require(keccak256(abi.encode(uint256({}), uint256({}))) != bytes32(uint256(0x2333)));",
+            MAGIC_SNAPSHOT_NUMBER,
+            u64::from(usid)
+        ))
+    }
 }
 
 /// Generates a variable update hook.
-pub fn generate_variable_update_hook(uvid: UVID, variable: &VariableRef) -> String {
-    let base_var = variable.base();
-    let base_name = &base_var.declaration().name;
-    format!(
-        "require(keccak256(abi.encode({}, {}, {})) != bytes32(uint256(0x2333)));",
-        VARIABLE_UPDATE_ADDRESS,
-        u64::from(uvid),
-        base_name,
-    )
+pub fn generate_variable_update_hook(
+    version: &VersionRef,
+    uvid: UVID,
+    variable: &VariableRef,
+) -> Option<String> {
+    if **version < Version::parse("0.4.24").unwrap() {
+        // if the abi.encode function is not available, we skip the variable update hook
+        // TODO: support solidity <0.4.24 in the future
+        return None;
+    }
+
+    // We currently do not support recording variables involving user-defined types and arrays, as well as state variables.
+    // Variables declared as calldata are not supported too.
+    // In addition, source code with 0.4.x solidity version is not supported due to the lack of the `abi.encode` function.
+    // TODO: support user-defined types and arrays, as well as state variables, solidity <0.4.24, in the future
+    let declaration = variable.declaration();
+    let base_type = &declaration.type_name;
+    let is_state_variable = declaration.state_variable;
+    let is_calldata_variable = declaration.storage_location == StorageLocation::Calldata;
+    if base_type.as_ref().is_some_and(|ty| {
+        !contains_user_defined_type(ty)
+            && !contains_function_type(ty)
+            && !contains_mapping_type(ty)
+            && !is_state_variable
+            && !is_calldata_variable
+    }) {
+        let base_var = variable.base();
+        let base_name = &base_var.declaration().name;
+        Some(format!(
+            "require(keccak256(abi.encode(uint256({}), uint256({}), {})) != bytes32(uint256(0x2333)));",
+            MAGIC_VARIABLE_UPDATE_NUMBER,
+            u64::from(uvid),
+            base_name,
+        ))
+    } else {
+        None
+    }
 }
 
 /// Generates a view method for a state variable.

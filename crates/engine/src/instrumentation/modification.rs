@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display};
+use std::{collections::BTreeMap, fmt::Display, sync::Arc};
 
 use crate::{
     analysis::{stmt_src, SourceAnalysis, VariableRef},
@@ -7,13 +7,13 @@ use crate::{
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
-    mutability_to_str, slice_source_location, source_string_at_location, 
-    USID, UVID,
+    mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str, USID,
+    UVID,
 };
 
 use eyre::Result;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, StorageLocation,
+    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, StorageLocation, Visibility,
 };
 use semver::Version;
 
@@ -23,6 +23,8 @@ const VISIBILITY_PRIORITY: u8 = 128; // used for the visibility of state variabl
 const VARIABLE_UPDATE_PRIORITY: u8 = 127; // used for the variable update hook
 const BEFORE_STEP_PRIORITY: u8 = 63; // used for the before step hook of statements other than function and modifier entry.
 const RIGHT_BRACKET_PRIORITY: u8 = 0; // used for the right bracket of the block
+
+pub type VersionRef = Arc<Version>;
 
 /// The collections of modifications on a source file.
 pub struct SourceModifications {
@@ -240,6 +242,8 @@ pub enum InstrumentContent {
     },
     /// A `before_step` hook. The debugger will pause here during step-by-step execution.
     BeforeStepHook {
+        /// Compiler Version
+        version: VersionRef,
         /// The USID of the step.
         usid: USID,
         /// The number of function calls made in the step.
@@ -247,6 +251,8 @@ pub enum InstrumentContent {
     },
     /// A `variable_update` hook. The debugger will record the value of the variable when it is updated.
     VariableUpdateHook {
+        /// Compiler Version
+        version: VersionRef,
         /// The UVID of the variable.
         uvid: UVID,
         /// The variable that is updated.
@@ -261,9 +267,11 @@ impl Display for InstrumentContent {
             Self::ViewMethod { variable } => {
                 codegen::generate_view_method(variable).unwrap_or_default()
             }
-            Self::BeforeStepHook { usid, .. } => codegen::generate_step_hook(*usid),
-            Self::VariableUpdateHook { uvid, variable } => {
-                codegen::generate_variable_update_hook(*uvid, variable)
+            Self::BeforeStepHook { version, usid, .. } => {
+                codegen::generate_step_hook(version, *usid).unwrap_or_default()
+            }
+            Self::VariableUpdateHook { version, uvid, variable } => {
+                codegen::generate_variable_update_hook(version, *uvid, variable).unwrap_or_default()
             }
         };
         write!(f, "{content}")
@@ -274,26 +282,50 @@ impl SourceModifications {
     /// Collects the modifications on the source code given the analysis result.
     pub fn collect_modifications(
         &mut self,
-        compiler_version: &Version,
+        compiler_version: VersionRef,
         source: &str,
         analysis: &SourceAnalysis,
     ) -> Result<()> {
-        // Collect the modifications on the visibility and mutability of state variables and functions
-        self.collect_visibility_and_mutability_modifications(source, analysis)?;
+        // Collect the modifications to generate view methods for state variables.
+        self.collect_view_method_modifications(analysis);
 
         // Collect the modifications to patch single-statement if/for/while/try/catch/etc.
         self.collect_statement_to_block_modifications(source, analysis)?;
 
         // Collect the before step hook modifications for each step.
-        self.collect_before_step_hook_modifications(source, analysis)?;
+        self.collect_before_step_hook_modifications(compiler_version.clone(), source, analysis)?;
 
         // Collect the variable update hook modifications for each step.
-        self.collect_variable_update_hook_modifications(compiler_version, source, analysis)?;
+        self.collect_variable_update_hook_modifications(
+            compiler_version.clone(),
+            source,
+            analysis,
+        )?;
 
         Ok(())
     }
 
+    /// Collects the modifications to generate view methods for state variables.
+    fn collect_view_method_modifications(&mut self, analysis: &SourceAnalysis) {
+        let source_id = self.source_id;
+        for state_variable in &analysis.state_variables {
+            let src = &state_variable.declaration().src;
+            let loc = src.start.unwrap_or(0) + src.length.unwrap_or(0) + 1; // XXX (ZZ): we may need to check last char
+            let instrument_action = InstrumentAction {
+                source_id,
+                loc,
+                content: InstrumentContent::ViewMethod { variable: state_variable.clone() },
+                priority: VISIBILITY_PRIORITY,
+            };
+            self.add_modification(instrument_action.into());
+        }
+    }
+
     /// Collects the modifications on the visibility of state variables and functions given the source analysis result.
+    #[deprecated(
+        note = "This function is deprecated, since our new instrumentation does not need to change visibility and mutability."
+    )]
+    #[allow(dead_code)]
     fn collect_visibility_and_mutability_modifications(
         &mut self,
         source: &str,
@@ -312,20 +344,6 @@ impl SourceModifications {
                 }
             };
 
-        for state_variable in &analysis.state_variables {
-            let src = &state_variable.declaration().src;
-            let loc = src.start.unwrap_or(0) + src.length.unwrap_or(0) + 1; // XXX (ZZ): we may need to check last char
-            let instrument_action = InstrumentAction {
-                source_id,
-                loc,
-                content: InstrumentContent::ViewMethod{ variable: state_variable.clone()},
-                priority: VISIBILITY_PRIORITY,
-            };
-            self.add_modification(instrument_action.into());
-        }
-
-        // We will manually generate view functions for private state variables
-        #[cfg(any())]
         let add_visibility =
             |src: SourceLocation, add: &str, at_index: usize| -> InstrumentAction {
                 let new_visibility_str = format!(" {add} ");
@@ -338,8 +356,6 @@ impl SourceModifications {
                 }
             };
 
-        // We will manually generate view functions for private state variables
-        #[cfg(any())]
         for private_state_variable in &analysis.private_state_variables {
             let declaration_str = source_string_at_location(
                 source_id,
@@ -367,8 +383,6 @@ impl SourceModifications {
             self.add_modification(instrument_action.into());
         }
 
-        // We temporarily disable private function visibility modifications
-        #[cfg(any())]
         for private_function in &analysis.private_functions {
             let definition_str =
                 source_string_at_location(source_id, source, &private_function.src());
@@ -520,6 +534,7 @@ impl SourceModifications {
 
     fn collect_before_step_hook_modifications(
         &mut self,
+        compiler_version: VersionRef,
         source: &str,
         analysis: &SourceAnalysis,
     ) -> Result<()> {
@@ -601,7 +616,11 @@ impl SourceModifications {
             let instrument_action = InstrumentAction {
                 source_id,
                 loc,
-                content: InstrumentContent::BeforeStepHook { usid, function_calls },
+                content: InstrumentContent::BeforeStepHook {
+                    version: compiler_version.clone(),
+                    usid,
+                    function_calls,
+                },
                 priority,
             };
             self.add_modification(instrument_action.into());
@@ -612,16 +631,10 @@ impl SourceModifications {
 
     fn collect_variable_update_hook_modifications(
         &mut self,
-        compiler_version: &Version,
+        compiler_version: VersionRef,
         source: &str,
         analysis: &SourceAnalysis,
     ) -> Result<()> {
-        if compiler_version < &Version::parse("0.4.24").unwrap() {
-            // if the abi.encode function is not available, we skip the variable update hook
-            // TODO: support solidity <0.4.24 in the future
-            return Ok(());
-        }
-
         let source_id = self.source_id;
         for step in &analysis.steps {
             let updated_variables = &step.read().updated_variables;
@@ -731,29 +744,14 @@ impl SourceModifications {
                         source_id,
                         loc,
                         content: InstrumentContent::VariableUpdateHook {
+                            version: compiler_version.clone(),
                             uvid,
                             variable: updated_variable.clone(),
                         },
                         priority: VARIABLE_UPDATE_PRIORITY,
                     };
-                    let declaration = updated_variable.declaration();
-                    let base_type = &declaration.type_name;
-                    let is_state_variable = declaration.state_variable;
-                    let is_calldata_variable =
-                        declaration.storage_location == StorageLocation::Calldata;
-                    // we currently do not support recording variables involving user-defined types and arrays, as well as state variables.
-                    // Variables declared as calldata are not supported too.
-                    // in addition, source code with 0.4.x solidity version is not supported due to the lack of the `abi.encode` function.
-                    // TODO: support user-defined types and arrays, as well as state variables, solidity <0.4.24, in the future
-                    if base_type.as_ref().is_some_and(|ty| {
-                        !contains_user_defined_type(ty)
-                            && !contains_function_type(ty)
-                            && !contains_mapping_type(ty)
-                            && !is_state_variable
-                            && !is_calldata_variable
-                    }) {
-                        self.add_modification(instrument_action.into());
-                    }
+
+                    self.add_modification(instrument_action.into());
                 }
             }
         }
@@ -980,7 +978,8 @@ mod tests {
         let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
 
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        let version = Arc::new(Version::parse("0.8.0").unwrap());
+        modifications.collect_before_step_hook_modifications(version, source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 4);
         let modified_source = modifications.modify_source(source);
 
@@ -1003,7 +1002,8 @@ mod tests {
         let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
 
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        let version = Arc::new(Version::parse("0.8.0").unwrap());
+        modifications.collect_before_step_hook_modifications(version, source, &analysis).unwrap();
         // assert_eq!(modifications.modifications.len(), 1);
         let modified_source = modifications.modify_source(source);
         println!("{}", modified_source);
@@ -1040,7 +1040,8 @@ mod tests {
         let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
 
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        let version = Arc::new(Version::parse("0.8.0").unwrap());
+        modifications.collect_before_step_hook_modifications(version, source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 13);
         let modified_source = modifications.modify_source(source);
 
@@ -1062,7 +1063,8 @@ mod tests {
         let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
 
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_before_step_hook_modifications(source, &analysis).unwrap();
+        let version = Arc::new(Version::parse("0.8.0").unwrap());
+        modifications.collect_before_step_hook_modifications(version, source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 1);
         let modified_source = modifications.modify_source(source);
 
@@ -1180,7 +1182,7 @@ contract TestContract {
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
         modifications
             .collect_variable_update_hook_modifications(
-                &Version::parse("0.8.0").unwrap(),
+                Arc::new(Version::parse("0.8.0").unwrap()),
                 source,
                 &analysis,
             )

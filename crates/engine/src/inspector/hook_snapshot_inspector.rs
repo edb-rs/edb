@@ -28,7 +28,7 @@
 use alloy_dyn_abi::{DynSolType, DynSolValue};
 use alloy_primitives::{address, Address, Bytes, U256};
 use edb_common::{
-    types::{ExecutionFrameId, Trace},
+    types::{CallResult, ExecutionFrameId, Trace},
     EdbContext,
 };
 use eyre::Result;
@@ -41,26 +41,37 @@ use revm::{
     context::{ContextTr, CreateScheme, JournalTr, LocalContextTr},
     database::CacheDB,
     interpreter::{
-        interpreter_types::Jumps, CallInput, CallInputs, CallOutcome, CallScheme, CreateInputs,
-        CreateOutcome, Interpreter,
+        interpreter_types::{InputsTr, Jumps},
+        CallInput, CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, Interpreter,
     },
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
+use tower::timeout::error;
 use tracing::{debug, error};
 
-use crate::{analysis::UVID, USID};
+use crate::{
+    analysis::{self, AnalysisResult, UVID},
+    USID,
+};
 
-/// Magic trigger address that causes snapshots to be taken
-/// 0x0000000000000000000000000000000000023333
-pub const HOOK_TRIGGER_ADDRESS: Address = address!("0x0000000000000000000000000000000000023333");
-/// Magic address that records the update of a variable
-/// 0x0000000000000000000000000000000002333333
-pub const VARIABLE_UPDATE_ADDRESS: Address = address!("0x0000000000000000000000000000000002333333");
+/// Magic number that indicates a snapshot to be taken
+pub const MAGIC_SNAPSHOT_NUMBER: U256 = U256::from_be_bytes([
+    0x20, 0x15, 0x05, 0x02, 0xff, 0xff, 0xff, 0xff, 0x20, 0x24, 0x01, 0x02, 0xff, 0xff, 0xff, 0xff,
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x05, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+]);
+
+/// Magic number that indicates a variable update to be recorded
+pub const MAGIC_VARIABLE_UPDATE_NUMBER: U256 = U256::from_be_bytes([
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x05, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x10,
+    0x20, 0x15, 0x05, 0x02, 0xff, 0xff, 0xff, 0xff, 0x20, 0x24, 0x01, 0x02, 0xff, 0xff, 0xff,
+    0xff, // To William: feel free to update this number
+]);
 
 /// Single hook execution snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +223,9 @@ where
     /// The trace of the current tx
     trace: &'a Trace,
 
+    /// Source code analysis results
+    analysis: &'a HashMap<Address, AnalysisResult>,
+
     /// Collection of hook snapshots
     pub snapshots: HookSnapshots<DB>,
 
@@ -232,9 +246,10 @@ where
     <DB as Database>::Error: Clone,
 {
     /// Create a new hook snapshot inspector
-    pub fn new(trace: &'a Trace) -> Self {
+    pub fn new(trace: &'a Trace, analysis: &'a HashMap<Address, AnalysisResult>) -> Self {
         Self {
             trace,
+            analysis,
             snapshots: HookSnapshots::default(),
             frame_stack: Vec::new(),
             current_trace_id: 0,
@@ -305,32 +320,22 @@ where
     }
 
     /// Check if this is a hook trigger call and record snapshot if so
-    fn check_and_record_hook(&mut self, inputs: &CallInputs, ctx: &mut EdbContext<DB>) {
-        // Check if this is a call to the magic trigger address
-        if inputs.target_address != HOOK_TRIGGER_ADDRESS {
-            return;
-        }
-
-        // Extract usid from call data (assume it's a single U256)
-        let input_data = match &inputs.input {
-            CallInput::SharedBuffer(range) => ctx
-                .local()
-                .shared_memory_buffer_slice(range.clone())
-                .map(|slice| slice.to_vec())
-                .unwrap_or_else(|| Vec::new()),
-            CallInput::Bytes(bytes) => bytes.to_vec().clone(),
-        };
-        let usid_opt = if input_data.len() >= 32 {
-            U256::from_be_slice(&input_data[..32]).try_into().ok()
+    fn check_and_record_hook(
+        &mut self,
+        data: &[u8],
+        _interp: &Interpreter,
+        ctx: &mut EdbContext<DB>,
+    ) {
+        let usid_opt = if data.len() >= 32 {
+            U256::from_be_slice(&data[..32]).try_into().ok()
         } else {
-            None
+            error!("KECCAK256 input data too short for snapshot, skipping");
+            return;
         };
-        let usid = match usid_opt {
-            Some(usid) => usid,
-            None => {
-                error!("Hook call data does not contain valid USID, skipping snapshot");
-                return;
-            }
+
+        let Some(usid) = usid_opt else {
+            error!("Hook call data does not contain valid USID, skipping snapshot");
+            return;
         };
 
         // Clone current database state
@@ -357,6 +362,61 @@ where
         } else {
             error!("No current frame to update with hook snapshot");
         }
+    }
+
+    fn check_and_record_variable_update(
+        &mut self,
+        data: &[u8],
+        interp: &Interpreter,
+        _ctx: &mut EdbContext<DB>,
+    ) {
+        let uvid_opt: Option<UVID> = if data.len() >= 32 {
+            U256::from_be_slice(&data[..32]).try_into().ok()
+        } else {
+            error!("KECCAK256 input data too short for variable update, skipping");
+            return;
+        };
+        let Some(uvid) = uvid_opt else {
+            error!("Hook call data does not contain valid UVID, skipping snapshot");
+            return;
+        };
+
+        let address = self
+            .current_frame_id()
+            .and_then(|frame_id| self.trace.get(frame_id.trace_entry_id()))
+            .and_then(|entry| Some(entry.code_address))
+            .unwrap_or(interp.input.target_address());
+
+        let Some(variable) =
+            self.analysis.get(&address).and_then(|a| a.uvid_to_variable.get(&uvid))
+        else {
+            error!(address=?address, uvid=?uvid, "No variable found for address and UVID, skipping variable update recording");
+            return;
+        };
+
+        let decoded_data = &data[32..];
+        let value = match decode_variable_value(variable.declaration(), decoded_data) {
+            Ok(v) => v,
+            Err(e) => {
+                error!(
+                    address=?address,
+                    uvid=?uvid,
+                    variable=?variable.declaration().type_descriptions.type_string,
+                    "Failed to decode variable value: {}", e
+                );
+                return;
+            }
+        };
+
+        // TODO
+        println!(
+            "Found variable update: {} ({}): {:?}",
+            uvid,
+            variable.base().declaration().name,
+            value
+        );
+
+        // TODO: save the variable value
     }
 
     /// Check and apply creation hooks if the bytecode matches
@@ -410,38 +470,6 @@ where
         }
     }
 
-    fn check_and_record_variable_update(
-        &mut self,
-        inputs: &mut CallInputs,
-        ctx: &mut EdbContext<DB>,
-    ) {
-        let input_data = match &inputs.input {
-            CallInput::SharedBuffer(range) => ctx
-                .local()
-                .shared_memory_buffer_slice(range.clone())
-                .map(|slice| slice.to_vec())
-                .unwrap_or_else(Vec::new),
-            CallInput::Bytes(bytes) => bytes.to_vec(),
-        };
-        // the variable value is encoded in this way: abi.encode(uvid, abi.encode(variable))
-        // Here, we do the outer decoding, extracting the uvid and encoded variable value
-        let encoded_type: DynSolType =
-            "(uint256,bytes)".parse().expect("Failed to parse encoded type");
-        let Ok(DynSolValue::Tuple(values)) = encoded_type.abi_decode_params(&input_data).inspect_err(|f| {
-            error!(data = ?hex::encode(&input_data), error = ?f, "Failed to decode variable update input data");
-        }) else {
-            return;
-        };
-        let (uvid, _) = values[0].as_uint().expect("Failed to convert uvid");
-        let Ok(uvid) = UVID::try_from(uvid) else {
-            error!(decoded_value = ?uvid, "Failed to convert to uvid");
-            return;
-        };
-        let encoded_value = values[1].as_bytes().expect("Failed to convert encoded value");
-
-        // TODO: save the variable value
-    }
-
     /// Clear all recorded data
     pub fn clear(&mut self) {
         self.snapshots.snapshots.clear();
@@ -456,23 +484,51 @@ where
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
+    fn step(&mut self, interp: &mut Interpreter, ctx: &mut EdbContext<DB>) {
+        // Get current opcode safely
+        let opcode = unsafe { OpCode::new_unchecked(interp.bytecode.opcode()) };
+
+        if opcode != OpCode::KECCAK256 {
+            // KECCAK256 is the only hooked opcode.
+            return;
+        }
+
+        let Some(data) = interp.stack.pop().ok().and_then(|offset_u256| {
+            let data = interp.stack.pop().ok().and_then(|len_u256| {
+                let offset = usize::try_from(offset_u256).ok()?;
+                let len = usize::try_from(len_u256).ok()?;
+                let data = interp.memory.slice_len(offset, len);
+
+                let _ = interp.stack.push(len_u256);
+                Some(data)
+            });
+
+            let _ = interp.stack.push(offset_u256);
+            data
+        }) else {
+            error!("Failed to read KECCAK256 input data from stack");
+            return;
+        };
+
+        if data.len() < 32 {
+            // Not enough data for at least two U256 values
+            return;
+        }
+
+        let magic_number = U256::from_be_slice(&data[..32]);
+
+        if magic_number == MAGIC_SNAPSHOT_NUMBER {
+            self.check_and_record_hook(&data[32..], interp, ctx);
+        } else if magic_number == MAGIC_VARIABLE_UPDATE_NUMBER {
+            self.check_and_record_variable_update(&data[32..], interp, ctx);
+        }
+    }
+
     fn call(
         &mut self,
-        context: &mut EdbContext<DB>,
-        inputs: &mut CallInputs,
+        _context: &mut EdbContext<DB>,
+        _inputs: &mut CallInputs,
     ) -> Option<CallOutcome> {
-        // Check if this is a hook trigger - if so, record snapshot but don't create frame
-        if inputs.target_address == HOOK_TRIGGER_ADDRESS {
-            self.check_and_record_hook(inputs, context);
-            return None; // Don't create a frame for hook calls
-        }
-
-        // Check if this is a variable update call - if so, record snapshot but don't create frame
-        if inputs.target_address == VARIABLE_UPDATE_ADDRESS {
-            self.check_and_record_variable_update(inputs, context);
-            return None; // Don't create a frame for variable update calls
-        }
-
         // Start tracking new execution frame for regular calls only
         self.push_frame(self.current_trace_id);
         self.current_trace_id += 1;
@@ -485,25 +541,21 @@ where
         inputs: &CallInputs,
         outcome: &mut CallOutcome,
     ) {
-        // Only pop frame for non-hook calls
-        if inputs.target_address != HOOK_TRIGGER_ADDRESS
-            && inputs.target_address != VARIABLE_UPDATE_ADDRESS
-        {
-            let Some(frame_id) = self.pop_frame() else { return };
+        let Some(frame_id) = self.pop_frame() else { return };
 
-            let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
+        let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
-            if entry.result != Some(outcome.into()) {
-                // Mismatched call outcome
-                error!(
-                    target_address = inputs.target_address.to_string(),
-                    bytecode_address = inputs.bytecode_address.to_string(),
-                    "Call outcome mismatch at frame {}: expected {:?}, got {:?}",
-                    frame_id,
-                    entry.result,
-                    outcome
-                );
-            }
+        if entry.result != Some(outcome.into()) {
+            // Mismatched call outcome
+            error!(
+                target_address = inputs.target_address.to_string(),
+                bytecode_address = inputs.bytecode_address.to_string(),
+                "Call outcome mismatch at frame {}: expected {:?}, got {:?} ({:?})",
+                frame_id,
+                entry.result,
+                Into::<CallResult>::into(&outcome),
+                outcome,
+            );
         }
     }
 
@@ -681,7 +733,7 @@ where
         println!(
             "\n\x1b[90m─────────────────────────────────────────────────────────────────\x1b[0m"
         );
-        println!("\x1b[33m💡 Magic Address:\x1b[0m {HOOK_TRIGGER_ADDRESS:?}");
+        println!("\x1b[33m💡 Magic Snapshot Number:\x1b[0m {MAGIC_SNAPSHOT_NUMBER:?}");
     }
 }
 

@@ -194,6 +194,7 @@ impl Engine {
             tx.clone(),
             hook_creation,
             &replay_result.execution_trace,
+            &analysis_results,
         )?;
 
         // Step 8: Start RPC server with analysis results and snapshots
@@ -360,6 +361,7 @@ impl Engine {
         mut tx: TxEnv,
         creation_hooks: Vec<(&'a Contract, &'a Contract, &'a Bytes)>,
         trace: &Trace,
+        analysis_results: &HashMap<Address, AnalysisResult>,
     ) -> Result<HookSnapshots<DB>>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -371,7 +373,7 @@ impl Engine {
 
         info!("Collecting hook snapshots for source code contracts");
 
-        let mut inspector = HookSnapshotInspector::new(trace);
+        let mut inspector = HookSnapshotInspector::new(trace, analysis_results);
         inspector.with_creation_hooks(creation_hooks)?;
         let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
 
