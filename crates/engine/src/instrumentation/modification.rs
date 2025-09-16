@@ -7,13 +7,13 @@ use crate::{
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
-    mutability_to_str, slice_source_location, source_string_at_location, HOOK_TRIGGER_ADDRESS,
-    USID, UVID, VARIABLE_UPDATE_ADDRESS,
+    mutability_to_str, slice_source_location, source_string_at_location, 
+    USID, UVID,
 };
 
 use eyre::Result;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, Mutability, StateMutability, Statement, StorageLocation,
+    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, StorageLocation,
 };
 use semver::Version;
 
@@ -233,6 +233,11 @@ impl RemoveAction {
 pub enum InstrumentContent {
     /// The code to instrument. The plain code can be directly inserted into the source code as a string.
     Plain(String),
+    /// View method for state variables
+    ViewMethod {
+        /// The state variable being accessed.
+        variable: VariableRef,
+    },
     /// A `before_step` hook. The debugger will pause here during step-by-step execution.
     BeforeStepHook {
         /// The USID of the step.
@@ -251,26 +256,17 @@ pub enum InstrumentContent {
 
 impl Display for InstrumentContent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Plain(content) => write!(f, "{content}"),
-            Self::BeforeStepHook { usid, .. } => write!(
-                f,
-                "address({:?}).call(hex\"{:064x}\");",
-                HOOK_TRIGGER_ADDRESS,
-                u64::from(*usid),
-            ),
-            Self::VariableUpdateHook { uvid, variable } => {
-                let base_var = variable.base();
-                let base_name = &base_var.declaration().name;
-                write!(
-                    f,
-                    "address({:?}).call(abi.encode({}, abi.encode({})));",
-                    VARIABLE_UPDATE_ADDRESS,
-                    u64::from(*uvid),
-                    base_name,
-                )
+        let content = match self {
+            Self::Plain(content) => content.clone(),
+            Self::ViewMethod { variable } => {
+                codegen::generate_view_method(variable).unwrap_or_default()
             }
-        }
+            Self::BeforeStepHook { usid, .. } => codegen::generate_step_hook(*usid),
+            Self::VariableUpdateHook { uvid, variable } => {
+                codegen::generate_variable_update_hook(*uvid, variable)
+            }
+        };
+        write!(f, "{content}")
     }
 }
 
@@ -317,22 +313,12 @@ impl SourceModifications {
             };
 
         for state_variable in &analysis.state_variables {
-            let Some(view_function) = codegen::generate_view_method(state_variable) else {
-                // The state variable contains user-defined types.
-                continue;
-            };
-
-            if state_variable.declaration().mutability == Some(Mutability::Constant) {
-                // We do not need to output constant state variables
-                continue;
-            }
-
             let src = &state_variable.declaration().src;
             let loc = src.start.unwrap_or(0) + src.length.unwrap_or(0) + 1; // XXX (ZZ): we may need to check last char
             let instrument_action = InstrumentAction {
                 source_id,
                 loc,
-                content: InstrumentContent::Plain(view_function),
+                content: InstrumentContent::ViewMethod{ variable: state_variable.clone()},
                 priority: VISIBILITY_PRIORITY,
             };
             self.add_modification(instrument_action.into());

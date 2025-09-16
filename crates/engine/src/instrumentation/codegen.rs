@@ -1,14 +1,33 @@
-use foundry_compilers::artifacts::TypeName;
+use foundry_compilers::artifacts::{Mutability, TypeName};
 
-use crate::analysis::VariableRef;
+use crate::{
+    analysis::{VariableRef, USID, UVID},
+    HOOK_TRIGGER_ADDRESS, VARIABLE_UPDATE_ADDRESS,
+};
 
 static EDB_STATE_VAR_FLAG: &str = "_edb_state_var_";
 
-/// Generates a view method for a private state variable.
+pub fn generate_step_hook(usid: USID) -> String {
+    format!("address({:?}).call(hex\"{:064x}\");", HOOK_TRIGGER_ADDRESS, u64::from(usid),)
+}
+
+/// Generates a variable update hook.
+pub fn generate_variable_update_hook(uvid: UVID, variable: &VariableRef) -> String {
+    let base_var = variable.base();
+    let base_name = &base_var.declaration().name;
+    format!(
+        "require(keccak256(abi.encode({}, {}, {})) != bytes32(uint256(0x2333)));",
+        VARIABLE_UPDATE_ADDRESS,
+        u64::from(uvid),
+        base_name,
+    )
+}
+
+/// Generates a view method for a state variable.
 ///
 /// For primitive types, generates a simple view function.
 /// For arrays and mappings, recursively adds index/key parameters.
-/// Returns None if the variable contains user-defined types.
+/// Returns None if the variable contains user-defined types or is constant.
 ///
 /// # Arguments
 /// * `private_state_variable` - The VariableRef for the private state variable
@@ -17,6 +36,11 @@ static EDB_STATE_VAR_FLAG: &str = "_edb_state_var_";
 /// * `Option<String>` - The generated view function code, or None if user-defined types are present
 pub fn generate_view_method(state_variable: &VariableRef) -> Option<String> {
     let declaration = state_variable.declaration();
+    if declaration.mutability == Some(Mutability::Constant) {
+        // We do not need to output constant state variables
+        return None;
+    }
+
     let var_name = &declaration.name;
 
     // Get the type information
