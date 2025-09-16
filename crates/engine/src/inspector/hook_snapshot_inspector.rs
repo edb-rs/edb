@@ -27,6 +27,7 @@
 
 use alloy_dyn_abi::{DynSolType, DynSolValue};
 use alloy_primitives::{address, Address, Bytes, U256};
+use axum::extract::rejection::LengthLimitError;
 use edb_common::{
     types::{CallResult, ExecutionFrameId, Trace},
     EdbContext,
@@ -37,7 +38,7 @@ use foundry_compilers::{
     Artifact,
 };
 use revm::{
-    bytecode::OpCode,
+    bytecode::{legacy, OpCode},
     context::{ContextTr, CreateScheme, JournalTr, LocalContextTr},
     database::CacheDB,
     interpreter::{
@@ -370,31 +371,70 @@ where
         interp: &Interpreter,
         _ctx: &mut EdbContext<DB>,
     ) {
-        let uvid_opt: Option<UVID> = if data.len() >= 32 {
-            U256::from_be_slice(&data[..32]).try_into().ok()
-        } else {
-            error!("KECCAK256 input data too short for variable update, skipping");
-            return;
-        };
-        let Some(uvid) = uvid_opt else {
-            error!("Hook call data does not contain valid UVID, skipping snapshot");
-            return;
-        };
-
         let address = self
             .current_frame_id()
             .and_then(|frame_id| self.trace.get(frame_id.trace_entry_id()))
             .and_then(|entry| Some(entry.code_address))
             .unwrap_or(interp.input.target_address());
 
-        let Some(variable) =
-            self.analysis.get(&address).and_then(|a| a.uvid_to_variable.get(&uvid))
-        else {
-            error!(address=?address, uvid=?uvid, "No variable found for address and UVID, skipping variable update recording");
+        // The data is decoded as (uint256 magic, uint256 uvid, abi.encode(value))
+        // So the data will be organized as
+        //      -32 .. 0 : [uint256 magic] (parsed before this function)
+        //        0 .. 32: [uint256 uvid]
+        //       32 .. 64: [offset] (should be 0x60 considering the first two uint256)
+        //       64 .. 96: [length of encoded value]
+        //       96 .. _ : [encoded value]
+        if data.len() < 96 {
+            error!(
+                address=?address,
+                "KECCAK256 input data too short for variable update value, skipping"
+            );
+            return;
+        }
+
+        let Some(uvid) = U256::from_be_slice(&data[..32]).try_into().ok() else {
+            error!("Hook call data does not contain valid UVID, skipping snapshot");
             return;
         };
 
-        let decoded_data = &data[32..];
+        let offset = U256::from_be_slice(&data[32..64]);
+        if offset != U256::from(0x60) {
+            error!(
+                address=?address,
+                uvid=?uvid,
+                offset=?offset,
+                "Unexpected offset for variable update value, skipping"
+            );
+            return;
+        }
+
+        let length = U256::from_be_slice(&data[64..96]);
+        let length_usize = match usize::try_from(length) {
+            Ok(l) => l,
+            Err(_) => {
+                error!(
+                    address=?address,
+                    uvid=?uvid,
+                    length=?length,
+                    "Variable update value length too large, skipping"
+                );
+                return;
+            }
+        };
+
+        let decoded_data = &data[96..96 + length_usize];
+
+        let Some(variable) =
+            self.analysis.get(&address).and_then(|a| a.uvid_to_variable.get(&uvid))
+        else {
+            error!(
+                address=?address,
+                uvid=?uvid,
+                "No variable found for address and UVID, skipping variable update recording",
+            );
+            return;
+        };
+
         let value = match decode_variable_value(variable.declaration(), decoded_data) {
             Ok(v) => v,
             Err(e) => {
@@ -402,7 +442,8 @@ where
                     address=?address,
                     uvid=?uvid,
                     variable=?variable.declaration().type_descriptions.type_string,
-                    "Failed to decode variable value: {}", e
+                    data=?hex::encode(decoded_data),
+                    error=?e,
                 );
                 return;
             }
