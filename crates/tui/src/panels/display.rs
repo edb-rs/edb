@@ -23,9 +23,13 @@ use crate::data::DataManager;
 use crate::ui::borders::BorderPresets;
 use crate::ui::colors::ColorScheme;
 use crate::ui::status::StatusBar;
+use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_primitives::{Address, Bytes, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use edb_common::types::{OpcodeSnapshotInfoDetail, SnapshotInfoDetail};
+use edb_common::types::{
+    EdbSolValue, HookSnapshotInfoDetail, OpcodeSnapshotInfoDetail, SnapshotInfoDetail,
+    SolValueFormatterContext,
+};
 use eyre::Result;
 use ratatui::{
     layout::Rect,
@@ -35,14 +39,29 @@ use ratatui::{
     Frame,
 };
 use revm::state::TransientStorage;
-use std::{collections::HashMap, mem};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+    sync::Arc,
+};
 use tracing::debug;
+
+/// Variable display category for hooked snapshots
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariableCategory {
+    /// Local variables from current scope
+    Local,
+    /// State variables (contract storage)
+    State,
+}
 
 /// Display modes for the panel
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayMode {
-    /// Show variables in scope (for hooked snapshots)
-    Variables,
+    /// Show local variables (for hooked snapshots)
+    LocalVariables,
+    /// Show state variables (for hooked snapshots)
+    StateVariables,
     /// Show breakpoints (for hooked snapshots)
     Breakpoints,
     /// Show current stack (for opcode snapshots)
@@ -57,11 +76,21 @@ pub enum DisplayMode {
     TransientStorage,
 }
 
+/// Represents a variable entry for display
+#[derive(Debug, Clone)]
+struct VariableEntry {
+    name: String,
+    value: Option<Arc<EdbSolValue>>,
+    category: VariableCategory,
+    is_multi_line: bool,
+}
+
 impl DisplayMode {
     /// Get display name for the mode
     pub fn name(&self) -> &'static str {
         match self {
-            DisplayMode::Variables => "Variables",
+            DisplayMode::LocalVariables => "Local Variables",
+            DisplayMode::StateVariables => "State Variables",
             DisplayMode::Breakpoints => "Breakpoints",
             DisplayMode::Stack => "Stack",
             DisplayMode::Memory => "Memory",
@@ -158,10 +187,18 @@ pub struct DisplayPanel {
     variables: Vec<String>,
     /// Mock breakpoints for hooked snapshots
     breakpoints: Vec<String>,
+    /// Local variable entries from hook snapshots
+    local_variables: Vec<VariableEntry>,
+    /// State variable entries (mock for now)
+    state_variables: Vec<VariableEntry>,
+    /// Variables that are toggled to multi-line (persisted by name)
+    multi_line_variables: HashSet<String>,
     /// Cached display line count for storage mode
     storage_display_lines: usize,
     /// Cached display line count for transient storage mode
     tstorage_display_lines: usize,
+    /// Syntax highlighter for Sol values
+    syntax_highlighter: SyntaxHighlighter,
 }
 
 impl DisplayPanel {
@@ -169,7 +206,7 @@ impl DisplayPanel {
     pub fn new() -> Self {
         Self {
             mode: DisplayMode::Stack,
-            prev_mode: DisplayMode::Variables,
+            prev_mode: DisplayMode::LocalVariables,
             available_modes: vec![DisplayMode::Stack],
             selected_index: 0,
             scroll_offset: 0,
@@ -192,12 +229,16 @@ impl DisplayPanel {
                 "balances[msg.sender]: uint256 = 500000".to_string(),
                 "msg.sender: address = 0x1234...abcd".to_string(),
             ],
+            local_variables: Vec::new(),
+            state_variables: Vec::new(),
+            multi_line_variables: HashSet::new(),
             breakpoints: vec![
                 "Line 42: Transfer.sol - require(balance >= amount)".to_string(),
                 "Line 58: Token.sol - emit Transfer(from, to, amount)".to_string(),
             ],
             storage_display_lines: 0,
             tstorage_display_lines: 0,
+            syntax_highlighter: SyntaxHighlighter::new(),
         }
     }
 
@@ -235,11 +276,15 @@ impl DisplayPanel {
                     self.scroll_offset = 0;
                 }
             }
-            SnapshotInfoDetail::Hook(_hook_detail) => {
+            SnapshotInfoDetail::Hook(hook_detail) => {
                 self.is_opcode_snapshot = false;
-                self.available_modes = vec![DisplayMode::Variables, DisplayMode::Breakpoints];
+                self.available_modes =
+                    vec![DisplayMode::LocalVariables, DisplayMode::StateVariables];
 
-                // Switch to Variables mode if not already in a hook mode
+                // Update hook-specific data
+                self.update_hook_data(hook_detail);
+
+                // Switch to LocalVariables mode if not already in a hook mode
                 if !self.available_modes.contains(&self.mode) {
                     // Swap prev_mode and mode
                     mem::swap(&mut self.prev_mode, &mut self.mode);
@@ -252,6 +297,47 @@ impl DisplayPanel {
         self.current_execution_snapshot = Some(current_snapshot);
 
         Some(())
+    }
+
+    /// Update data for hook snapshots
+    fn update_hook_data(&mut self, hook_detail: &HookSnapshotInfoDetail) {
+        self.local_variables.clear();
+        self.state_variables.clear();
+
+        // Extract local variables
+        for (name, value_opt) in &hook_detail.locals {
+            let is_multi_line = self.multi_line_variables.contains(name);
+            self.local_variables.push(VariableEntry {
+                name: name.clone(),
+                value: value_opt.clone(),
+                category: VariableCategory::Local,
+                is_multi_line,
+            });
+        }
+
+        // Sort local variables by name
+        self.local_variables.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Add mock state variables for now
+        let mock_state_vars: Vec<(String, Option<Arc<EdbSolValue>>)> = vec![
+            ("totalSupply".to_string(), None),
+            ("owner".to_string(), None),
+            ("paused".to_string(), None),
+            ("balances".to_string(), None),
+        ];
+
+        for (name, _mock_value) in mock_state_vars {
+            let is_multi_line = self.multi_line_variables.contains(&name);
+            self.state_variables.push(VariableEntry {
+                name,
+                value: None, // Mock as None to show [Unknown] behavior
+                category: VariableCategory::State,
+                is_multi_line,
+            });
+        }
+
+        // Sort state variables by name
+        self.state_variables.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
     /// Update data for opcode snapshots
@@ -459,7 +545,10 @@ impl DisplayPanel {
                 let header_width = "─── Transient Storage ───".len();
                 max_width.max(header_width).max(80) // At least 80 chars
             }
-            DisplayMode::Variables => self.variables.iter().map(|s| s.len()).max().unwrap_or(0),
+            DisplayMode::LocalVariables | DisplayMode::StateVariables => {
+                // Return reasonable default for now
+                80
+            }
             DisplayMode::Breakpoints => self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0),
         };
     }
@@ -575,6 +664,114 @@ impl DisplayPanel {
         count.max(1) // At least 1 line
     }
 
+    /// Format a variable entry for display with syntax highlighting
+    fn format_variable_entry(
+        &self,
+        entry: &VariableEntry,
+        dm: &mut DataManager,
+    ) -> Vec<Span<'static>> {
+        // Add category prefix for better organization
+        let prefix = match entry.category {
+            VariableCategory::Local => "🔹 ", // Blue diamond for local
+            VariableCategory::State => "🔸 ", // Orange diamond for state
+        };
+
+        let mut spans = vec![Span::raw(prefix.to_string())];
+        spans.push(Span::raw(format!("{}: ", entry.name)));
+
+        // Format and highlight the value
+        match &entry.value {
+            Some(value) => {
+                let ctx = if entry.is_multi_line {
+                    SolValueFormatterContext::new().with_ty(true).multi_line(true)
+                } else {
+                    SolValueFormatterContext::new().with_ty(true)
+                };
+                let value_str = dm.resolver.resolve_sol_value(value, Some(ctx));
+
+                // Apply syntax highlighting to the value string
+                spans.extend(self.highlight_solidity_value(value_str, dm));
+            }
+            None => {
+                // Use comment color for unknown values
+                spans.push(Span::styled(
+                    "???".to_string(),
+                    Style::default().fg(dm.theme.comment_color).add_modifier(Modifier::ITALIC),
+                ));
+            }
+        };
+
+        // Add multi-line indicator
+        if entry.is_multi_line {
+            spans.push(Span::raw(" ⬇".to_string()));
+        }
+
+        spans
+    }
+
+    /// Apply syntax highlighting to Solidity value strings
+    fn highlight_solidity_value(&self, value: String, dm: &DataManager) -> Vec<Span<'static>> {
+        let tokens = self.syntax_highlighter.tokenize(&value, SyntaxType::Solidity);
+        let mut spans = Vec::new();
+        let mut last_end = 0;
+
+        // Apply syntax highlighting to tokens (same pattern as code and trace panels)
+        for token in tokens {
+            // Add any unhighlighted text before this token
+            if token.start > last_end {
+                let unhighlighted = value[last_end..token.start].to_owned();
+                if !unhighlighted.is_empty() {
+                    spans.push(Span::raw(unhighlighted));
+                }
+            }
+
+            // Add the highlighted token
+            let token_text = value[token.start..token.end].to_owned();
+            let token_style = self.syntax_highlighter.get_token_style(token.token_type, &dm.theme);
+            spans.push(Span::styled(token_text, token_style));
+            last_end = token.end;
+        }
+
+        // Add any remaining unhighlighted text
+        if last_end < value.len() {
+            let remaining = value[last_end..].to_owned();
+            if !remaining.is_empty() {
+                spans.push(Span::raw(remaining));
+            }
+        }
+
+        spans
+    }
+
+    /// Get current variable list based on display mode
+    fn get_current_variables(&self) -> &[VariableEntry] {
+        match self.mode {
+            DisplayMode::LocalVariables => &self.local_variables,
+            DisplayMode::StateVariables => &self.state_variables,
+            _ => &[],
+        }
+    }
+
+    /// Toggle multi-line display for the currently selected variable
+    fn toggle_variable_multiline(&mut self) {
+        let variables = match self.mode {
+            DisplayMode::LocalVariables => &mut self.local_variables,
+            DisplayMode::StateVariables => &mut self.state_variables,
+            _ => return,
+        };
+
+        if let Some(entry) = variables.get_mut(self.selected_index) {
+            entry.is_multi_line = !entry.is_multi_line;
+
+            // Persist the toggle state
+            if entry.is_multi_line {
+                self.multi_line_variables.insert(entry.name.clone());
+            } else {
+                self.multi_line_variables.remove(&entry.name);
+            }
+        }
+    }
+
     /// Move selection up with auto-scrolling
     fn move_up(&mut self) {
         if self.selected_index > 0 {
@@ -600,7 +797,8 @@ impl DisplayPanel {
             }
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
-            DisplayMode::Variables => self.variables.len(),
+            DisplayMode::LocalVariables => self.local_variables.len(),
+            DisplayMode::StateVariables => self.state_variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
         };
 
@@ -1157,20 +1355,47 @@ impl DisplayPanel {
 
     /// Render variables display (for hooked snapshots)
     fn render_variables(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        let items: Vec<ListItem<'_>> = self
-            .variables
+        let current_variables = self.get_current_variables();
+
+        if current_variables.is_empty() {
+            let empty_msg = match self.mode {
+                DisplayMode::LocalVariables => "No local variables in current scope",
+                DisplayMode::StateVariables => "No state variables available",
+                _ => "No variables",
+            };
+            let paragraph = Paragraph::new(empty_msg).block(BorderPresets::display(
+                self.focused,
+                self.title(dm),
+                dm.theme.focused_border,
+                dm.theme.unfocused_border,
+            ));
+            frame.render_widget(paragraph, area);
+            return;
+        }
+
+        let items: Vec<ListItem<'_>> = current_variables
             .iter()
             .enumerate()
             .skip(self.scroll_offset)
             .take(self.context_height)
-            .map(|(display_idx, var)| {
+            .map(|(display_idx, entry)| {
                 let is_selected = display_idx == self.selected_index;
+
+                // Format the variable entry with syntax highlighting
+                let formatted_spans = self.format_variable_entry(entry, dm);
+
+                // Create a line from the spans
+                let line = Line::from(formatted_spans);
+
+                // Apply selection style if selected
                 let style = if is_selected && self.focused {
                     Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
                 } else {
+                    // Default style - the highlighting is already applied to individual spans
                     Style::default()
                 };
-                ListItem::new(var.clone()).style(style)
+
+                ListItem::new(line).style(style)
             })
             .collect();
 
@@ -1231,7 +1456,8 @@ impl DisplayPanel {
             DisplayMode::CallData => (self.calldata.len() + 31) / 32,
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
-            DisplayMode::Variables => self.variables.len(),
+            DisplayMode::LocalVariables => self.local_variables.len(),
+            DisplayMode::StateVariables => self.state_variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
         };
 
@@ -1249,7 +1475,12 @@ impl DisplayPanel {
         let help_area =
             Rect { x: area.x + 1, y: area.y + area.height - 2, width: area.width - 2, height: 1 };
 
-        let help_text = "↑/↓: Navigate • s/S: Switch mode";
+        let help_text = match self.mode {
+            DisplayMode::LocalVariables | DisplayMode::StateVariables => {
+                "↑/↓: Navigate • s/S: Switch mode • Enter: Toggle multi-line"
+            }
+            _ => "↑/↓: Navigate • s/S: Switch mode",
+        };
         let help_paragraph =
             Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
         frame.render_widget(help_paragraph, help_area);
@@ -1274,7 +1505,8 @@ impl PanelTr for DisplayPanel {
             }
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
-            DisplayMode::Variables => self.variables.len(),
+            DisplayMode::LocalVariables => self.local_variables.len(),
+            DisplayMode::StateVariables => self.state_variables.len(),
             DisplayMode::Breakpoints => self.breakpoints.len(),
         };
 
@@ -1304,12 +1536,18 @@ impl PanelTr for DisplayPanel {
             DisplayMode::CallData => self.render_calldata(frame, area, dm),
             DisplayMode::Storage => self.render_storage(frame, area, dm),
             DisplayMode::TransientStorage => self.render_transient_storage(frame, area, dm),
-            DisplayMode::Variables => self.render_variables(frame, area, dm),
+            DisplayMode::LocalVariables | DisplayMode::StateVariables => {
+                self.render_variables(frame, area, dm)
+            }
             DisplayMode::Breakpoints => self.render_breakpoints(frame, area, dm),
         }
     }
 
-    fn handle_key_event(&mut self, event: KeyEvent, dm: &mut DataManager) -> Result<EventResponse> {
+    fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        _dm: &mut DataManager,
+    ) -> Result<EventResponse> {
         if !self.focused || event.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
         }
@@ -1379,11 +1617,22 @@ impl PanelTr for DisplayPanel {
                     }
                     DisplayMode::Storage => self.storage_display_lines,
                     DisplayMode::TransientStorage => self.tstorage_display_lines,
-                    DisplayMode::Variables => self.variables.len(),
+                    DisplayMode::LocalVariables => self.local_variables.len(),
+                    DisplayMode::StateVariables => self.state_variables.len(),
                     DisplayMode::Breakpoints => self.breakpoints.len(),
                 };
                 self.selected_index = max_items.saturating_sub(1);
                 Ok(EventResponse::Handled)
+            }
+            KeyCode::Enter => {
+                // Toggle multi-line display for variables
+                match self.mode {
+                    DisplayMode::LocalVariables | DisplayMode::StateVariables => {
+                        self.toggle_variable_multiline();
+                        Ok(EventResponse::Handled)
+                    }
+                    _ => Ok(EventResponse::NotHandled),
+                }
             }
             _ => Ok(EventResponse::NotHandled),
         }

@@ -63,6 +63,13 @@ impl SnapshotInfo {
             SnapshotInfoDetail::Hook(_) => None,
         }
     }
+
+    pub fn locals(&self) -> Option<&HashMap<String, Option<Arc<EdbSolValue>>>> {
+        match self.detail() {
+            SnapshotInfoDetail::Opcode(_) => None,
+            SnapshotInfoDetail::Hook(info) => Some(&info.locals),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
