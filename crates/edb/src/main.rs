@@ -74,6 +74,10 @@ pub struct Cli {
     #[arg(long)]
     pub quick: bool,
 
+    /// Disable cache - do not use cached RPC responses
+    #[arg(long)]
+    pub disable_cache: bool,
+
     /// Command to execute
     #[command(subcommand)]
     pub command: Commands,

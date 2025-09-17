@@ -25,13 +25,7 @@ use eyre::Result;
 use std::net::SocketAddr;
 use tracing::{info, warn};
 
-use edb_rpc_proxy::cache;
-use edb_rpc_proxy::health;
-use edb_rpc_proxy::metrics;
-use edb_rpc_proxy::providers;
 use edb_rpc_proxy::proxy;
-use edb_rpc_proxy::registry;
-use edb_rpc_proxy::rpc;
 use edb_rpc_proxy::tui;
 
 use proxy::ProxyServerBuilder;

@@ -19,7 +19,7 @@ When you submit your first pull request, the CLA Assistant bot will automaticall
 
 ### Prerequisites
 
-- Rust 1.88.0 or higher
+- Rust 1.89.0 or higher
 - Git
 - A GitHub account
 
@@ -28,13 +28,13 @@ When you submit your first pull request, the CLA Assistant bot will automaticall
 1. Fork the repository on GitHub
 2. Clone your fork locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/EDB.git
+   git clone https://github.com/YOUR_USERNAME/edb.git
    cd EDB
    ```
 
 3. Add the upstream repository:
    ```bash
-   git remote add upstream https://github.com/MedGa-eth/EDB.git
+   git remote add upstream https://github.com/edb-rs/edb.git
    ```
 
 4. Create a new branch for your feature:
@@ -187,7 +187,6 @@ Look for issues labeled `good first issue` - these are ideal for newcomers.
 
 ### Getting Help
 
-- **Discord**: [Join our Discord](https://discord.gg/medga) (if applicable)
 - **GitHub Issues**: For bug reports and feature requests
 - **GitHub Discussions**: For questions and general discussion
 
@@ -213,7 +212,7 @@ We welcome feature requests! Please:
 
 If you discover a security vulnerability, please:
 - **DO NOT** open a public issue
-- Email security@medga.org with details
+- Email edb@zzhang.xyz with details
 - Include steps to reproduce
 - Allow time for us to respond and fix
 

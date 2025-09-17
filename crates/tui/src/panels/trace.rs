@@ -500,7 +500,7 @@ impl TracePanelInner {
             Span::styled(call_type_str, Style::default().fg(call_color)),
             Span::raw(" "),
             Span::styled(
-                dm.resolver.resolve_address(entry.code_address, true),
+                dm.resolver.resolve_address(entry.code_address, false),
                 Style::default().fg(dm.theme.accent_color),
             ),
         ];
@@ -553,7 +553,7 @@ impl TracePanelInner {
             spans.push(Span::styled(
                 format!(
                     " → {} ({} ETH)",
-                    dm.resolver.resolve_address(*beneficiary, true),
+                    dm.resolver.resolve_address(*beneficiary, false),
                     dm.resolver.resolve_ether(*value)
                 ),
                 Style::default().fg(dm.theme.warning_color),
@@ -1193,6 +1193,18 @@ impl PanelTr for TracePanel {
             }
             KeyCode::Down => {
                 self.inner.move_down(trace);
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::PageUp => {
+                for _ in 0..self.inner.context_height / 2 {
+                    self.inner.move_up(trace);
+                }
+                Ok(EventResponse::Handled)
+            }
+            KeyCode::PageDown => {
+                for _ in 0..self.inner.context_height / 2 {
+                    self.inner.move_down(trace);
+                }
                 Ok(EventResponse::Handled)
             }
             KeyCode::Left => {

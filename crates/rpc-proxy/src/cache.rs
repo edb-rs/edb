@@ -86,7 +86,7 @@ impl CacheManager {
         info!("Using cache file: {}", cache_path.display());
 
         // Load existing cache from disk
-        let cache = if cache_path.exists() {
+        let mut cache = if cache_path.exists() {
             match fs::read_to_string(&cache_path) {
                 Ok(content) => {
                     match serde_json::from_str::<HashMap<String, CacheEntry>>(&content) {
@@ -109,6 +109,11 @@ impl CacheManager {
             info!("No existing cache file found, starting with empty cache");
             HashMap::new()
         };
+
+        if cache.len() >= max_items as usize {
+            // This will be a hard cap - evict oldest entries
+            Self::evict_to_size(&mut cache, max_items as usize);
+        }
 
         Ok(Self { cache: Arc::new(RwLock::new(cache)), max_items, cache_file_path: cache_path })
     }
@@ -144,7 +149,7 @@ impl CacheManager {
 
         // Check if we need to evict entries to make space
         if cache.len() >= self.max_items as usize {
-            self.evict_oldest(&mut cache).await;
+            Self::evict_oldest(&mut cache);
         }
 
         let entry = CacheEntry::new(value);
@@ -152,12 +157,12 @@ impl CacheManager {
         debug!("Cached entry: {}", key);
     }
 
-    async fn evict_oldest(&self, cache: &mut HashMap<String, CacheEntry>) {
+    fn evict_oldest(cache: &mut HashMap<String, CacheEntry>) {
         // Sort entries by creation time (oldest first) and remove oldest 10%
         let to_remove = (cache.len() / 10).max(1);
         debug!("Evicting {} oldest cache entries", to_remove);
 
-        self.evict_to_size(cache, cache.len() - to_remove);
+        Self::evict_to_size(cache, cache.len().saturating_sub(to_remove));
     }
 
     /// Saves the current cache contents to disk as JSON with atomic write and merge
@@ -453,7 +458,7 @@ impl CacheManager {
         }
 
         // Apply LRU eviction to fit target size
-        self.evict_to_size(&mut merged_cache, target_size);
+        Self::evict_to_size(&mut merged_cache, target_size);
         merged_cache
     }
 
@@ -465,12 +470,12 @@ impl CacheManager {
     ///
     /// # Returns
     /// Cache with oldest entries removed to fit target_size
-    fn evict_to_size(&self, cache: &mut HashMap<String, CacheEntry>, target_size: usize) {
+    fn evict_to_size(cache: &mut HashMap<String, CacheEntry>, target_size: usize) {
         if cache.len() <= target_size {
             return;
         }
 
-        let to_remove = cache.len() - target_size;
+        let to_remove = cache.len().saturating_sub(target_size);
 
         // Sort entries by creation time (oldest first)
         let mut entries: Vec<(String, u64)> =

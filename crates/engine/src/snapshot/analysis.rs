@@ -200,6 +200,8 @@ where
                 .usid_to_step
                 .get(&usid)
                 .ok_or_else(|| eyre::eyre!("No step found for USID {}", u64::from(usid)))?;
+            let ufid = step.ufid();
+            let contract = analysis.ufid_to_function.get(&ufid).and_then(|f| f.contract());
 
             let next_id = snapshots[i + 1].1.id();
             let next_usid = snapshots[i + 1]
@@ -211,6 +213,8 @@ where
                 .get(&next_usid)
                 .ok_or_else(|| eyre::eyre!("No step found for USID {}", u64::from(next_usid)))?;
             let next_ufid = next_step.ufid();
+            let next_contract =
+                analysis.ufid_to_function.get(&next_ufid).and_then(|f| f.contract());
 
             // Step 0: To avoid annoying crash, we always add a placeholder stack entry
             if stack.is_empty() {
@@ -238,6 +242,7 @@ where
             }
 
             // Step 2: check whether this step contains any valid internal call
+            //  a) The step contains internal calls
             if step.function_calls()
                 > snapshots[i + 1].0.re_entry_count() - snapshots[i].0.re_entry_count()
                 && is_entry(next_step)
@@ -251,6 +256,20 @@ where
                             - (snapshots[i + 1].0.re_entry_count()
                                 - snapshots[i].0.re_entry_count()),
                     }),
+                    return_after_callsite: step.contains_return(),
+                });
+                continue;
+            }
+            // b) There is overrided operation (e.g., `+`)
+            if is_entry(next_step) && contract.is_some() && next_contract.is_none() {
+                // This is likely an internal call to a library function
+                warn!(
+                    "Assuming an internal call to a library function at Snapshot {}",
+                    snapshots[i].1.id()
+                );
+                stack.push(CallStackEntry {
+                    func_info: FunctionInfo::Unknown,
+                    callsite: Some(Callsite { id: i, callees: usize::MAX }),
                     return_after_callsite: step.contains_return(),
                 });
                 continue;
@@ -303,7 +322,9 @@ where
                 // Check whether we are done with this callsite (callsite_certainly_done has higher priority)
                 let callsite_certainly_done =
                     parent_entry.func_info.contains_ufid(next_ufid) && !is_entry(next_step);
-                if callsite.callees > 0 && !callsite_certainly_done {
+                let callsite_certainly_not_done = next_contract.is_none(); // We are still in free functions
+                if (callsite.callees > 0 || callsite_certainly_not_done) && !callsite_certainly_done
+                {
                     stack_entry.func_info = FunctionInfo::Unknown;
                     stack.push(stack_entry);
                     break;

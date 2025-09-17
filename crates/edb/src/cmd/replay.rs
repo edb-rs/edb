@@ -72,6 +72,7 @@ mod tests {
             ui: crate::UiMode::Tui,
             block: None,
             proxy_port,
+            disable_cache: false,
             etherscan_api_key: std::env::var("ETHERSCAN_API_KEY").ok(),
             quick: false, // Full replay for thorough testing
             command: crate::Commands::Replay {

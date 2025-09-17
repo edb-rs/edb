@@ -167,6 +167,17 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
             args.push(rpc_urls.clone());
         }
 
+        // If cache is disabled, add set the max cache items to 0
+        if cli.disable_cache {
+            args.push("--max-cache-items".to_string());
+            args.push("0".to_string());
+        }
+
+        debug!(
+            "Invoking proxy with command: {} {:?}",
+            proxy_binary.as_os_str().to_string_lossy(),
+            args
+        );
         Command::new(&proxy_binary)
             .args(&args)
             .stdin(Stdio::null())
