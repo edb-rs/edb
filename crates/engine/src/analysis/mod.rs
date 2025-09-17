@@ -34,6 +34,9 @@ pub use hook::*;
 mod step;
 pub use step::*;
 
+mod types;
+pub use types::*;
+
 mod variable;
 pub use variable::*;
 

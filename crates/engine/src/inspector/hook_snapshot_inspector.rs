@@ -34,7 +34,9 @@ use edb_common::{
 };
 use eyre::Result;
 use foundry_compilers::{
-    artifacts::{bytecode, Contract, VariableDeclaration},
+    artifacts::{
+        bytecode, Contract, Expression, Mutability, StateMutability, TypeName, VariableDeclaration,
+    },
     Artifact,
 };
 use revm::{
@@ -57,7 +59,10 @@ use tower::timeout::error;
 use tracing::{debug, error};
 
 use crate::{
-    analysis::{self, AnalysisResult, UVID},
+    analysis::{
+        self, dyn_sol_type, AnalysisResult, UserDefinedTypeRef, UserDefinedTypeVariant,
+        VariableRef, UTID, UVID,
+    },
     USID,
 };
 
@@ -424,9 +429,15 @@ where
 
         let decoded_data = &data[96..96 + length_usize];
 
-        let Some(variable) =
-            self.analysis.get(&address).and_then(|a| a.uvid_to_variable.get(&uvid))
-        else {
+        let Some(analysis) = self.analysis.get(&address) else {
+            error!(
+                address=?address,
+                uvid=?uvid,
+                "No analysis found for address, skipping variable update recording",
+            );
+            return;
+        };
+        let Some(variable) = analysis.uvid_to_variable.get(&uvid) else {
             error!(
                 address=?address,
                 uvid=?uvid,
@@ -435,19 +446,21 @@ where
             return;
         };
 
-        let value = match decode_variable_value(variable.declaration(), decoded_data) {
-            Ok(v) => v,
-            Err(e) => {
-                error!(
-                    address=?address,
-                    uvid=?uvid,
-                    variable=?variable.declaration().type_descriptions.type_string,
-                    data=?hex::encode(decoded_data),
-                    error=?e,
-                );
-                return;
-            }
-        };
+        let value =
+            match decode_variable_value(&analysis.user_defined_types, variable, decoded_data) {
+                Ok(v) => v,
+                Err(e) => {
+                    error!(
+                        address=?address,
+                        uvid=?uvid,
+                        variable=?variable.declaration().type_descriptions.type_string,
+                        type_name = ?variable.declaration().type_name,
+                        data=?hex::encode(decoded_data),
+                        error=?e,
+                    );
+                    return;
+                }
+            };
 
         // TODO
         println!(
@@ -787,14 +800,17 @@ where
 /// # Returns
 /// The decoded variable value
 pub fn decode_variable_value(
-    declaration: &VariableDeclaration,
+    user_defined_types: &HashMap<usize, UserDefinedTypeRef>,
+    variable: &VariableRef,
     data: &[u8],
 ) -> Result<DynSolValue> {
-    let Some(variable_type) = &declaration.type_descriptions.type_string else {
+    let type_name = variable
+        .type_name()
+        .ok_or(eyre::eyre!("Failed to get variable type: no type name in the declaration"))?;
+    let Some(variable_type): Option<DynSolType> = dyn_sol_type(user_defined_types, type_name)
+    else {
         return Err(eyre::eyre!("Failed to get variable type: no type string in the declaration"));
     };
-    let variable_type: DynSolType =
-        variable_type.parse().map_err(|e| eyre::eyre!("Failed to parse variable type: {}", e))?;
     let value = variable_type
         .abi_decode(data)
         .map_err(|e| eyre::eyre!("Failed to decode variable value: {}", e))?;

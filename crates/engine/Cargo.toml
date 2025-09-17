@@ -20,7 +20,7 @@ edb-common = { path = "../common" }
 # alloy - using individual crates like Foundry does
 alloy-chains.workspace = true
 alloy-contract.workspace = true
-alloy-dyn-abi.workspace = true
+alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 alloy-json-abi.workspace = true
 alloy-network.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }

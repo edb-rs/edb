@@ -200,6 +200,7 @@ pub async fn fork_and_prepare(
             c.chain_id = chain_id;
             c.spec = spec_id;
             c.disable_nonce_check = quick; // Disable nonce check in quick mode
+            c.disable_nonce_check = true;
         });
 
     let mut evm = ctx.build_mainnet();

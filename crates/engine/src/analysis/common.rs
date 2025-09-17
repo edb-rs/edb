@@ -64,7 +64,8 @@ use tracing::warn;
 
 use crate::{
     analysis::{
-        AnalysisError, Analyzer, ContractRef, FunctionRef, SourceAnalysis, StepRef, UCID, UFID,
+        AnalysisError, Analyzer, ContractRef, FunctionRef, SourceAnalysis, StepRef,
+        UserDefinedTypeRef, UCID, UFID, UTID,
     },
     ASTPruner, Artifact, VariableRef, USID, UVID,
 };
@@ -109,6 +110,10 @@ pub struct AnalysisResult {
     pub usid_to_step: HashMap<USID, StepRef>,
     /// Maps unique variable identifiers to their variable references (currently unimplemented)
     pub uvid_to_variable: HashMap<UVID, VariableRef>,
+    /// Maps AST IDs to their corresponding user defined type references
+    pub utid_to_user_defined_type: HashMap<UTID, UserDefinedTypeRef>,
+    /// Maps AST IDs to their corresponding user defined type references
+    pub user_defined_types: HashMap<usize, UserDefinedTypeRef>,
 }
 
 /// Performs comprehensive analysis of Solidity source code.
@@ -170,7 +175,7 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
             let source_unit = ASTPruner::convert(&mut source_ast, false)
                 .map_err(AnalysisError::ASTConversionError)?;
 
-            let analyzer = Analyzer::new();
+            let analyzer = Analyzer::new(source_id);
             let mut source_result = analyzer.analyze(source_id, path, &source_unit)?;
 
             // sort steps in reverse order
@@ -208,11 +213,15 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
     let mut ufid_to_function = HashMap::new();
     let mut usid_to_step = HashMap::new();
     let mut uvid_to_variable = HashMap::new();
+    let mut utid_to_user_defined_type = HashMap::new();
+    let mut user_defined_types = HashMap::new();
     for result in source_results.iter() {
         ucid_to_contract.extend(result.contract_table().into_iter());
         ufid_to_function.extend(result.function_table().into_iter());
         usid_to_step.extend(result.step_table().into_iter());
         uvid_to_variable.extend(result.variable_table().into_iter());
+        utid_to_user_defined_type.extend(result.user_defined_type_table().into_iter());
+        user_defined_types.extend(result.user_defined_types().into_iter());
     }
     let sources = source_results.into_iter().map(|s| (s.id, s)).collect();
 
@@ -222,6 +231,8 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
         ufid_to_function,
         usid_to_step,
         uvid_to_variable,
+        utid_to_user_defined_type,
+        user_defined_types,
     })
 }
 

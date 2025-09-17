@@ -16,13 +16,14 @@
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, Assignment, Block, ContractDefinition, EventDefinition, Expression,
-    ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition, ModifierDefinition,
-    PragmaDirective, Source, SourceUnit, StateMutability, Statement, TypeName, UncheckedBlock,
+    ast::SourceLocation, Assignment, Block, ContractDefinition, EnumDefinition, EventDefinition,
+    Expression, ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition,
+    ModifierDefinition, PragmaDirective, Source, SourceUnit, StateMutability, Statement,
+    StructDefinition, TypeName, UncheckedBlock, UserDefinedValueTypeDefinition,
     VariableDeclaration, Visibility,
 };
+use std::collections::HashMap;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
@@ -33,8 +34,9 @@ use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
         visitor::VisitorAction, Contract, ContractRef, Function, FunctionRef, FunctionTypeNameRef,
-        ScopeNode, Step, StepHook, StepRef, StepVariant, Variable, VariableScope, VariableScopeRef,
-        Visitor, Walk, UCID, UFID,
+        ScopeNode, Step, StepHook, StepRef, StepVariant, UserDefinedType, UserDefinedTypeRef,
+        UserDefinedTypeVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk, UCID,
+        UFID, UTID,
     },
     block_or_stmt_src,
     contains_user_defined_type,
@@ -86,6 +88,8 @@ pub struct SourceAnalysis {
     pub immutable_functions: Vec<FunctionRef>,
     /// Variables that are defined as function types
     pub function_types: Vec<FunctionTypeNameRef>,
+    /// User defined types defined in this file.
+    pub user_defined_types: Vec<UserDefinedTypeRef>,
 }
 
 impl SourceAnalysis {
@@ -139,6 +143,28 @@ impl SourceAnalysis {
         let mut table = HashMap::default();
         for contract in &self.contracts {
             table.insert(contract.read().ucid, contract.clone());
+        }
+        table
+    }
+
+    /// Returns a mapping of all user defined types in this source file by their UTID.
+    pub fn user_defined_type_table(&self) -> HashMap<UTID, UserDefinedTypeRef> {
+        let mut table = HashMap::default();
+        for user_defined_type in &self.user_defined_types {
+            table.insert(user_defined_type.read().utid, user_defined_type.clone());
+        }
+        table
+    }
+
+    /// Returns a mapping of all user defined types in this source file by their AST ID.
+    ///
+    /// # Returns
+    ///
+    /// A HashMap mapping AST IDs to their corresponding UserDefinedTypeRef instances.
+    pub fn user_defined_types(&self) -> HashMap<usize, UserDefinedTypeRef> {
+        let mut table = HashMap::default();
+        for user_defined_type in &self.user_defined_types {
+            table.insert(user_defined_type.ast_id(), user_defined_type.clone());
         }
         table
     }
@@ -440,8 +466,9 @@ impl SourceAnalysis {
 /// - `private_state_variables`: State variables that should be made public
 /// - `private_functions`: Functions that should be made public
 /// - `immutable_functions`: Functions that should be made mutable
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Analyzer {
+    source_id: u32,
     version_requirements: Vec<String>,
 
     scope_stack: Vec<VariableScopeRef>,
@@ -466,6 +493,8 @@ pub struct Analyzer {
     immutable_functions: Vec<FunctionRef>,
     /// Function types defined in this file.
     function_types: Vec<FunctionTypeNameRef>,
+    /// User defined types defined in this file.
+    user_defined_types: Vec<UserDefinedTypeRef>,
 }
 
 impl Analyzer {
@@ -477,8 +506,25 @@ impl Analyzer {
     /// # Returns
     ///
     /// A new `Analyzer` instance with empty scope stack and step collections.
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(source_id: u32) -> Self {
+        Self {
+            source_id,
+            version_requirements: Vec::new(),
+            scope_stack: Vec::new(),
+            finished_steps: Vec::new(),
+            current_step: None,
+            current_function: None,
+            current_contract: None,
+            contracts: Vec::new(),
+            functions: Vec::new(),
+            variables: HashMap::default(),
+            state_variables: Vec::new(),
+            private_state_variables: Vec::new(),
+            private_functions: Vec::new(),
+            immutable_functions: Vec::new(),
+            function_types: Vec::new(),
+            user_defined_types: Vec::new(),
+        }
     }
 
     /// Analyzes a source unit and returns the analysis results.
@@ -535,6 +581,7 @@ impl Analyzer {
             private_functions: self.private_functions,
             immutable_functions: self.immutable_functions,
             function_types: self.function_types,
+            user_defined_types: self.user_defined_types,
         })
     }
 }
@@ -1105,6 +1152,51 @@ impl Analyzer {
     }
 }
 
+/* User defined type analysis */
+impl Analyzer {
+    fn record_user_defined_value_type(
+        &mut self,
+        type_definition: &UserDefinedValueTypeDefinition,
+    ) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::UserDefinedValueType(type_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+
+    fn record_struct_type(&mut self, struct_definition: &StructDefinition) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::Struct(struct_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+
+    fn record_enum_type(&mut self, enum_definition: &EnumDefinition) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::Enum(enum_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+
+    fn record_contract_type(
+        &mut self,
+        contract_definition: &ContractDefinition,
+    ) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::Contract(contract_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+}
+
 impl Visitor for Analyzer {
     fn visit_source_unit(&mut self, source_unit: &SourceUnit) -> eyre::Result<VisitorAction> {
         // enter a global scope
@@ -1160,6 +1252,9 @@ impl Visitor for Analyzer {
         &mut self,
         _definition: &ContractDefinition,
     ) -> eyre::Result<VisitorAction> {
+        // record the contract type
+        self.record_contract_type(_definition)?;
+
         // enter a new contract
         self.enter_new_contract(_definition)?;
 
@@ -1178,6 +1273,30 @@ impl Visitor for Analyzer {
         // exit the contract
         self.exit_current_contract()?;
         Ok(())
+    }
+
+    fn visit_user_defined_value_type(
+        &mut self,
+        _value_type: &UserDefinedValueTypeDefinition,
+    ) -> eyre::Result<VisitorAction> {
+        self.record_user_defined_value_type(_value_type)?;
+        Ok(VisitorAction::Continue)
+    }
+
+    fn visit_struct_definition(
+        &mut self,
+        _definition: &StructDefinition,
+    ) -> eyre::Result<VisitorAction> {
+        self.record_struct_type(_definition)?;
+        Ok(VisitorAction::Continue)
+    }
+
+    fn visit_enum_definition(
+        &mut self,
+        _definition: &EnumDefinition,
+    ) -> eyre::Result<VisitorAction> {
+        self.record_enum_type(_definition)?;
+        Ok(VisitorAction::Continue)
     }
 
     fn visit_event_definition(
@@ -1398,7 +1517,7 @@ pub(crate) mod tests {
         let sources = BTreeMap::from([(TEST_CONTRACT_SOURCE_ID, Source::new(source))]);
 
         // Create an analyzer and analyze the contract
-        let analyzer = Analyzer::new();
+        let analyzer = Analyzer::new(TEST_CONTRACT_SOURCE_ID);
         let analysis = analyzer
             .analyze(
                 TEST_CONTRACT_SOURCE_ID,
@@ -1687,7 +1806,7 @@ contract TestContract {
         let source_unit = ASTPruner::convert(&mut ast, false).unwrap();
 
         let sources = BTreeMap::from([(TEST_CONTRACT_SOURCE_ID, Source::new(source1))]);
-        let analyzer = Analyzer::new();
+        let analyzer = Analyzer::new(TEST_CONTRACT_SOURCE_ID);
         let analysis = analyzer
             .analyze(
                 TEST_CONTRACT_SOURCE_ID,

@@ -33,7 +33,7 @@ use delegate::delegate;
 use derive_more::From;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, Expression, ForStatement, FunctionDefinition,
-    ModifierDefinition, SourceUnit, UncheckedBlock, VariableDeclaration,
+    ModifierDefinition, SourceUnit, TypeName, UncheckedBlock, VariableDeclaration,
 };
 use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
@@ -94,6 +94,7 @@ impl From<Variable> for VariableRef {
     }
 }
 
+#[allow(unused)]
 impl VariableRef {
     pub fn new(inner: Variable) -> Self {
         Self {
@@ -117,6 +118,10 @@ impl VariableRef {
 
     pub fn declaration(&self) -> &VariableDeclaration {
         self.declaration.get_or_init(|| self.inner.read().declaration())
+    }
+
+    pub fn type_name(&self) -> Option<&TypeName> {
+        self.declaration().type_name.as_ref()
     }
 
     pub fn base(&self) -> VariableRef {
@@ -302,7 +307,7 @@ impl VariableScopeRef {
 impl VariableScopeRef {
     delegate! {
         to self.inner.read() {
-            pub fn id(&self) -> usize;
+            pub fn ast_id(&self) -> usize;
             pub fn src(&self) -> SourceLocation;
             pub fn pretty_display(&self) -> String;
         }
@@ -389,8 +394,8 @@ pub struct VariableScope {
 
 impl VariableScope {
     /// Returns the unique identifier of this scope, i.e., the node ID of the AST node that corresponds to this scope.
-    pub fn id(&self) -> usize {
-        self.node.id()
+    pub fn ast_id(&self) -> usize {
+        self.node.ast_id()
     }
 
     /// Returns the source location of this scope's AST node.
@@ -502,7 +507,7 @@ pub enum ScopeNode {
 
 impl ScopeNode {
     /// Returns the node ID of the AST node.
-    pub fn id(&self) -> usize {
+    pub fn ast_id(&self) -> usize {
         match self {
             Self::SourceUnit(source_unit) => source_unit.id,
             Self::Block(block) => block.id,

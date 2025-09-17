@@ -83,7 +83,7 @@ codegen-units = 1
 alloy-chains = "0.2"
 alloy-consensus = { version = "1.0.23", default-features = false }
 alloy-contract = { version = "1.0.23", default-features = false }
-alloy-dyn-abi = "1.3.1"
+alloy-dyn-abi = { version = "1.3.1", features = ["eip712"] }
 alloy-eips = { version = "1.0.23", default-features = false }
 alloy-evm = "0.20.1"
 alloy-genesis = { version = "1.0.23", default-features = false }

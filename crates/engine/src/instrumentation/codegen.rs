@@ -372,7 +372,7 @@ mod tests {
                 uint256 balance;
                 address addr;
             }
-            
+
             User private userData;
             User[] private users;
         }
