@@ -17,10 +17,10 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use foundry_compilers::artifacts::{
-    ast::SourceLocation, Assignment, Block, ContractDefinition, EnumDefinition, EventDefinition,
-    Expression, ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition,
-    ModifierDefinition, PragmaDirective, Source, SourceUnit, StateMutability, Statement,
-    StructDefinition, TypeName, UncheckedBlock, UserDefinedValueTypeDefinition,
+    ast::SourceLocation, Assignment, Block, ContractDefinition, EnumDefinition, ErrorDefinition,
+    EventDefinition, Expression, ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition,
+    ModifierDefinition, Mutability, PragmaDirective, Source, SourceUnit, StateMutability,
+    Statement, StructDefinition, TypeName, UncheckedBlock, UserDefinedValueTypeDefinition,
     VariableDeclaration, Visibility,
 };
 use std::collections::HashMap;
@@ -42,6 +42,7 @@ use crate::{
     contains_user_defined_type,
     sloc_ldiff,
     sloc_rdiff,
+    source_string_at_location,
     VariableRef,
     USID,
     UVID,
@@ -609,6 +610,13 @@ impl Analyzer {
             // if a variable has no name, we skip the variable declaration
             return Ok(());
         }
+        if declaration.mutability == Some(Mutability::Immutable)
+            || declaration.mutability == Some(Mutability::Constant)
+            || declaration.constant
+        {
+            // constant and immutable variables are excluded.
+            return Ok(());
+        }
 
         // collect function types from this variable declaration
         self.collect_function_types_from_variable(declaration)?;
@@ -955,13 +963,13 @@ impl Analyzer {
 
         // step is the function header
         let current_scope = self.current_scope();
-        let accessible_variables = current_scope.read().variables_recursive().clone();
+        let accessible_variables = current_scope.read().variables_recursive();
         let loc = sloc_ldiff(function.src, function.body.as_ref().unwrap().src);
         let new_step: StepRef = Step::new(
             current_function.ufid(),
             StepVariant::FunctionEntry(function.clone()),
             loc,
-            current_scope.clone(),
+            current_scope,
             accessible_variables,
         )
         .into();
@@ -1302,6 +1310,13 @@ impl Visitor for Analyzer {
     fn visit_event_definition(
         &mut self,
         _definition: &EventDefinition,
+    ) -> eyre::Result<VisitorAction> {
+        Ok(VisitorAction::SkipSubtree)
+    }
+
+    fn visit_error_definition(
+        &mut self,
+        _definition: &ErrorDefinition,
     ) -> eyre::Result<VisitorAction> {
         Ok(VisitorAction::SkipSubtree)
     }

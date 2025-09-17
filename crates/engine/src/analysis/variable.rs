@@ -80,11 +80,13 @@ universal_id! {
 /// This type alias provides shared ownership of Variable instances, allowing
 /// multiple parts of the analysis system to reference the same variable
 /// without copying the data.
-#[derive(Debug, Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub struct VariableRef {
     inner: Arc<RwLock<Variable>>,
     /* cached readonly fields*/
+    #[debug(ignore)]
     name: OnceCell<String>,
+    #[debug(ignore)]
     declaration: OnceCell<VariableDeclaration>,
 }
 
@@ -269,12 +271,15 @@ impl Variable {
 }
 
 /// A reference-counted pointer to a VariableScope.
-#[derive(Debug, Clone)]
+#[derive(Clone, derive_more::Debug)]
 pub struct VariableScopeRef {
     inner: Arc<RwLock<VariableScope>>,
 
+    #[debug(ignore)]
     children: OnceCell<Vec<VariableScopeRef>>,
+    #[debug(ignore)]
     variables: OnceCell<Vec<VariableRef>>,
+    #[debug(ignore)]
     variables_recursive: OnceCell<Vec<VariableRef>>,
 }
 
@@ -379,7 +384,7 @@ impl<'de> Deserialize<'de> for VariableScopeRef {
 /// - Contract scope information
 /// - Visibility modifiers (public, private, internal, external)
 /// - Storage location (storage, memory, calldata)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, derive_more::Debug)]
 #[non_exhaustive]
 pub struct VariableScope {
     /// The AST node that defines this scope
@@ -407,7 +412,7 @@ impl VariableScope {
     pub fn variables_recursive(&self) -> Vec<VariableRef> {
         let mut variables = self.variables.clone();
         variables.extend(
-            self.parent.clone().map_or(vec![], |parent| parent.variables_recursive().clone()),
+            self.parent.clone().map_or(vec![], |parent| parent.read().variables_recursive()),
         );
         variables
     }
