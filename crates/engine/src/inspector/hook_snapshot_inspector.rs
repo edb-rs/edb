@@ -40,23 +40,21 @@ use foundry_compilers::{
     Artifact,
 };
 use revm::{
-    bytecode::{legacy, OpCode},
-    context::{ContextTr, CreateScheme, JournalTr, LocalContextTr},
+    bytecode::OpCode,
+    context::{ContextTr, CreateScheme, JournalTr},
     database::CacheDB,
     interpreter::{
         interpreter_types::{InputsTr, Jumps},
-        CallInput, CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, Interpreter,
+        CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter,
     },
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    hash::Hash,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
-use tower::timeout::error;
 use tracing::{debug, error};
 
 use crate::{

@@ -151,7 +151,6 @@ where
                     })
                 })
                 .collect();
-            println!("MDZZ locals: {:?}", locals);
 
             SnapshotInfo {
                 id: snapshot.id(),

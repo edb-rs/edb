@@ -26,7 +26,7 @@ use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{hex, Bytes};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use edb_common::types::{CallResult, CallType, SolValueFormatterContext, Trace, TraceEntry};
+use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
 use eyre::Result;
 use ratatui::{
     layout::Rect,
@@ -35,7 +35,6 @@ use ratatui::{
     widgets::{List, ListItem, Paragraph},
     Frame,
 };
-use revm::context::entry;
 use revm::{
     context::CreateScheme,
     interpreter::{CallScheme, InstructionResult},
@@ -104,6 +103,12 @@ pub struct TracePanelInner {
     syntax_highlighter: SyntaxHighlighter,
     /// Set of collapsed trace entry IDs (when collapsed, we hide children)
     collapsed_entries: HashSet<usize>,
+    /// VIM mode number prefix for repetition (e.g., "10" in "10j")
+    vim_number_prefix: String,
+    /// VIM command buffer for commands like ":n"
+    vim_command_buffer: String,
+    /// Whether we're in VIM command mode (after pressing :)
+    vim_command_mode: bool,
 
     // ========== Execution Tracking ==========
     /// Currently executing trace entry ID (from execution snapshot)
@@ -127,6 +132,9 @@ impl TracePanelInner {
             collapsed_entries: HashSet::new(),
             current_execution_entry: None,
             current_execution_snapshot: None,
+            vim_number_prefix: String::new(),
+            vim_command_buffer: String::new(),
+            vim_command_mode: false,
         }
     }
 
@@ -187,29 +195,81 @@ impl TracePanelInner {
         Line::from(new_spans)
     }
 
-    /// Move selection up
-    fn move_up(&mut self, _trace: &Trace) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-            // Auto-scroll up if needed
-            if self.selected_index < self.scroll_offset {
-                self.scroll_offset = self.selected_index;
+    /// Get repetition count from vim_number_prefix, defaulting to 1
+    fn get_vim_repetition(&self) -> usize {
+        if self.vim_number_prefix.is_empty() {
+            1
+        } else {
+            self.vim_number_prefix.parse().unwrap_or(1).max(1)
+        }
+    }
+
+    /// Clear vim state after executing a command
+    fn clear_vim_state(&mut self) {
+        self.vim_number_prefix.clear();
+    }
+
+    /// Move selection up with repetition support
+    fn move_up(&mut self, trace: &Trace, count: usize) {
+        for _ in 0..count {
+            if self.selected_index > 0 {
+                self.selected_index -= 1;
+                // Auto-scroll up if needed
+                if self.selected_index < self.scroll_offset {
+                    self.scroll_offset = self.selected_index;
+                }
+            } else {
+                break;
             }
         }
     }
 
-    /// Move selection down
-    fn move_down(&mut self, trace: &Trace) {
+    /// Move selection down with repetition support
+    fn move_down(&mut self, trace: &Trace, count: usize) {
         let display_lines = self.generate_display_lines(trace);
         let max_lines = display_lines.len();
-        if self.selected_index < max_lines.saturating_sub(1) {
-            self.selected_index += 1;
-            // Auto-scroll down if needed
-            let viewport_height = self.context_height;
-            if self.selected_index >= self.scroll_offset + viewport_height {
-                self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
+        for _ in 0..count {
+            if self.selected_index < max_lines.saturating_sub(1) {
+                self.selected_index += 1;
+                // Auto-scroll down if needed
+                let viewport_height = self.context_height;
+                if self.selected_index >= self.scroll_offset + viewport_height {
+                    self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
+                }
+            } else {
+                break;
             }
         }
+    }
+
+    /// Move to specific line number (1-based)
+    fn move_to(&mut self, line_num: usize, trace: &Trace) {
+        let display_lines = self.generate_display_lines(trace);
+        let max_lines = display_lines.len();
+        let line_number = line_num.clamp(1, max_lines);
+        self.selected_index = line_num.saturating_sub(1);
+        // Center the view on this line if possible
+        let viewport_height = self.context_height;
+        let half_viewport = viewport_height / 2;
+
+        if self.selected_index <= half_viewport || max_lines <= viewport_height {
+            self.scroll_offset = 0;
+        } else if self.selected_index > max_lines.saturating_sub(viewport_height) {
+            self.scroll_offset = max_lines.saturating_sub(viewport_height);
+        } else {
+            self.scroll_offset = self.selected_index.saturating_sub(half_viewport);
+        }
+    }
+
+    /// Execute VIM command from command buffer
+    fn execute_vim_command(&mut self, trace: &Trace) {
+        let command = self.vim_command_buffer.trim();
+        if let Ok(line_number) = command.parse::<usize>() {
+            self.move_to(line_number, trace);
+        }
+        // Clear command mode
+        self.vim_command_buffer.clear();
+        self.vim_command_mode = false;
     }
 
     /// Get currently selected trace entry
@@ -957,41 +1017,6 @@ impl TracePanelInner {
 
         result
     }
-
-    /// Move to a specific trace entry ID and center it in view
-    #[allow(dead_code)]
-    pub fn move_to(&mut self, trace_entry_id: usize, trace: &Trace) {
-        let display_lines = self.generate_display_lines(trace);
-
-        // Find the display line index for this trace entry
-        for (idx, line_type) in display_lines.iter().enumerate() {
-            let entry_id = match line_type {
-                TraceLineType::Call(id)
-                | TraceLineType::Return(id)
-                | TraceLineType::Event(id, _) => *id,
-            };
-
-            if entry_id == trace_entry_id {
-                // Set the selected index to this line
-                self.selected_index = idx;
-
-                // Center the view on this line
-                let viewport_height = self.context_height;
-                let half_viewport = viewport_height / 2;
-
-                // Scroll logic similar to code panel
-                if idx <= half_viewport || display_lines.len() <= viewport_height {
-                    self.scroll_offset = 0;
-                } else if idx > display_lines.len().saturating_sub(viewport_height) {
-                    self.scroll_offset = display_lines.len().saturating_sub(viewport_height);
-                } else {
-                    self.scroll_offset = idx.saturating_sub(half_viewport);
-                }
-
-                break;
-            }
-        }
-    }
 }
 
 impl PanelTr for TracePanel {
@@ -1162,16 +1187,26 @@ impl PanelTr for TracePanel {
                 width: area.width - 2,
                 height: 1,
             };
-            let mut help = String::from("↑/↓: Navigate");
-            if self.inner.max_line_width > self.inner.content_width {
-                help.push_str(" • ←/→: Scroll");
-            }
-            help.push_str(" • Enter: Toggle expand/collapse");
-            help.push_str(" • V: View code");
-            help.push_str(" • C: Goto code");
+            let help_text = if self.inner.vim_command_mode {
+                // Show VIM command mode prompt
+                format!(":{}", self.inner.vim_command_buffer)
+            } else {
+                let mut help = String::from("j/k: Down/Up • G/gg: Bottom/Top");
+                if self.inner.max_line_width > self.inner.content_width {
+                    help.push_str(" • h/l: Scroll H");
+                }
+                help.push_str(" • Enter: Expand • V/C: View/Goto code");
+                help
+            };
 
-            let help_paragraph =
-                Paragraph::new(help).style(Style::default().fg(dm.theme.help_text_color));
+            let help_style = if self.inner.vim_command_mode {
+                // Use a different style for VIM command mode to make it more prominent
+                Style::default().fg(dm.theme.help_text_color).bg(dm.theme.highlight_bg)
+            } else {
+                Style::default().fg(dm.theme.help_text_color)
+            };
+
+            let help_paragraph = Paragraph::new(help_text).style(help_style);
             frame.render_widget(help_paragraph, help_area);
         }
     }
@@ -1186,85 +1221,156 @@ impl PanelTr for TracePanel {
         }
 
         let trace = self.trace.as_ref().unwrap(); // This must be safe
-        match event.code {
-            KeyCode::Up => {
-                self.inner.move_up(trace);
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Down => {
-                self.inner.move_down(trace);
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::PageUp => {
-                for _ in 0..self.inner.context_height / 2 {
-                    self.inner.move_up(trace);
+
+        // Handle VIM command mode first
+        if self.inner.vim_command_mode {
+            match event.code {
+                KeyCode::Char(c) => {
+                    self.inner.vim_command_buffer.push(c);
+                    Ok(EventResponse::Handled)
                 }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::PageDown => {
-                for _ in 0..self.inner.context_height / 2 {
-                    self.inner.move_down(trace);
+                KeyCode::Backspace => {
+                    self.inner.vim_command_buffer.pop();
+                    Ok(EventResponse::Handled)
                 }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Left => {
-                // Scroll left
-                if self.inner.horizontal_offset > 0 {
-                    self.inner.horizontal_offset = self.inner.horizontal_offset.saturating_sub(5);
-                    debug!("Scrolled left to offset {}", self.inner.horizontal_offset);
+                KeyCode::Enter => {
+                    self.inner.execute_vim_command(trace);
+                    Ok(EventResponse::Handled)
                 }
-                Ok(EventResponse::Handled)
+                KeyCode::Esc => {
+                    self.inner.vim_command_buffer.clear();
+                    self.inner.vim_command_mode = false;
+                    Ok(EventResponse::Handled)
+                }
+                _ => Ok(EventResponse::Handled),
             }
-            KeyCode::Right => {
-                // Scroll right
-                if self.inner.max_line_width > self.inner.content_width {
-                    let max_scroll =
-                        self.inner.max_line_width.saturating_sub(self.inner.content_width);
-                    if self.inner.horizontal_offset < max_scroll {
+        } else {
+            match event.code {
+                // Handle numeric input for VIM repetition
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    self.inner.vim_number_prefix.push(c);
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: k (up)
+                KeyCode::Up | KeyCode::Char('k') => {
+                    let count = self.inner.get_vim_repetition();
+                    self.inner.move_up(trace, count);
+                    self.inner.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: j (down)
+                KeyCode::Down | KeyCode::Char('j') => {
+                    let count = self.inner.get_vim_repetition();
+                    self.inner.move_down(trace, count);
+                    self.inner.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: h (left scroll)
+                KeyCode::Left | KeyCode::Char('h') => {
+                    let count = self.inner.get_vim_repetition();
+                    if self.inner.horizontal_offset > 0 {
                         self.inner.horizontal_offset =
-                            (self.inner.horizontal_offset + 5).min(max_scroll);
-                        debug!("Scrolled right to offset {}", self.inner.horizontal_offset);
+                            self.inner.horizontal_offset.saturating_sub(count * 5);
+                        debug!("Scrolled left to offset {}", self.inner.horizontal_offset);
                     }
+                    self.inner.clear_vim_state();
+                    Ok(EventResponse::Handled)
                 }
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Enter => {
-                self.inner.toggle_expansion(trace);
-                Ok(EventResponse::Handled)
-            }
-            KeyCode::Char('c') | KeyCode::Char('C') => {
-                if let Some(entry) = self.inner.selected_entry(trace) {
-                    debug!("Selected trace entry ID: {} at depth: {}", entry.id, entry.depth);
-
-                    // Jump to the first snapshot of this trace entry if available
-                    if let Some(snapshot_id) = entry.first_snapshot_id {
-                        debug!("Jumping to snapshot: {}", snapshot_id);
-                        dm.execution.goto(snapshot_id)?;
+                // VIM-like navigation: l (right scroll)
+                KeyCode::Right | KeyCode::Char('l') => {
+                    let count = self.inner.get_vim_repetition();
+                    if self.inner.max_line_width > self.inner.content_width {
+                        let max_scroll =
+                            self.inner.max_line_width.saturating_sub(self.inner.content_width);
+                        if self.inner.horizontal_offset < max_scroll {
+                            self.inner.horizontal_offset =
+                                (self.inner.horizontal_offset + count * 5).min(max_scroll);
+                            debug!("Scrolled right to offset {}", self.inner.horizontal_offset);
+                        }
+                    }
+                    self.inner.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM-like navigation: g (might be gg)
+                KeyCode::Char('g') => {
+                    // Handle 'gg' sequence
+                    if self.inner.vim_number_prefix == "g" {
+                        self.inner.move_to(1, trace);
+                        self.inner.vim_number_prefix.clear();
                     } else {
-                        error!("No snapshot available for trace entry");
+                        self.inner.vim_number_prefix = String::from("g");
                     }
-                } else {
-                    error!("No trace entry selected");
+                    Ok(EventResponse::Handled)
                 }
-                Ok(EventResponse::ChangeFocus(PanelType::Code))
-            }
-            KeyCode::Char('v') | KeyCode::Char('V') => {
-                if let Some(entry) = self.inner.selected_entry(trace) {
-                    debug!("Selected trace entry ID: {} at depth: {}", entry.id, entry.depth);
+                // VIM-like navigation: G (go to bottom or specific line)
+                KeyCode::Char('G') => {
+                    if self.inner.vim_number_prefix.is_empty() {
+                        // G without number - go to bottom
+                        let display_lines = self.generate_display_lines(trace);
+                        let max_lines = display_lines.len();
+                        self.inner.move_to(max_lines, trace);
+                    } else if self.inner.vim_number_prefix != "g" {
+                        // nG - go to line n
+                        let line = self.inner.get_vim_repetition();
+                        self.inner.move_to(line, trace);
+                    }
+                    self.inner.clear_vim_state();
+                    Ok(EventResponse::Handled)
+                }
+                // VIM command mode
+                KeyCode::Char(':') => {
+                    self.inner.vim_command_mode = true;
+                    self.inner.vim_command_buffer.clear();
+                    Ok(EventResponse::Handled)
+                }
+                // Page navigation
+                KeyCode::PageUp => {
+                    self.inner.move_up(trace, self.inner.context_height / 2);
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::PageDown => {
+                    self.inner.move_down(trace, self.inner.context_height / 2);
+                    Ok(EventResponse::Handled)
+                }
+                // Other operations
+                KeyCode::Enter => {
+                    self.inner.toggle_expansion(trace);
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    if let Some(entry) = self.inner.selected_entry(trace) {
+                        debug!("Selected trace entry ID: {} at depth: {}", entry.id, entry.depth);
 
-                    // Jump to the first snapshot of this trace entry if available
-                    if let Some(snapshot_id) = entry.first_snapshot_id {
-                        debug!("Jumping to snapshot: {}", snapshot_id);
-                        dm.execution.display(snapshot_id)?;
+                        // Jump to the first snapshot of this trace entry if available
+                        if let Some(snapshot_id) = entry.first_snapshot_id {
+                            debug!("Jumping to snapshot: {}", snapshot_id);
+                            dm.execution.goto(snapshot_id)?;
+                        } else {
+                            error!("No snapshot available for trace entry");
+                        }
                     } else {
-                        error!("No snapshot available for trace entry");
+                        error!("No trace entry selected");
                     }
-                } else {
-                    error!("No trace entry selected");
+                    Ok(EventResponse::ChangeFocus(PanelType::Code))
                 }
-                Ok(EventResponse::ChangeFocus(PanelType::Code))
+                KeyCode::Char('v') | KeyCode::Char('V') => {
+                    if let Some(entry) = self.inner.selected_entry(trace) {
+                        debug!("Selected trace entry ID: {} at depth: {}", entry.id, entry.depth);
+
+                        // Jump to the first snapshot of this trace entry if available
+                        if let Some(snapshot_id) = entry.first_snapshot_id {
+                            debug!("Jumping to snapshot: {}", snapshot_id);
+                            dm.execution.display(snapshot_id)?;
+                        } else {
+                            error!("No snapshot available for trace entry");
+                        }
+                    } else {
+                        error!("No trace entry selected");
+                    }
+                    Ok(EventResponse::ChangeFocus(PanelType::Code))
+                }
+                _ => Ok(EventResponse::NotHandled),
             }
-            _ => Ok(EventResponse::NotHandled),
         }
     }
 

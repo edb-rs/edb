@@ -225,7 +225,7 @@ impl Resolver {
                             ));
                         } else {
                             return_parts.push(
-                                self.resolve_sol_value(value, Some(FormatCtx::new_with_ty())),
+                                self.resolve_sol_value(value, Some(FormatCtx::new().with_ty(true))),
                             );
                         }
                     }
@@ -263,7 +263,9 @@ impl Resolver {
                 Ok(decoded) => {
                     let params: Vec<String> = decoded
                         .iter()
-                        .map(|param| self.resolve_sol_value(param, Some(FormatCtx::new_with_ty())))
+                        .map(|param| {
+                            self.resolve_sol_value(param, Some(FormatCtx::new().with_ty(true)))
+                        })
                         .collect();
 
                     return Some(format!("{}({})", function_abi.name, params.join(", ")));
@@ -294,7 +296,9 @@ impl Resolver {
                 Ok(decoded) => {
                     let params: Vec<String> = decoded
                         .iter()
-                        .map(|param| self.resolve_sol_value(param, Some(FormatCtx::new_with_ty())))
+                        .map(|param| {
+                            self.resolve_sol_value(param, Some(FormatCtx::new().with_ty(true)))
+                        })
                         .collect();
 
                     return Some(format!("constructor({})", params.join(", ")));
@@ -357,6 +361,8 @@ impl Resolver {
     pub fn resolve_sol_value(&mut self, value: &DynSolValue, ctx: Option<FormatCtx>) -> String {
         let mut ctx = ctx.unwrap_or_default();
 
+        // Use unsafe to extend lifetime of self reference in closure
+        // This should be safe since ctx is only used during formatting
         let self_ptr = self as *mut Self;
         ctx.resolve_address =
             Some(Box::new(move |addr| unsafe { (*self_ptr).resolve_address_label(addr) }));

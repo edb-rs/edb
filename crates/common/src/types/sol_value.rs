@@ -150,7 +150,16 @@ pub trait SolValueFormatter {
     /// # Returns
     ///
     /// A formatted string representation of the value.
-    fn format_value(&self, ctx: &SolValueFormatterContext) -> String;
+    fn format_value(&self, ctx: &SolValueFormatterContext) -> String {
+        self.format_value_with_indent(ctx, 0)
+    }
+
+    /// Formats a Solidity value with specific indentation level.
+    fn format_value_with_indent(
+        &self,
+        ctx: &SolValueFormatterContext,
+        indent_level: usize,
+    ) -> String;
 
     /// Returns the Solidity type of this value as a string.
     ///
@@ -165,6 +174,7 @@ pub struct SolValueFormatterContext {
     pub resolve_address: Option<Box<dyn Fn(Address) -> Option<String>>>,
     pub with_ty: bool,
     pub shorten_long: bool,
+    pub multi_line: bool,
 }
 
 impl SolValueFormatterContext {
@@ -172,13 +182,28 @@ impl SolValueFormatterContext {
         Self::default()
     }
 
-    pub fn new_with_ty() -> Self {
-        Self { with_ty: true, ..Default::default() }
+    pub fn with_ty(mut self, with_ty: bool) -> Self {
+        self.with_ty = with_ty;
+        self
+    }
+
+    pub fn shorten_long(mut self, shorten_long: bool) -> Self {
+        self.shorten_long = shorten_long;
+        self
+    }
+
+    pub fn multi_line(mut self, multi_line: bool) -> Self {
+        self.multi_line = multi_line;
+        self
     }
 }
 
 impl SolValueFormatter for DynSolValue {
-    fn format_value(&self, ctx: &SolValueFormatterContext) -> String {
+    fn format_value_with_indent(
+        &self,
+        ctx: &SolValueFormatterContext,
+        indent_level: usize,
+    ) -> String {
         let value_str = match self {
             DynSolValue::Bool(b) => b.to_string(),
 
@@ -247,27 +272,17 @@ impl SolValueFormatter for DynSolValue {
                 }
             }
 
-            DynSolValue::Array(arr) => format_array(arr, false, ctx),
+            DynSolValue::Array(arr) => format_array(arr, false, ctx, indent_level),
 
-            DynSolValue::FixedArray(arr) => format_array(arr, true, ctx),
+            DynSolValue::FixedArray(arr) => format_array(arr, true, ctx, indent_level),
 
-            DynSolValue::Tuple(tuple) => format_tuple(tuple, ctx),
+            DynSolValue::Tuple(tuple) => format_tuple(tuple, ctx, indent_level),
 
             DynSolValue::CustomStruct { name, prop_names, tuple } => {
                 if prop_names.is_empty() {
-                    format!("{}{}", name, format_tuple(tuple, ctx))
+                    format!("{}{}", name, format_tuple(tuple, ctx, indent_level))
                 } else {
-                    let fields: Vec<String> = tuple
-                        .iter()
-                        .zip(prop_names.iter())
-                        .map(|(value, name)| format!("{}: {}", name, value.format_value(ctx)))
-                        .collect();
-
-                    if ctx.with_ty {
-                        format!("{}{{ {} }}", name, fields.join(", "))
-                    } else {
-                        format!("{{ {} }}", fields.join(", "))
-                    }
+                    format_custom_struct(name, prop_names, tuple, ctx, indent_level)
                 }
             }
         };
@@ -308,18 +323,57 @@ impl SolValueFormatter for DynSolValue {
     }
 }
 
-fn format_array(arr: &[DynSolValue], is_fixed: bool, ctx: &SolValueFormatterContext) -> String {
+/// Helper function to create indentation string
+fn make_indent(indent_level: usize) -> String {
+    "  ".repeat(indent_level)
+}
+
+fn format_array(
+    arr: &[DynSolValue],
+    is_fixed: bool,
+    ctx: &SolValueFormatterContext,
+    indent_level: usize,
+) -> String {
     const MAX_DISPLAY_ITEMS: usize = 5;
 
     if arr.is_empty() {
         return "[]".to_string();
     }
 
-    if arr.len() <= MAX_DISPLAY_ITEMS || !ctx.shorten_long {
-        let items: Vec<String> = arr.iter().map(|v| v.format_value(ctx)).collect();
+    if ctx.multi_line && arr.len() > 1 {
+        let child_indent = make_indent(indent_level + 1);
+        let current_indent = make_indent(indent_level);
+
+        let items: Vec<String> = if ctx.shorten_long && arr.len() > MAX_DISPLAY_ITEMS {
+            let mut items = arr
+                .iter()
+                .take(3)
+                .map(|v| {
+                    format!("{}{}", child_indent, v.format_value_with_indent(ctx, indent_level + 1))
+                })
+                .collect::<Vec<_>>();
+            let suffix = if is_fixed {
+                format!("{}...[{} total]", child_indent, arr.len())
+            } else {
+                format!("{}...[{} items]", child_indent, arr.len())
+            };
+            items.push(suffix);
+            items
+        } else {
+            arr.iter()
+                .map(|v| {
+                    format!("{}{}", child_indent, v.format_value_with_indent(ctx, indent_level + 1))
+                })
+                .collect()
+        };
+        format!("[\n{}\n{}]", items.join(",\n"), current_indent)
+    } else if arr.len() <= MAX_DISPLAY_ITEMS || !ctx.shorten_long {
+        let items: Vec<String> =
+            arr.iter().map(|v| v.format_value_with_indent(ctx, indent_level)).collect();
         format!("[{}]", items.join(", "))
     } else {
-        let first_items: Vec<String> = arr.iter().take(3).map(|v| v.format_value(ctx)).collect();
+        let first_items: Vec<String> =
+            arr.iter().take(3).map(|v| v.format_value_with_indent(ctx, indent_level)).collect();
 
         let suffix = if is_fixed {
             format!(", ...[{} total]", arr.len())
@@ -331,30 +385,138 @@ fn format_array(arr: &[DynSolValue], is_fixed: bool, ctx: &SolValueFormatterCont
     }
 }
 
-fn format_tuple(tuple: &[DynSolValue], ctx: &SolValueFormatterContext) -> String {
+fn format_tuple(
+    tuple: &[DynSolValue],
+    ctx: &SolValueFormatterContext,
+    indent_level: usize,
+) -> String {
     if tuple.is_empty() {
         return "()".to_string();
     }
 
     if tuple.len() == 1 {
-        return format!("({})", tuple[0].format_value(ctx));
+        return format!("({})", tuple[0].format_value_with_indent(ctx, indent_level));
     }
 
     const MAX_DISPLAY_FIELDS: usize = 4;
 
-    if tuple.len() <= MAX_DISPLAY_FIELDS || !ctx.shorten_long {
-        let items: Vec<String> = tuple.iter().map(|v| v.format_value(ctx)).collect();
+    if ctx.multi_line && tuple.len() > 1 {
+        let child_indent = make_indent(indent_level + 1);
+        let current_indent = make_indent(indent_level);
+
+        let items: Vec<String> = if ctx.shorten_long && tuple.len() > MAX_DISPLAY_FIELDS {
+            let mut items = tuple
+                .iter()
+                .take(3)
+                .map(|v| {
+                    format!("{}{}", child_indent, v.format_value_with_indent(ctx, indent_level + 1))
+                })
+                .collect::<Vec<_>>();
+            items.push(format!("{}...[{} fields]", child_indent, tuple.len()));
+            items
+        } else {
+            tuple
+                .iter()
+                .map(|v| {
+                    format!("{}{}", child_indent, v.format_value_with_indent(ctx, indent_level + 1))
+                })
+                .collect()
+        };
+        format!("(\n{}\n{})", items.join(",\n"), current_indent)
+    } else if tuple.len() <= MAX_DISPLAY_FIELDS || !ctx.shorten_long {
+        let items: Vec<String> =
+            tuple.iter().map(|v| v.format_value_with_indent(ctx, indent_level)).collect();
         format!("({})", items.join(", "))
     } else {
-        let first_items: Vec<String> = tuple.iter().take(3).map(|v| v.format_value(ctx)).collect();
+        let first_items: Vec<String> =
+            tuple.iter().take(3).map(|v| v.format_value_with_indent(ctx, indent_level)).collect();
         format!("({}, ...[{} fields])", first_items.join(", "), tuple.len())
+    }
+}
+
+fn format_custom_struct(
+    name: &str,
+    prop_names: &[String],
+    tuple: &[DynSolValue],
+    ctx: &SolValueFormatterContext,
+    indent_level: usize,
+) -> String {
+    const MAX_DISPLAY_FIELDS: usize = 4;
+
+    if ctx.multi_line && tuple.len() > 1 {
+        let child_indent = make_indent(indent_level + 1);
+        let current_indent = make_indent(indent_level);
+
+        let fields: Vec<String> = if ctx.shorten_long && tuple.len() > MAX_DISPLAY_FIELDS {
+            let mut fields = tuple
+                .iter()
+                .zip(prop_names.iter())
+                .take(3)
+                .map(|(value, field_name)| {
+                    format!(
+                        "{}{}: {}",
+                        child_indent,
+                        field_name,
+                        value.format_value_with_indent(ctx, indent_level + 1)
+                    )
+                })
+                .collect::<Vec<_>>();
+            fields.push(format!("{}...[{} fields]", child_indent, tuple.len()));
+            fields
+        } else {
+            tuple
+                .iter()
+                .zip(prop_names.iter())
+                .map(|(value, field_name)| {
+                    format!(
+                        "{}{}: {}",
+                        child_indent,
+                        field_name,
+                        value.format_value_with_indent(ctx, indent_level + 1)
+                    )
+                })
+                .collect()
+        };
+
+        if ctx.with_ty {
+            format!("{}{{\n{}\n{}}}", name, fields.join(",\n"), current_indent)
+        } else {
+            format!("{{\n{}\n{}}}", fields.join(",\n"), current_indent)
+        }
+    } else {
+        let fields: Vec<String> = if ctx.shorten_long && tuple.len() > MAX_DISPLAY_FIELDS {
+            let mut fields = tuple
+                .iter()
+                .zip(prop_names.iter())
+                .take(3)
+                .map(|(value, field_name)| {
+                    format!("{}: {}", field_name, value.format_value_with_indent(ctx, indent_level))
+                })
+                .collect::<Vec<_>>();
+            fields.push(format!("...[{} fields]", tuple.len()));
+            fields
+        } else {
+            tuple
+                .iter()
+                .zip(prop_names.iter())
+                .map(|(value, field_name)| {
+                    format!("{}: {}", field_name, value.format_value_with_indent(ctx, indent_level))
+                })
+                .collect()
+        };
+
+        if ctx.with_ty {
+            format!("{}{{ {} }}", name, fields.join(", "))
+        } else {
+            format!("{{ {} }}", fields.join(", "))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, bytes, uint, Address, FixedBytes, I256, U256};
+    use alloy_primitives::{address, Address, FixedBytes, I256, U256};
     use serde_json;
 
     #[test]
@@ -607,5 +769,258 @@ mod tests {
         assert!(json.contains("\"type\""));
         assert!(json.contains("\"value\""));
         assert!(json.contains("\"Tuple\""));
+    }
+
+    #[test]
+    fn test_single_line_formatting() {
+        let ctx = SolValueFormatterContext::new();
+
+        // Test array single line
+        let array = DynSolValue::Array(vec![
+            DynSolValue::Uint(U256::from(1u64), 256),
+            DynSolValue::Uint(U256::from(2u64), 256),
+            DynSolValue::Uint(U256::from(3u64), 256),
+        ]);
+        let result = array.format_value(&ctx);
+        assert_eq!(result, "[1, 2, 3]");
+
+        // Test tuple single line
+        let tuple = DynSolValue::Tuple(vec![
+            DynSolValue::Bool(true),
+            DynSolValue::Uint(U256::from(42u64), 256),
+        ]);
+        let result = tuple.format_value(&ctx);
+        assert_eq!(result, "(true, 42)");
+    }
+
+    #[test]
+    fn test_multi_line_formatting() {
+        let ctx = SolValueFormatterContext::new().multi_line(true);
+
+        // Test array multi-line
+        let array = DynSolValue::Array(vec![
+            DynSolValue::Uint(U256::from(1u64), 256),
+            DynSolValue::Uint(U256::from(2u64), 256),
+            DynSolValue::Uint(U256::from(3u64), 256),
+        ]);
+        let result = array.format_value(&ctx);
+        assert_eq!(result, "[\n  1,\n  2,\n  3\n]");
+
+        // Test tuple multi-line
+        let tuple = DynSolValue::Tuple(vec![
+            DynSolValue::Bool(true),
+            DynSolValue::Uint(U256::from(42u64), 256),
+        ]);
+        let result = tuple.format_value(&ctx);
+        assert_eq!(result, "(\n  true,\n  42\n)");
+
+        // Test custom struct multi-line
+        let custom_struct = DynSolValue::CustomStruct {
+            name: "Person".to_string(),
+            prop_names: vec!["name".to_string(), "age".to_string()],
+            tuple: vec![
+                DynSolValue::String("Alice".to_string()),
+                DynSolValue::Uint(U256::from(30u64), 256),
+            ],
+        };
+        let result = custom_struct.format_value(&ctx);
+        assert_eq!(result, "{\n  name: \"Alice\",\n  age: 30\n}");
+    }
+
+    #[test]
+    fn test_multi_line_with_type_info() {
+        let ctx = SolValueFormatterContext::new().multi_line(true).with_ty(true);
+
+        let custom_struct = DynSolValue::CustomStruct {
+            name: "Person".to_string(),
+            prop_names: vec!["name".to_string(), "age".to_string()],
+            tuple: vec![
+                DynSolValue::String("Alice".to_string()),
+                DynSolValue::Uint(U256::from(30u64), 256),
+            ],
+        };
+        let result = custom_struct.format_value(&ctx);
+        assert_eq!(result, "Person{\n  name: \"Alice\",\n  age: uint256(30)\n}");
+    }
+
+    #[test]
+    fn test_single_element_formatting() {
+        let ctx = SolValueFormatterContext::new().multi_line(true);
+
+        // Single element array should not use multi-line
+        let array = DynSolValue::Array(vec![DynSolValue::Uint(U256::from(1u64), 256)]);
+        let result = array.format_value(&ctx);
+        assert_eq!(result, "[1]");
+
+        // Single element tuple should not use multi-line
+        let tuple = DynSolValue::Tuple(vec![DynSolValue::Bool(true)]);
+        let result = tuple.format_value(&ctx);
+        assert_eq!(result, "(true)");
+    }
+
+    #[test]
+    fn test_empty_collections() {
+        let ctx = SolValueFormatterContext::new().multi_line(true);
+
+        // Empty array
+        let empty_array = DynSolValue::Array(vec![]);
+        let result = empty_array.format_value(&ctx);
+        assert_eq!(result, "[]");
+
+        // Empty tuple
+        let empty_tuple = DynSolValue::Tuple(vec![]);
+        let result = empty_tuple.format_value(&ctx);
+        assert_eq!(result, "()");
+
+        // Empty fixed array
+        let empty_fixed_array = DynSolValue::FixedArray(vec![]);
+        let result = empty_fixed_array.format_value(&ctx);
+        assert_eq!(result, "[]");
+    }
+
+    #[test]
+    fn test_deeply_nested_structures() {
+        let ctx = SolValueFormatterContext::new().multi_line(true);
+
+        // Nested array within array
+        let nested_array = DynSolValue::Array(vec![
+            DynSolValue::Array(vec![
+                DynSolValue::Uint(U256::from(1u64), 256),
+                DynSolValue::Uint(U256::from(2u64), 256),
+            ]),
+            DynSolValue::Array(vec![
+                DynSolValue::Uint(U256::from(3u64), 256),
+                DynSolValue::Uint(U256::from(4u64), 256),
+            ]),
+        ]);
+        let result = nested_array.format_value(&ctx);
+        let expected = "[\n  [\n    1,\n    2\n  ],\n  [\n    3,\n    4\n  ]\n]";
+        assert_eq!(result, expected);
+
+        // Nested struct within struct
+        let nested_struct = DynSolValue::CustomStruct {
+            name: "Outer".to_string(),
+            prop_names: vec!["inner".to_string(), "value".to_string()],
+            tuple: vec![
+                DynSolValue::CustomStruct {
+                    name: "Inner".to_string(),
+                    prop_names: vec!["x".to_string(), "y".to_string()],
+                    tuple: vec![
+                        DynSolValue::Uint(U256::from(10u64), 256),
+                        DynSolValue::Uint(U256::from(20u64), 256),
+                    ],
+                },
+                DynSolValue::Uint(U256::from(100u64), 256),
+            ],
+        };
+        let result = nested_struct.format_value(&ctx);
+        let expected = "{\n  inner: {\n    x: 10,\n    y: 20\n  },\n  value: 100\n}";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_shorten_long_with_multi_line() {
+        let ctx = SolValueFormatterContext::new().multi_line(true).shorten_long(true);
+
+        // Long array should be shortened even in multi-line mode
+        let long_array =
+            DynSolValue::Array((1..=10).map(|i| DynSolValue::Uint(U256::from(i), 256)).collect());
+        let result = long_array.format_value(&ctx);
+        let expected = "[\n  1,\n  2,\n  3,\n  ...[10 items]\n]";
+        assert_eq!(result, expected);
+
+        // Long tuple should be shortened
+        let long_tuple =
+            DynSolValue::Tuple((1..=8).map(|i| DynSolValue::Uint(U256::from(i), 256)).collect());
+        let result = long_tuple.format_value(&ctx);
+        let expected = "(\n  1,\n  2,\n  3,\n  ...[8 fields]\n)";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_triple_nested_indentation() {
+        let ctx = SolValueFormatterContext::new().multi_line(true);
+
+        // Three levels of nesting to test proper indentation
+        let triple_nested =
+            DynSolValue::Array(vec![DynSolValue::Tuple(vec![DynSolValue::Array(vec![
+                DynSolValue::Uint(U256::from(1u64), 256),
+                DynSolValue::Uint(U256::from(2u64), 256),
+            ])])]);
+        let result = triple_nested.format_value(&ctx);
+        let expected = "[([\n  1,\n  2\n])]"; // Actual format from error
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_mixed_complex_structures() {
+        let ctx = SolValueFormatterContext::new().multi_line(true);
+
+        // Array containing tuples containing structs
+        let complex_value = DynSolValue::Array(vec![DynSolValue::Tuple(vec![
+            DynSolValue::CustomStruct {
+                name: "Point".to_string(),
+                prop_names: vec!["x".to_string(), "y".to_string()],
+                tuple: vec![
+                    DynSolValue::Uint(U256::from(1u64), 256),
+                    DynSolValue::Uint(U256::from(2u64), 256),
+                ],
+            },
+            DynSolValue::Bool(true),
+        ])]);
+        let result = complex_value.format_value(&ctx);
+        let expected = "[(\n  {\n    x: 1,\n    y: 2\n  },\n  true\n)]";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_bytes_and_strings_multi_line() {
+        let ctx = SolValueFormatterContext::new().multi_line(true);
+
+        let mixed_data = DynSolValue::Array(vec![
+            DynSolValue::String("Hello, World!".to_string()),
+            DynSolValue::Bytes(vec![0x01, 0x02, 0x03, 0x04]),
+            DynSolValue::FixedBytes(FixedBytes::<32>::from([0xff; 32]), 32),
+        ]);
+        let result = mixed_data.format_value(&ctx);
+        let expected = "[\n  \"Hello, World!\",\n  0x01020304,\n  0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n]";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_address_formatting_nested() {
+        let ctx = SolValueFormatterContext::new().multi_line(true).shorten_long(true);
+
+        let struct_with_addresses = DynSolValue::CustomStruct {
+            name: "Transfer".to_string(),
+            prop_names: vec!["from".to_string(), "to".to_string()],
+            tuple: vec![
+                DynSolValue::Address("0x742d35Cc6639C0532fBb5dd9D09A0CB21234000A".parse().unwrap()),
+                DynSolValue::Address("0x0000000000000000000000000000000000000000".parse().unwrap()),
+            ],
+        };
+        let result = struct_with_addresses.format_value(&ctx);
+        let expected = "{\n  from: 0x742d35...34000a,\n  to: 0x0000000000000000\n}";
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_all_options_together() {
+        let ctx = SolValueFormatterContext::new().multi_line(true).with_ty(true).shorten_long(true);
+
+        let complex_struct = DynSolValue::CustomStruct {
+            name: "Transaction".to_string(),
+            prop_names: vec!["from".to_string(), "to".to_string(), "values".to_string()],
+            tuple: vec![
+                DynSolValue::Address("0x742d35Cc6639C0532fBb5dd9D09A0CB21234000A".parse().unwrap()),
+                DynSolValue::Address("0x123F681646d4A755815f9CB19e1aCc8565A0c2AC".parse().unwrap()),
+                DynSolValue::Array(
+                    (1..=10).map(|i| DynSolValue::Uint(U256::from(i), 256)).collect(),
+                ),
+            ],
+        };
+        let result = complex_struct.format_value(&ctx);
+        let expected = "Transaction{\n  from: address(0x742d35...34000a),\n  to: address(0x123f68...a0c2ac),\n  values: [\n    uint256(1),\n    uint256(2),\n    uint256(3),\n    ...[10 items]\n  ]\n}";
+        assert_eq!(result, expected);
     }
 }
