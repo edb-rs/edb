@@ -29,7 +29,7 @@ use alloy_dyn_abi::{DynSolType, DynSolValue};
 use alloy_primitives::{address, Address, Bytes, U256};
 use axum::extract::rejection::LengthLimitError;
 use edb_common::{
-    types::{CallResult, ExecutionFrameId, Trace},
+    types::{CallResult, EdbSolValue, ExecutionFrameId, Trace},
     EdbContext,
 };
 use eyre::Result;
@@ -52,6 +52,7 @@ use revm::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    hash::Hash,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
@@ -92,6 +93,8 @@ where
     pub bytecode_address: Address,
     /// Database state at the hook point
     pub database: Arc<CacheDB<DB>>,
+    /// Value of accessible local variables
+    pub locals: HashMap<UVID, Option<Arc<EdbSolValue>>>,
     /// User-defined snapshot ID from call data
     pub usid: USID,
 }
@@ -242,6 +245,9 @@ where
 
     /// Creation hooks (original contract bytecode, hooked bytecode, constructor args)
     creation_hooks: Vec<(Bytes, Bytes, Bytes)>,
+
+    /// The latest value of each UVID encountered (for variable tracking)
+    uvid_values: HashMap<UVID, Arc<EdbSolValue>>,
 }
 
 impl<'a, DB> HookSnapshotInspector<'a, DB>
@@ -259,6 +265,7 @@ where
             frame_stack: Vec::new(),
             current_trace_id: 0,
             creation_hooks: Vec::new(),
+            uvid_values: HashMap::new(),
         }
     }
 
@@ -328,9 +335,15 @@ where
     fn check_and_record_hook(
         &mut self,
         data: &[u8],
-        _interp: &Interpreter,
+        interp: &Interpreter,
         ctx: &mut EdbContext<DB>,
     ) {
+        let address = self
+            .current_frame_id()
+            .and_then(|frame_id| self.trace.get(frame_id.trace_entry_id()))
+            .and_then(|entry| Some(entry.code_address))
+            .unwrap_or(interp.input.target_address());
+
         let usid_opt = if data.len() >= 32 {
             U256::from_be_slice(&data[..32]).try_into().ok()
         } else {
@@ -349,6 +362,23 @@ where
         let mut snap = ctx.db().clone();
         snap.commit(changes);
 
+        // Check variables that are valid at this point
+        let Some(step) = self.analysis.get(&address).and_then(|a| a.usid_to_step.get(&usid)) else {
+            error!(
+                address=?address,
+                usid=?usid,
+                "No analysis step found for address and USID, skipping hook snapshot",
+            );
+            return;
+        };
+
+        // Collect values of accessible variables
+        let mut locals = HashMap::new();
+        for variable in &step.read().accessible_variables {
+            let uvid = variable.id();
+            locals.insert(uvid, self.uvid_values.get(&uvid).cloned());
+        }
+
         // Update the last frame with this snapshot
         if let Some(current_frame_id) = self.current_frame_id() {
             if let Some(entry) = self.trace.get(current_frame_id.trace_entry_id()) {
@@ -357,6 +387,7 @@ where
                     target_address: entry.target,
                     bytecode_address: entry.code_address,
                     database: Arc::new(snap),
+                    locals,
                     usid,
                 };
 
@@ -461,15 +492,15 @@ where
                 }
             };
 
-        // TODO
-        println!(
-            "Found variable update: {} ({}): {:?}",
-            uvid,
-            variable.base().declaration().name,
-            value
+        debug!(
+            uvid=?uvid,
+            address=?address,
+            variable=?variable.declaration().name,
+            value=?value,
+            "Found variable update",
         );
 
-        // TODO: save the variable value
+        self.uvid_values.insert(uvid, Arc::new(value.into()));
     }
 
     /// Check and apply creation hooks if the bytecode matches

@@ -1,11 +1,11 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use alloy_primitives::{Address, Bytes, U256};
 use derive_more::From;
 use revm::state::TransientStorage;
 use serde::{Deserialize, Serialize};
 
-use crate::types::ExecutionFrameId;
+use crate::types::{EdbSolValue, ExecutionFrameId};
 
 #[derive(Debug, Clone, Serialize, Deserialize, From)]
 pub struct SnapshotInfo {
@@ -77,6 +77,8 @@ pub struct HookSnapshotInfoDetail {
     pub offset: usize,
     /// Length of the step
     pub length: usize,
+    /// Local variables (shared via Arc when unchanged)
+    pub locals: HashMap<String, Option<Arc<EdbSolValue>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

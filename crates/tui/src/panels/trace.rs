@@ -26,7 +26,7 @@ use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{hex, Bytes};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
+use edb_common::types::{CallResult, CallType, SolValueFormatterContext, Trace, TraceEntry};
 use eyre::Result;
 use ratatui::{
     layout::Rect,
@@ -500,7 +500,7 @@ impl TracePanelInner {
             Span::styled(call_type_str, Style::default().fg(call_color)),
             Span::raw(" "),
             Span::styled(
-                dm.resolver.resolve_address(entry.code_address, false),
+                dm.resolver.resolve_sol_value(&DynSolValue::Address(entry.code_address), None),
                 Style::default().fg(dm.theme.accent_color),
             ),
         ];
@@ -553,7 +553,7 @@ impl TracePanelInner {
             spans.push(Span::styled(
                 format!(
                     " → {} ({} ETH)",
-                    dm.resolver.resolve_address(*beneficiary, false),
+                    dm.resolver.resolve_sol_value(&DynSolValue::Address(*beneficiary), None),
                     dm.resolver.resolve_ether(*value)
                 ),
                 Style::default().fg(dm.theme.warning_color),

@@ -21,6 +21,7 @@ use std::sync::Arc;
 use edb_common::types::{
     HookSnapshotInfoDetail, OpcodeSnapshotInfoDetail, SnapshotInfo, SnapshotInfoDetail,
 };
+use foundry_compilers::artifacts::Mutability;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
@@ -136,6 +137,22 @@ where
                     data: None,
                 })?;
 
+            // Find local variables at this snapshot
+            let locals = hook_snapshot
+                .locals
+                .iter()
+                .filter_map(|(uvid, value)| {
+                    analysis_result.uvid_to_variable.get(uvid).and_then(|v| {
+                        if !v.declaration().state_variable {
+                            Some((v.declaration().name.clone(), value.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+            println!("MDZZ locals: {:?}", locals);
+
             SnapshotInfo {
                 id: snapshot.id(),
                 frame_id: snapshot.frame_id(),
@@ -152,6 +169,7 @@ where
                 detail: SnapshotInfoDetail::Hook(HookSnapshotInfoDetail {
                     id: snapshot.id(),
                     frame_id: *frame_id,
+                    locals,
                     path: source_analysis.path.clone(),
                     offset: source_location.start.unwrap_or(0),
                     length: source_location.length.unwrap_or(0),

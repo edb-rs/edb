@@ -25,3 +25,6 @@ pub use trace::*;
 
 mod execution_frame;
 pub use execution_frame::*;
+
+mod dyn_sol;
+pub use dyn_sol::*;

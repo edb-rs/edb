@@ -33,9 +33,9 @@ use crate::{
 use alloy_dyn_abi::{DynSolValue, EventExt, FunctionExt, JsonAbiExt};
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
-use edb_common::SolValueFormatter;
+use edb_common::types::{SolValueFormatter, SolValueFormatterContext as FormatCtx};
 use eyre::Result;
-use std::{collections::HashSet, ops::Deref, sync::Arc};
+use std::{cell::RefCell, collections::HashSet, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::debug;
 
@@ -221,10 +221,12 @@ impl Resolver {
                                 "{} {}: {}",
                                 value.format_type(),
                                 name,
-                                self.resolve_sol_value(value, false),
+                                self.resolve_sol_value(value, None),
                             ));
                         } else {
-                            return_parts.push(self.resolve_sol_value(value, true));
+                            return_parts.push(
+                                self.resolve_sol_value(value, Some(FormatCtx::new_with_ty())),
+                            );
                         }
                     }
 
@@ -259,8 +261,10 @@ impl Resolver {
         {
             match function_abi.abi_decode_input(&calldata[4..]) {
                 Ok(decoded) => {
-                    let params: Vec<String> =
-                        decoded.iter().map(|param| self.resolve_sol_value(param, true)).collect();
+                    let params: Vec<String> = decoded
+                        .iter()
+                        .map(|param| self.resolve_sol_value(param, Some(FormatCtx::new_with_ty())))
+                        .collect();
 
                     return Some(format!("{}({})", function_abi.name, params.join(", ")));
                 }
@@ -288,8 +292,10 @@ impl Resolver {
         {
             match abi.abi_decode_input(&args) {
                 Ok(decoded) => {
-                    let params: Vec<String> =
-                        decoded.iter().map(|param| self.resolve_sol_value(param, true)).collect();
+                    let params: Vec<String> = decoded
+                        .iter()
+                        .map(|param| self.resolve_sol_value(param, Some(FormatCtx::new_with_ty())))
+                        .collect();
 
                     return Some(format!("constructor({})", params.join(", ")));
                 }
@@ -323,7 +329,7 @@ impl Resolver {
                             "{} {}: {}",
                             value.format_type(),
                             param.name,
-                            value.format_value(false)
+                            self.resolve_sol_value(value, None),
                         ));
                     }
 
@@ -348,23 +354,19 @@ impl Resolver {
     }
 
     /// Resolve solidity value
-    pub fn resolve_sol_value(&mut self, value: &DynSolValue, with_ty: bool) -> String {
-        // TODO: add address label
-        value.format_value(with_ty)
+    pub fn resolve_sol_value(&mut self, value: &DynSolValue, ctx: Option<FormatCtx>) -> String {
+        let mut ctx = ctx.unwrap_or_default();
+
+        let self_ptr = self as *mut Self;
+        ctx.resolve_address =
+            Some(Box::new(move |addr| unsafe { (*self_ptr).resolve_address_label(addr) }));
+
+        value.format_value(&ctx)
     }
 
-    /// Resolve address
-    pub fn resolve_address(&mut self, address: Address, readable: bool) -> String {
-        // TODO: add address label
-        if !readable {
-            return format!("{:?}", address);
-        } else if address == Address::ZERO {
-            "0x0000000000000000".to_string()
-        } else {
-            let addr_str = format!("{:?}", address);
-            // Show more characters for better identification: 8 chars + ... + 6 chars
-            format!("{}...{}", &addr_str[..8], &addr_str[addr_str.len() - 6..])
-        }
+    /// Resolve and format address with label if available
+    pub fn resolve_address_label(&mut self, address: Address) -> Option<String> {
+        None
     }
 
     /// Resolve and format ether
