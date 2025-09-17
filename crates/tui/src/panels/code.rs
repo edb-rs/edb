@@ -120,8 +120,6 @@ pub struct CodePanel {
     vim_command_mode: bool,
 
     // ========== Data (Flag) ==========
-    /// Current execution snapshot
-    current_execution_snapshot: Option<usize>,
     /// Current display snapshot id
     current_display_snapshot: Option<usize>,
     /// Current selected path
@@ -155,7 +153,6 @@ impl CodePanel {
 
         Self {
             display_info,
-            current_execution_snapshot: None,
             current_display_snapshot: None,
             current_selected_path_id: None,
             source_lines: vec![],
@@ -333,7 +330,7 @@ impl CodePanel {
             .skip(self.file_selector_scroll_offset) // Skip items before viewport
             .take(self.file_selector_context_height) // Take only visible items
             .map(|(display_idx, file_info)| {
-                let filename = file_info.path.split('/').last().unwrap_or(&file_info.path);
+                let filename = file_info.path.as_str();
 
                 // Determine file status for enhanced icon display
                 let file_status = if file_info.has_execution {
@@ -817,7 +814,7 @@ impl CodePanel {
                     .sources
                     .get(execution_path)
                     .zip(exec_source_offset)
-                    .and_then(|(s, offset)| Some(s[..offset].lines().count()))
+                    .and_then(|(s, offset)| Some(s[..offset + 1].lines().count()))
                     .unwrap_or_default(); // 1-based
                 self.move_to(execution_line);
             }
@@ -901,53 +898,48 @@ impl CodePanel {
     }
 
     fn update_execution_info(&mut self, dm: &mut DataManager) -> Option<()> {
-        if self.current_execution_snapshot != Some(dm.execution.get_current_snapshot()) {
-            // We have update the execution snapshot
-            let execution_snapshot_id = dm.execution.get_current_snapshot();
-            let display_snapshot_id = dm.execution.get_display_snapshot();
+        let execution_snapshot_id = dm.execution.get_current_snapshot();
+        let display_snapshot_id = dm.execution.get_display_snapshot();
 
-            let execution_entry_id =
-                dm.execution.get_snapshot_info(execution_snapshot_id)?.frame_id().trace_entry_id();
-            let display_entry_id =
-                dm.execution.get_snapshot_info(display_snapshot_id)?.frame_id().trace_entry_id();
+        let execution_entry_id =
+            dm.execution.get_snapshot_info(execution_snapshot_id)?.frame_id().trace_entry_id();
+        let display_entry_id =
+            dm.execution.get_snapshot_info(display_snapshot_id)?.frame_id().trace_entry_id();
 
-            let execution_address = dm.execution.get_trace().get(execution_entry_id)?.code_address;
-            let display_address = dm.execution.get_trace().get(display_entry_id)?.code_address;
+        let execution_address = dm.execution.get_trace().get(execution_entry_id)?.code_address;
+        let display_address = dm.execution.get_trace().get(display_entry_id)?.code_address;
 
-            self.current_execution_snapshot = Some(execution_snapshot_id);
+        if execution_address != display_address {
+            // We do not need to show the execution line
+            self.current_execution_line = None;
+            return Some(());
+        }
 
-            if execution_address != display_address {
-                // We do not need to show the execution line
-                self.current_execution_line = None;
-                return Some(());
-            }
-
-            match dm.execution.get_snapshot_info(execution_snapshot_id)?.detail() {
-                SnapshotInfoDetail::Hook(hook_info) => {
-                    let execution_path = hook_info.path.as_os_str().to_string_lossy();
-                    let display_path = &self.display_info.available_files[self.selected_path_index];
-                    if &*execution_path != display_path {
-                        // Execution moved to a different file, we simply do not show it
-                        self.current_execution_line = None;
-                    } else {
-                        let offset = hook_info.offset;
-                        let execution_line = self
-                            .sources
-                            .get(display_path)
-                            .and_then(|s| Some(s[..offset].lines().count()))
-                            .unwrap_or_default(); // 1-based
-                        self.current_execution_line = Some(execution_line);
-                    }
-                }
-                SnapshotInfoDetail::Opcode(opcode_info) => {
+        match dm.execution.get_snapshot_info(execution_snapshot_id)?.detail() {
+            SnapshotInfoDetail::Hook(hook_info) => {
+                let execution_path = hook_info.path.as_os_str().to_string_lossy();
+                let display_path = &self.display_info.available_files[self.selected_path_index];
+                if &*execution_path != display_path {
+                    // Execution moved to a different file, we simply do not show it
+                    self.current_execution_line = None;
+                } else {
+                    let offset = hook_info.offset;
                     let execution_line = self
-                        .opcodes
-                        .iter()
-                        .position(|(pc, _)| *pc as usize == opcode_info.pc)
-                        .map(|idx| idx + 1) // 1-based
-                        .unwrap_or_default();
+                        .sources
+                        .get(display_path)
+                        .and_then(|s| Some(s[..offset + 1].lines().count()))
+                        .unwrap_or_default(); // 1-based
                     self.current_execution_line = Some(execution_line);
                 }
+            }
+            SnapshotInfoDetail::Opcode(opcode_info) => {
+                let execution_line = self
+                    .opcodes
+                    .iter()
+                    .position(|(pc, _)| *pc as usize == opcode_info.pc)
+                    .map(|idx| idx + 1) // 1-based
+                    .unwrap_or_default();
+                self.current_execution_line = Some(execution_line);
             }
         }
 
