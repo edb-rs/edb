@@ -18,8 +18,8 @@ use std::path::PathBuf;
 
 use alloy_primitives::{address, Address, Bytes, TxHash};
 use edb_common::{
-    fork_and_prepare, relax_context_constraints, Cache, CachePath, EdbCache, EdbCachePath,
-    EdbContext, ForkResult,
+    fork_and_prepare, relax_evm_constraints, Cache, CachePath, EdbCache, EdbCachePath, EdbContext,
+    ForkResult,
 };
 use eyre::Result;
 use foundry_block_explorers::{contract::ContractCreationData, Client};
@@ -123,7 +123,7 @@ where
         // Create replay environment
         let ForkResult { context: mut replay_ctx, target_tx_env: mut creation_tx_env, .. } =
             fork_and_prepare(&self.rpc_url, creation_tx_hash, quick).await?;
-        relax_context_constraints(&mut replay_ctx, &mut creation_tx_env);
+        relax_evm_constraints(&mut replay_ctx, &mut creation_tx_env);
 
         // Get init code
         let contract = artifact.contract().ok_or(eyre::eyre!("Failed to get contract"))?;

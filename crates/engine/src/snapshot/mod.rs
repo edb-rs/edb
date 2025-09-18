@@ -138,6 +138,11 @@ where
         &self.detail
     }
 
+    /// Get the detail of the snapshot (mutable)
+    pub fn detail_mut(&mut self) -> &mut SnapshotDetail<DB> {
+        &mut self.detail
+    }
+
     /// Get USID if the snapshot is hooked
     pub fn usid(&self) -> Option<USID> {
         match &self.detail {

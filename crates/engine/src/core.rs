@@ -48,7 +48,7 @@ use std::{
 use tracing::{debug, error, info, warn};
 
 use edb_common::{
-    relax_context_constraints, types::Trace, CachePath, EdbCachePath, EdbContext, ForkResult,
+    relax_evm_constraints, types::Trace, CachePath, EdbCachePath, EdbContext, ForkResult,
     DEFAULT_ETHERSCAN_CACHE_TTL,
 };
 
@@ -213,7 +213,7 @@ impl Engine {
             recompiled_artifacts,
             analysis_results,
             replay_result.execution_trace,
-        );
+        )?;
 
         let rpc_handle = start_debug_server(context).await?;
         info!("Debug RPC server started on port {}", rpc_handle.port());
@@ -368,7 +368,7 @@ impl Engine {
         <DB as Database>::Error: Clone,
     {
         // We need to relax execution constraints for hook snapshots
-        relax_context_constraints(&mut ctx, &mut tx);
+        relax_evm_constraints(&mut ctx, &mut tx);
 
         info!("Collecting hook snapshots for source code contracts");
 

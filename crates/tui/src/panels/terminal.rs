@@ -27,7 +27,7 @@ use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
 use crate::{Spinner, SpinnerStyles};
 use alloy_primitives::{Address, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use edb_common::types::{SnapshotInfo, SnapshotInfoDetail};
+use edb_common::types::SnapshotInfoDetail;
 use eyre::{bail, eyre, Result};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -168,20 +168,20 @@ impl PendingCommand {
         let id = dm.execution.get_current_snapshot();
         match self {
             PendingCommand::StepForward(count) => {
-                Ok(format!("Stepped forward {} times to Snapshot {}", count, id))
+                Ok(format!("Stepped forward {} times to Step {}", count, id))
             }
             PendingCommand::StepBackward(count) => {
-                Ok(format!("Stepped backward {} times to Snapshot {}", count, id))
+                Ok(format!("Stepped backward {} times to Step {}", count, id))
             }
             PendingCommand::NextCall(src_id) => {
                 let next_id =
                     dm.execution.get_next_call(*src_id).ok_or(eyre!("No next call found"))?;
-                Ok(format!("Goto Next Call at Snapshot {}", next_id))
+                Ok(format!("Goto Next Call at Step {}", next_id))
             }
             PendingCommand::PrevCall(src_id) => {
                 let prev_id =
                     dm.execution.get_prev_call(*src_id).ok_or(eyre!("No previous call found"))?;
-                Ok(format!("Goto Previous Call at Snapshot {}", prev_id))
+                Ok(format!("Goto Previous Call at Step {}", prev_id))
             }
             PendingCommand::StepForwardNoCallees(src_id) => {
                 let next_id = dm
@@ -189,7 +189,7 @@ impl PendingCommand {
                     .get_snapshot_info(*src_id)
                     .ok_or(eyre!("No next step found"))?
                     .next_id;
-                Ok(format!("Stepped to Snapshot {} without going into callees", next_id))
+                Ok(format!("Stepped to Step {} without going into callees", next_id))
             }
             PendingCommand::StepBackwardNoCallees(src_id) => {
                 let prev_id = dm
@@ -197,9 +197,9 @@ impl PendingCommand {
                     .get_snapshot_info(*src_id)
                     .ok_or(eyre!("No previous step found"))?
                     .prev_id;
-                Ok(format!("Stepped to Snapshot {} without going into callees", prev_id))
+                Ok(format!("Stepped to Step {} without going into callees", prev_id))
             }
-            PendingCommand::Goto(id) => Ok(format!("Goto Snapshot {}", id)),
+            PendingCommand::Goto(id) => Ok(format!("Goto Step {}", id)),
             PendingCommand::CallableAbi(address) => {
                 let abi_list = dm
                     .resolver
@@ -880,9 +880,9 @@ impl TerminalPanel {
             .execution(execution_status)
             .current_panel("Terminal".to_string());
 
-        // Add snapshot info if available
+        // Add step info if available
         if let Some((current, total)) = self.snapshot_info {
-            status_bar = status_bar.message(format!("Snapshot {}/{}", current + 1, total + 1));
+            status_bar = status_bar.message(format!("Step {}/{}", current + 1, total + 1));
         }
 
         // Add gas info

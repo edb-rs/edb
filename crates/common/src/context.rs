@@ -25,23 +25,46 @@ use revm::{
     state::{Account, AccountInfo, Bytecode},
     Context, Database, DatabaseCommit, DatabaseRef,
 };
-use std::{fmt, usize};
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+    usize,
+};
 
-/// Type alias for the EDB context
+/// Type alias for the EDB context in terms of revm's Context
 pub type EdbContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, CacheDB<DB>>;
 
-/// Relax the constraints on the context
-pub fn relax_context_constraints<DB: Database + DatabaseRef>(
+/// Type alias for the derived context with Arc-wrapped CacheDB.
+/// This context is used for those derived EVM instances at each snapshot.
+pub type DerivedContext<DB> = EdbContext<CacheDB<Arc<CacheDB<DB>>>>;
+
+/// Relax the constraints for EVM execution in the given context and transaction
+pub fn relax_evm_constraints<DB: Database + DatabaseRef>(
     context: &mut EdbContext<DB>,
     tx: &mut TxEnv,
 ) {
+    relax_evm_context_constraints(context);
+    relax_evm_tx_constraints(tx);
+}
+
+/// Relax the constraints for EVM execution in the given context
+pub fn relax_evm_context_constraints<DB: Database + DatabaseRef>(context: &mut EdbContext<DB>) {
     let cfg = &mut context.cfg;
     cfg.disable_base_fee = true;
     cfg.disable_block_gas_limit = true;
     cfg.tx_gas_limit_cap = Some(u64::MAX);
     cfg.limit_contract_initcode_size = Some(usize::MAX);
     cfg.limit_contract_code_size = Some(usize::MAX);
+}
 
+/// Disable nonce check in the given context
+pub fn disable_nonce_check<DB: Database + DatabaseRef>(context: &mut EdbContext<DB>) {
+    context.cfg.disable_nonce_check = true;
+}
+
+/// Relax the constraints for EVM execution in the given transaction
+pub fn relax_evm_tx_constraints(tx: &mut TxEnv) {
     tx.gas_limit = u64::MAX; // Relax gas limit for execution
     tx.gas_price = 0; // Relax gas price for execution
     tx.gas_priority_fee = Some(0); // Relax gas priority fee for execution
