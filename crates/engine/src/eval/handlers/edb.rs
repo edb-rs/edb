@@ -14,12 +14,16 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use alloy_dyn_abi::DynSolValue;
+use alloy_primitives::U256;
 use edb_common::types::{parse_callable_abi_entries, CallableAbiEntry, SnapshotInfoDetail};
 use eyre::{bail, eyre, Result};
-use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
+use revm::{
+    database::CacheDB, interpreter::instructions::system::address, Database, DatabaseCommit,
+    DatabaseRef,
+};
 use tracing::debug;
 
 use super::*;
@@ -325,7 +329,7 @@ where
             name, args, callee, snapshot_id
         );
 
-        let (frame_id, snapshot) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
+        let (_frame_id, snapshot) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
             eyre::eyre!("Snapshot ID {} not found in EdbHandler::call_function", snapshot_id)
         })?;
 
@@ -354,7 +358,87 @@ where
             }
         }
 
-        bail!("EdbHandler::call_function not yet implemented for name='{}', args={:?}, callee={:?}, snapshot_id={}", name, args, callee, snapshot_id)
+        // Let's then handle calls to functions in the contract's ABI
+        let to = if let Some(v) = callee {
+            match v {
+                DynSolValue::Address(addr) => *addr,
+                _ => {
+                    bail!("Callee must be an address, got {:?}", callee);
+                }
+            }
+        } else {
+            snapshot.target_address()
+        };
+
+        let mut address_candidates = self
+            .0
+            .context
+            .address_code_address_map()
+            .get(&to)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<Vec<_>>();
+        address_candidates.insert(0, to); // Prioritize the direct address
+
+        let mut errors = Vec::new();
+        for address_candidate in address_candidates {
+            if let Some(contract) = self
+                .0
+                .context
+                .recompiled_artifacts
+                .get(&address_candidate)
+                .and_then(|art| art.contract())
+            {
+                for entry in parse_callable_abi_entries(contract) {
+                    if entry.name == name && entry.is_function() && entry.inputs.len() == args.len()
+                    {
+                        match self.0.context.call_in_derived_evm(
+                            snapshot_id,
+                            address_candidate,
+                            &entry.abi,
+                            args,
+                            None,
+                        ) {
+                            Ok(result) => return Ok(result),
+                            Err(e) => {
+                                errors.push(e);
+                                debug!(
+                                    "Function '{}' found in contract at address {:?}, but call failed",
+                                    name, address_candidate
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            bail!(
+                "No function found for name='{}', args={:?}, callee={:?}, snapshot_id={}",
+                name,
+                args,
+                callee,
+                snapshot_id
+            )
+        } else {
+            let combined_error = errors
+                .into_iter()
+                .map(|e| format!("{e}"))
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(";\n");
+            bail!(
+                "Function call failed for name='{}', args={:?}, callee={:?}, snapshot_id={}:\n{}",
+                name,
+                args,
+                callee,
+                snapshot_id,
+                combined_error
+            )
+        }
     }
 }
 
@@ -370,8 +454,12 @@ where
         member: &str,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to access member in snapshot
-        bail!("EdbHandler::access_member not yet implemented for value={:?}, member='{}', snapshot_id={}", value, member, snapshot_id)
+        bail!(
+            "Invalid member access for value={:?}, member='{}', snapshot_id={}",
+            value,
+            member,
+            snapshot_id
+        )
     }
 }
 
@@ -410,14 +498,12 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    fn get_block_number(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to get block.number from snapshot
-        bail!("EdbHandler::get_block_number not yet implemented for snapshot_id={}", snapshot_id)
+    fn get_block_number(&self, _snapshot_id: usize) -> Result<DynSolValue> {
+        Ok(DynSolValue::Uint(U256::from(self.0.context.fork_info.block_number), 256))
     }
 
-    fn get_block_timestamp(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to get block.timestamp from snapshot
-        bail!("EdbHandler::get_block_timestamp not yet implemented for snapshot_id={}", snapshot_id)
+    fn get_block_timestamp(&self, _snapshot_id: usize) -> Result<DynSolValue> {
+        Ok(DynSolValue::Uint(self.0.context.block.timestamp, 256))
     }
 }
 

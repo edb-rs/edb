@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use alloy_dyn_abi::DynSolValue;
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{Address, B256, I256, U256};
 use eyre::{bail, Result};
 use revm::database::CacheDB;
 use revm::{Database, DatabaseCommit, DatabaseRef};
@@ -300,6 +300,20 @@ impl ExpressionEvaluator {
         // First try built-in properties, then fall back to handlers
         if let Some(builtin_result) = self.handle_builtin_property(&base_value, &member.name)? {
             return Ok(builtin_result);
+        }
+
+        // Handle struct member access via handler
+        if let DynSolValue::CustomStruct { name, prop_names, tuple } = base_value {
+            if let Some((idx, _)) = prop_names.iter().enumerate().find(|(_, n)| *n == &member.name)
+            {
+                if let Some(value) = tuple.get(idx) {
+                    return Ok(value.clone());
+                } else {
+                    bail!("Struct {} has no member named {}", name, member.name);
+                }
+            } else {
+                bail!("Struct {} has no member named {}", name, member.name);
+            }
         }
 
         self.access_member(base_value, &member.name, snapshot_id)
@@ -990,37 +1004,77 @@ impl ExpressionEvaluator {
                 _ => bail!("Cannot cast {:?} to address", value),
             },
 
-            // Unsigned integer casting (default to 256 bits)
-            Type::Uint(_) => match value {
-                DynSolValue::Uint(val, _) => Ok(DynSolValue::Uint(val, 256)),
-                DynSolValue::Int(val, _) => {
-                    let unsigned = val.into_raw();
-                    Ok(DynSolValue::Uint(unsigned, 256))
+            // Unsigned integer casting with proper size and truncation
+            Type::Uint(bits) => {
+                let target_bits = *bits as usize;
+                // Create mask for truncation
+                let mask = if target_bits >= 256 {
+                    U256::MAX
+                } else {
+                    (U256::from(1) << target_bits) - U256::from(1)
+                };
+                match value {
+                    DynSolValue::Uint(val, _) => {
+                        let truncated = val & mask;
+                        Ok(DynSolValue::Uint(truncated, target_bits))
+                    }
+                    DynSolValue::Int(val, _) => {
+                        let unsigned = val.into_raw() & mask;
+                        Ok(DynSolValue::Uint(unsigned, target_bits))
+                    }
+                    DynSolValue::Address(addr) => {
+                        let val = U256::from_be_slice(addr.as_slice()) & mask;
+                        Ok(DynSolValue::Uint(val, target_bits))
+                    }
+                    DynSolValue::Bool(b) => {
+                        let val = if b { U256::from(1) } else { U256::ZERO };
+                        Ok(DynSolValue::Uint(val, target_bits))
+                    }
+                    _ => bail!("Cannot cast {:?} to uint{}", value, target_bits),
                 }
-                DynSolValue::Address(addr) => {
-                    let val = U256::from_be_slice(addr.as_slice());
-                    Ok(DynSolValue::Uint(val, 256))
-                }
-                DynSolValue::Bool(b) => {
-                    let val = if b { U256::from(1) } else { U256::ZERO };
-                    Ok(DynSolValue::Uint(val, 256))
-                }
-                _ => bail!("Cannot cast {:?} to uint256", value),
-            },
+            }
 
-            // Signed integer casting (default to 256 bits)
-            Type::Int(_) => match value {
-                DynSolValue::Int(val, _) => Ok(DynSolValue::Int(val, 256)),
-                DynSolValue::Uint(val, _) => {
-                    let signed = I256::from_raw(val);
-                    Ok(DynSolValue::Int(signed, 256))
+            // Signed integer casting with proper size and truncation
+            Type::Int(bits) => {
+                let target_bits = *bits as usize;
+                // For signed integers, we need to handle sign extension properly
+                let truncate_signed = |val: I256| -> I256 {
+                    if target_bits >= 256 {
+                        return val;
+                    }
+                    // Create mask for the value bits
+                    let mask = (U256::from(1) << target_bits) - U256::from(1);
+                    let truncated = val.into_raw() & mask;
+
+                    // Check if the sign bit is set
+                    let sign_bit = U256::from(1) << (target_bits - 1);
+                    if truncated & sign_bit != U256::ZERO {
+                        // Negative number - sign extend
+                        let extension = U256::MAX ^ mask;
+                        I256::from_raw(truncated | extension)
+                    } else {
+                        // Positive number
+                        I256::from_raw(truncated)
+                    }
+                };
+
+                match value {
+                    DynSolValue::Int(val, _) => {
+                        let truncated = truncate_signed(val);
+                        Ok(DynSolValue::Int(truncated, target_bits))
+                    }
+                    DynSolValue::Uint(val, _) => {
+                        let signed = I256::from_raw(val);
+                        let truncated = truncate_signed(signed);
+                        Ok(DynSolValue::Int(truncated, target_bits))
+                    }
+                    DynSolValue::Bool(b) => {
+                        let val = if b { I256::from_raw(U256::from(1)) } else { I256::ZERO };
+                        Ok(DynSolValue::Int(val, target_bits))
+                    }
+                    _ => bail!("Cannot cast {:?} to int{}", value, target_bits),
                 }
-                DynSolValue::Bool(b) => {
-                    let val = if b { I256::from_raw(U256::from(1)) } else { I256::ZERO };
-                    Ok(DynSolValue::Int(val, 256))
-                }
-                _ => bail!("Cannot cast {:?} to int256", value),
-            },
+            }
 
             // Boolean casting
             Type::Bool => match value {
@@ -1030,11 +1084,55 @@ impl ExpressionEvaluator {
                 _ => bail!("Cannot cast {:?} to bool", value),
             },
 
-            // Bytes casting (simplified)
-            Type::Bytes(_) => match value {
+            // Fixed bytes casting (e.g., bytes32)
+            Type::Bytes(size) => {
+                let target_size = *size as usize;
+                match value {
+                    DynSolValue::Bytes(bytes) => {
+                        // Always use 32-byte buffer for B256
+                        let mut fixed_bytes = vec![0u8; 32];
+                        let copy_len = bytes.len().min(target_size);
+                        fixed_bytes[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                        Ok(DynSolValue::FixedBytes(B256::from_slice(&fixed_bytes), target_size))
+                    }
+                    DynSolValue::FixedBytes(bytes, _) => {
+                        // Convert between different fixed sizes
+                        let mut fixed_bytes = vec![0u8; 32];
+                        let copy_len = bytes.len().min(target_size).min(32);
+                        fixed_bytes[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                        Ok(DynSolValue::FixedBytes(B256::from_slice(&fixed_bytes), target_size))
+                    }
+                    DynSolValue::String(s) => {
+                        // Convert string to fixed bytes
+                        let bytes = s.as_bytes();
+                        let mut fixed_bytes = vec![0u8; 32];
+                        let copy_len = bytes.len().min(target_size);
+                        fixed_bytes[..copy_len].copy_from_slice(&bytes[..copy_len]);
+                        Ok(DynSolValue::FixedBytes(B256::from_slice(&fixed_bytes), target_size))
+                    }
+                    DynSolValue::Uint(val, _) => {
+                        // Convert uint to fixed bytes (big-endian)
+                        let mut fixed_bytes = vec![0u8; 32];
+                        let be_bytes = val.to_be_bytes::<32>();
+                        if target_size < 32 {
+                            // Copy from the end of be_bytes (rightmost bytes for smaller sizes)
+                            let src_start = 32 - target_size;
+                            fixed_bytes[..target_size].copy_from_slice(&be_bytes[src_start..]);
+                        } else {
+                            fixed_bytes = be_bytes.to_vec();
+                        }
+                        Ok(DynSolValue::FixedBytes(B256::from_slice(&fixed_bytes), target_size))
+                    }
+                    _ => bail!("Cannot cast {:?} to bytes{}", value, target_size),
+                }
+            }
+
+            // Dynamic bytes casting (simplified)
+            Type::DynamicBytes => match value {
                 DynSolValue::Bytes(bytes) => Ok(DynSolValue::Bytes(bytes)),
                 DynSolValue::FixedBytes(bytes, _) => Ok(DynSolValue::Bytes(bytes.to_vec())),
                 DynSolValue::String(s) => Ok(DynSolValue::Bytes(s.into_bytes())),
+                DynSolValue::Uint(val, _) => Ok(DynSolValue::Bytes(val.to_be_bytes_vec())),
                 _ => bail!("Cannot cast {:?} to bytes", value),
             },
 
