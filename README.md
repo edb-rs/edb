@@ -73,8 +73,11 @@ Debug any transaction from mainnet or testnets:
 
 ```bash
 # Debug a transaction with Terminal UI (default)
-edb replay 0x5bedd885ff628e935fe47dacb6065c6ac80514a85ec6444578fd1ba092904096
+edb --rpc-urls <RPC_ENDPOINTS> replay 0x5bedd885ff628e935fe47dacb6065c6ac80514a85ec6444578fd1ba092904096
 ```
+The `RPC_ENDPOINTS` should be a comma-separated list of RPC endpoint URLs.
+EDB will utilize the RPC endpoints to obtain on-chain states to replay the transaction.
+The more RPC endpoints are provided, the faster the replay is.
 
 EDB will by default start a TUI debugger:
 ![EDB TUI](resources/edb-tui.png)
