@@ -1,3 +1,19 @@
+// EDB - Ethereum Debugger
+// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use std::sync::Arc;
 
 use alloy_dyn_abi::DynSolValue;
@@ -167,9 +183,7 @@ impl ExpressionEvaluator {
             }
 
             // Hex literal: hex"deadbeef"
-            Expression::HexLiteral(literals) => {
-                self.evaluate_hex_literal(literals)
-            }
+            Expression::HexLiteral(literals) => self.evaluate_hex_literal(literals),
 
             // Array literal: [1, 2, 3]
             Expression::ArrayLiteral(_, elements) => {
@@ -181,27 +195,27 @@ impl ExpressionEvaluator {
                 self.evaluate_list_parameters(parameters, snapshot_id)
             }
 
-            Expression::New(..) |
-            Expression::Delete(..) |
-            Expression::PostDecrement(..) |
-            Expression::PostIncrement(..) |
-            Expression::PreDecrement(..) |
-            Expression::PreIncrement(..) |
-            Expression::Assign(..) |
-            Expression::AssignAdd(..) |
-            Expression::AssignSubtract(..) |
-            Expression::AssignMultiply(..) |
-            Expression::AssignDivide(..) |
-            Expression::AssignModulo(..) |
-            Expression::AssignShiftLeft(..) |
-            Expression::AssignShiftRight(..) |
-            Expression::AssignAnd(..) |
-            Expression::AssignOr(..) |
-            Expression::AssignXor(..) |
-            Expression::FunctionCallBlock(..) |
-            Expression::NamedFunctionCall(..) |
-            Expression::RationalNumberLiteral(..) |
-            Expression::Type(..) => bail!("Unsupported expression type: {:?}", expr),
+            Expression::New(..)
+            | Expression::Delete(..)
+            | Expression::PostDecrement(..)
+            | Expression::PostIncrement(..)
+            | Expression::PreDecrement(..)
+            | Expression::PreIncrement(..)
+            | Expression::Assign(..)
+            | Expression::AssignAdd(..)
+            | Expression::AssignSubtract(..)
+            | Expression::AssignMultiply(..)
+            | Expression::AssignDivide(..)
+            | Expression::AssignModulo(..)
+            | Expression::AssignShiftLeft(..)
+            | Expression::AssignShiftRight(..)
+            | Expression::AssignAnd(..)
+            | Expression::AssignOr(..)
+            | Expression::AssignXor(..)
+            | Expression::FunctionCallBlock(..)
+            | Expression::NamedFunctionCall(..)
+            | Expression::RationalNumberLiteral(..)
+            | Expression::Type(..) => bail!("Unsupported expression type: {:?}", expr),
         }
     }
 
@@ -259,7 +273,7 @@ impl ExpressionEvaluator {
         member: &Identifier,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        // Special handling for msg, tx, block
+        // Special handling for global variables (msg, tx, block)
         if let Expression::Variable(base_ident) = base {
             match (base_ident.name.as_str(), member.name.as_str()) {
                 ("msg", "sender") => return self.get_msg_sender(snapshot_id),
@@ -267,12 +281,20 @@ impl ExpressionEvaluator {
                 ("tx", "origin") => return self.get_tx_origin(snapshot_id),
                 ("block", "number") => return self.get_block_number(snapshot_id),
                 ("block", "timestamp") => return self.get_block_timestamp(snapshot_id),
+                // Additional msg/tx/block properties should be handled by extending handlers
+                // rather than hardcoding values here
                 _ => {}
             }
         }
 
-        // Regular member access
+        // Regular member access with built-in property handling
         let base_value = self.evaluate_expression(base, snapshot_id)?;
+
+        // First try built-in properties, then fall back to handlers
+        if let Some(builtin_result) = self.handle_builtin_property(&base_value, &member.name)? {
+            return Ok(builtin_result);
+        }
+
         self.access_member(base_value, &member.name, snapshot_id)
     }
 
@@ -336,7 +358,9 @@ impl ExpressionEvaluator {
                 let callee = self.evaluate_expression(base, snapshot_id)?;
 
                 // Handle built-in properties/methods
-                if let Some(result) = self.handle_builtin_member_call(&member.name, &callee, &arg_values)? {
+                if let Some(result) =
+                    self.handle_builtin_member_call(&member.name, &callee, &arg_values)?
+                {
                     return Ok(result);
                 }
 
@@ -354,7 +378,66 @@ impl ExpressionEvaluator {
         self.call_function(&func_name, &arg_values, callee.as_ref(), snapshot_id)
     }
 
-    /// Handle built-in member calls (like string.length, array.push, etc.)
+    /// Handle built-in properties (like string.length, address.balance)
+    fn handle_builtin_property(
+        &self,
+        value: &DynSolValue,
+        property_name: &str,
+    ) -> Result<Option<DynSolValue>> {
+        match (property_name, value) {
+            // ============ LENGTH PROPERTIES ============
+            ("length", DynSolValue::String(s)) => {
+                Ok(Some(DynSolValue::Uint(U256::from(s.len()), 256)))
+            }
+            ("length", DynSolValue::Bytes(b)) => {
+                Ok(Some(DynSolValue::Uint(U256::from(b.len()), 256)))
+            }
+            ("length", DynSolValue::FixedBytes(_, size)) => {
+                Ok(Some(DynSolValue::Uint(U256::from(*size), 256)))
+            }
+            ("length", DynSolValue::Tuple(arr)) => {
+                Ok(Some(DynSolValue::Uint(U256::from(arr.len()), 256)))
+            }
+
+            // ============ ADDRESS PROPERTIES ============
+            // Note: These should ultimately be handled by specialized handlers
+            // that can access blockchain state, but we define the interface here
+            ("balance", DynSolValue::Address(_)) => {
+                // Delegate to handler - this is blockchain state
+                Ok(None)
+            }
+            ("code", DynSolValue::Address(_)) => {
+                // Delegate to handler - this is blockchain state
+                Ok(None)
+            }
+            ("codehash", DynSolValue::Address(_)) => {
+                // Delegate to handler - this is blockchain state
+                Ok(None)
+            }
+            ("codesize", DynSolValue::Address(_)) => {
+                // Delegate to handler - this is blockchain state
+                Ok(None)
+            }
+
+            // ============ NUMERIC PROPERTIES ============
+            ("abs", DynSolValue::Int(val, bits)) => {
+                // Absolute value for signed integers
+                let abs_val = if val.is_negative() { val.wrapping_neg() } else { *val };
+                Ok(Some(DynSolValue::Uint(abs_val.into_raw(), *bits)))
+            }
+
+            // ============ TYPE CHECKING PROPERTIES ============
+            ("isZero", DynSolValue::Uint(val, bits)) => Ok(Some(DynSolValue::Bool(val.is_zero()))),
+            ("isZero", DynSolValue::Int(val, bits)) => Ok(Some(DynSolValue::Bool(val.is_zero()))),
+            ("isZero", DynSolValue::Address(addr)) => {
+                Ok(Some(DynSolValue::Bool(*addr == Address::ZERO)))
+            }
+
+            _ => Ok(None), // Not a built-in property we handle
+        }
+    }
+
+    /// Handle built-in member calls (methods with arguments, like array.push(), string.concat())
     fn handle_builtin_member_call(
         &self,
         member_name: &str,
@@ -362,24 +445,7 @@ impl ExpressionEvaluator {
         args: &[DynSolValue],
     ) -> Result<Option<DynSolValue>> {
         match (member_name, callee, args.len()) {
-            // ============ LENGTH PROPERTIES ============
-
-            // String length property
-            ("length", DynSolValue::String(s), 0) => {
-                Ok(Some(DynSolValue::Uint(U256::from(s.len()), 256)))
-            }
-            // Bytes length property
-            ("length", DynSolValue::Bytes(b), 0) => {
-                Ok(Some(DynSolValue::Uint(U256::from(b.len()), 256)))
-            }
-            // Fixed bytes length property
-            ("length", DynSolValue::FixedBytes(_, size), 0) => {
-                Ok(Some(DynSolValue::Uint(U256::from(*size), 256)))
-            }
-            // Array length property (for arrays represented as tuples)
-            ("length", DynSolValue::Tuple(arr), 0) => {
-                Ok(Some(DynSolValue::Uint(U256::from(arr.len()), 256)))
-            }
+            // Note: Length properties are handled in handle_builtin_property since they take no arguments
 
             // ============ ARRAY/LIST METHODS ============
 
@@ -428,7 +494,9 @@ impl ExpressionEvaluator {
             }
             // String slice/substring (start and end)
             ("slice", DynSolValue::String(s), 2) => {
-                if let (DynSolValue::Uint(start, _), DynSolValue::Uint(end, _)) = (&args[0], &args[1]) {
+                if let (DynSolValue::Uint(start, _), DynSolValue::Uint(end, _)) =
+                    (&args[0], &args[1])
+                {
                     let start_idx = start.to::<usize>();
                     let end_idx = end.to::<usize>();
                     if start_idx <= end_idx && end_idx <= s.len() {
@@ -468,7 +536,9 @@ impl ExpressionEvaluator {
             }
             // Bytes slice (start and end)
             ("slice", DynSolValue::Bytes(b), 2) => {
-                if let (DynSolValue::Uint(start, _), DynSolValue::Uint(end, _)) = (&args[0], &args[1]) {
+                if let (DynSolValue::Uint(start, _), DynSolValue::Uint(end, _)) =
+                    (&args[0], &args[1])
+                {
                     let start_idx = start.to::<usize>();
                     let end_idx = end.to::<usize>();
                     if start_idx <= end_idx && end_idx <= b.len() {
@@ -503,17 +573,11 @@ impl ExpressionEvaluator {
             // ============ TYPE CHECKING FUNCTIONS ============
 
             // Check if string is empty
-            ("isEmpty", DynSolValue::String(s), 0) => {
-                Ok(Some(DynSolValue::Bool(s.is_empty())))
-            }
+            ("isEmpty", DynSolValue::String(s), 0) => Ok(Some(DynSolValue::Bool(s.is_empty()))),
             // Check if bytes is empty
-            ("isEmpty", DynSolValue::Bytes(b), 0) => {
-                Ok(Some(DynSolValue::Bool(b.is_empty())))
-            }
+            ("isEmpty", DynSolValue::Bytes(b), 0) => Ok(Some(DynSolValue::Bool(b.is_empty()))),
             // Check if array is empty
-            ("isEmpty", DynSolValue::Tuple(arr), 0) => {
-                Ok(Some(DynSolValue::Bool(arr.is_empty())))
-            }
+            ("isEmpty", DynSolValue::Tuple(arr), 0) => Ok(Some(DynSolValue::Bool(arr.is_empty()))),
 
             _ => Ok(None), // Not a built-in we handle
         }
@@ -852,11 +916,7 @@ impl ExpressionEvaluator {
             let cleaned = hex_str.replace(['_', ' '], "");
 
             // Ensure even number of characters
-            let hex = if cleaned.len() % 2 != 0 {
-                format!("0{}", cleaned)
-            } else {
-                cleaned
-            };
+            let hex = if cleaned.len() % 2 != 0 { format!("0{}", cleaned) } else { cleaned };
 
             // Convert hex string to bytes
             for chunk in hex.as_bytes().chunks(2) {
@@ -975,11 +1035,13 @@ impl ExpressionEvaluator {
             Type::String => match value {
                 DynSolValue::String(s) => Ok(DynSolValue::String(s)),
                 DynSolValue::Bytes(bytes) => {
-                    let s = String::from_utf8(bytes).map_err(|_| eyre::eyre!("Invalid UTF-8 bytes"))?;
+                    let s =
+                        String::from_utf8(bytes).map_err(|_| eyre::eyre!("Invalid UTF-8 bytes"))?;
                     Ok(DynSolValue::String(s))
                 }
                 DynSolValue::FixedBytes(bytes, _) => {
-                    let s = String::from_utf8(bytes.to_vec()).map_err(|_| eyre::eyre!("Invalid UTF-8 bytes"))?;
+                    let s = String::from_utf8(bytes.to_vec())
+                        .map_err(|_| eyre::eyre!("Invalid UTF-8 bytes"))?;
                     Ok(DynSolValue::String(s))
                 }
                 _ => bail!("Cannot cast {:?} to string", value),
@@ -1028,19 +1090,15 @@ impl ExpressionEvaluator {
         }
     }
 
-    /// Access member of a value
+    /// Access member of a value (for handler delegation)
     fn access_member(
         &self,
         value: DynSolValue,
         member: &str,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        // First check for built-in member properties (no-argument cases)
-        if let Some(builtin_result) = self.handle_builtin_member_call(member, &value, &[])? {
-            return Ok(builtin_result);
-        }
-
-        // Fall back to handler
+        // This method is only called after built-in properties have been checked
+        // in evaluate_member_access, so we delegate directly to handlers
         match &self.handlers.member_access_handler {
             Some(handler) => handler.access_member(value, member, snapshot_id),
             None => bail!("No member access handler configured"),
@@ -1718,7 +1776,11 @@ mod tests {
         // Test handler not configured errors
         let result = evaluator.eval("unknownVar", 0);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().to_lowercase().contains("no variable handler configured"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .to_lowercase()
+            .contains("no variable handler configured"));
     }
 
     #[test]
@@ -1726,7 +1788,10 @@ mod tests {
         let evaluator = ExpressionEvaluator::new_default();
 
         // Test large numbers
-        let result = evaluator.eval("115792089237316195423570985008687907853269984665640564039457584007913129639935", 0);
+        let result = evaluator.eval(
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+            0,
+        );
         assert!(result.is_ok());
         if let Ok(DynSolValue::Uint(val, _)) = result {
             assert_eq!(val, U256::MAX);
@@ -2223,11 +2288,14 @@ mod tests {
         let evaluator = ExpressionEvaluator::new(handlers);
 
         // Set up complex function return values
-        debug_handler.set_function("getReserves", DynSolValue::Tuple(vec![
-            DynSolValue::Uint(U256::from(1000000), 256),
-            DynSolValue::Uint(U256::from(500000), 256),
-            DynSolValue::Uint(U256::from(1700000000), 256)
-        ]));
+        debug_handler.set_function(
+            "getReserves",
+            DynSolValue::Tuple(vec![
+                DynSolValue::Uint(U256::from(1000000), 256),
+                DynSolValue::Uint(U256::from(500000), 256),
+                DynSolValue::Uint(U256::from(1700000000), 256),
+            ]),
+        );
 
         // Test function calls with different argument patterns
         let result = evaluator.eval("getReserves()", 0);
@@ -2331,10 +2399,8 @@ mod tests {
         debug_handler.clear_log();
 
         // Execute a complex expression
-        let result = evaluator.eval(
-            "((balanceOf() * msg.value) / totalSupply()) > (block.timestamp % 1000)",
-            0
-        );
+        let result = evaluator
+            .eval("((balanceOf() * msg.value) / totalSupply()) > (block.timestamp % 1000)", 0);
         assert!(result.is_ok());
 
         // Analyze logging output
@@ -2347,7 +2413,7 @@ mod tests {
         let block_accesses = log.iter().filter(|entry| entry.contains("get_block_")).count();
 
         assert!(function_calls >= 2); // balanceOf, totalSupply
-        assert!(msg_accesses >= 1);   // msg.value
+        assert!(msg_accesses >= 1); // msg.value
         assert!(block_accesses >= 1); // block.timestamp
 
         // Test log clearing functionality
@@ -2472,6 +2538,77 @@ mod tests {
     }
 
     #[test]
+    fn test_enhanced_builtin_properties() {
+        let (handlers, debug_handler) = create_simulation_debug_handlers();
+        let evaluator = ExpressionEvaluator::new(handlers);
+
+        // Set up test data
+        debug_handler.set_variable("testString", DynSolValue::String("Hello".to_string()));
+        debug_handler.set_variable("testBytes", DynSolValue::Bytes(vec![1, 2, 3]));
+        debug_handler.set_variable("testAddress", DynSolValue::Address(Address::ZERO));
+        debug_handler.set_variable(
+            "testInt",
+            DynSolValue::Int(I256::from_raw(U256::from(42).wrapping_neg()), 256),
+        );
+        debug_handler.set_variable("zeroInt", DynSolValue::Int(I256::ZERO, 256));
+        debug_handler.set_variable("zeroUint", DynSolValue::Uint(U256::ZERO, 256));
+        debug_handler.set_variable("nonZeroUint", DynSolValue::Uint(U256::from(123), 256));
+
+        // ============ LENGTH PROPERTIES ============
+
+        // Test string.length
+        let result = evaluator.eval("testString.length", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(len, _)) = result {
+            assert_eq!(len, U256::from(5)); // "Hello" length
+        }
+
+        // Test bytes.length
+        let result = evaluator.eval("testBytes.length", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(len, _)) = result {
+            assert_eq!(len, U256::from(3));
+        }
+
+        // ============ NUMERIC PROPERTIES ============
+
+        // Test int.abs (negative value)
+        let result = evaluator.eval("testInt.abs", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(val, _)) = result {
+            assert_eq!(val, U256::from(42));
+        }
+
+        // ============ TYPE CHECKING PROPERTIES ============
+
+        // Test isZero for zero values
+        let result = evaluator.eval("zeroInt.isZero", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(is_zero)) = result {
+            assert!(is_zero);
+        }
+
+        let result = evaluator.eval("zeroUint.isZero", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(is_zero)) = result {
+            assert!(is_zero);
+        }
+
+        let result = evaluator.eval("testAddress.isZero", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(is_zero)) = result {
+            assert!(is_zero); // Address::ZERO
+        }
+
+        // Test isZero for non-zero values
+        let result = evaluator.eval("nonZeroUint.isZero", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(is_zero)) = result {
+            assert!(!is_zero);
+        }
+    }
+
+    #[test]
     fn test_builtin_member_functions() {
         let (handlers, debug_handler) = create_simulation_debug_handlers();
         let evaluator = ExpressionEvaluator::new(handlers);
@@ -2481,11 +2618,14 @@ mod tests {
         debug_handler.set_variable("emptyString", DynSolValue::String("".to_string()));
         debug_handler.set_variable("myBytes", DynSolValue::Bytes(vec![1, 2, 3, 4, 5]));
         debug_handler.set_variable("emptyBytes", DynSolValue::Bytes(vec![]));
-        debug_handler.set_variable("myArray", DynSolValue::Tuple(vec![
-            DynSolValue::Uint(U256::from(10), 256),
-            DynSolValue::Uint(U256::from(20), 256),
-            DynSolValue::Uint(U256::from(30), 256),
-        ]));
+        debug_handler.set_variable(
+            "myArray",
+            DynSolValue::Tuple(vec![
+                DynSolValue::Uint(U256::from(10), 256),
+                DynSolValue::Uint(U256::from(20), 256),
+                DynSolValue::Uint(U256::from(30), 256),
+            ]),
+        );
         debug_handler.set_variable("emptyArray", DynSolValue::Tuple(vec![]));
         debug_handler.set_variable("testAddress", DynSolValue::Address(Address::from([0x42; 20])));
         debug_handler.set_variable("numberA", DynSolValue::Uint(U256::from(100), 256));
@@ -2661,11 +2801,14 @@ mod tests {
         let evaluator = ExpressionEvaluator::new(handlers);
 
         // Set up complex mock data for realistic DeFi/protocol scenarios
-        debug_handler.set_function("getPoolData", DynSolValue::Tuple(vec![
-            DynSolValue::Uint(U256::from(1000000), 256), // reserve0
-            DynSolValue::Uint(U256::from(2000000), 256), // reserve1
-            DynSolValue::Uint(U256::from(1700000000), 256), // lastUpdate
-        ]));
+        debug_handler.set_function(
+            "getPoolData",
+            DynSolValue::Tuple(vec![
+                DynSolValue::Uint(U256::from(1000000), 256), // reserve0
+                DynSolValue::Uint(U256::from(2000000), 256), // reserve1
+                DynSolValue::Uint(U256::from(1700000000), 256), // lastUpdate
+            ]),
+        );
 
         debug_handler.set_function("calculateFee", DynSolValue::Uint(U256::from(3000), 256)); // 0.3% fee
         debug_handler.set_function("getPrice", DynSolValue::Uint(U256::from(2000), 256)); // Price in USD
@@ -2713,11 +2856,14 @@ mod tests {
         let evaluator = ExpressionEvaluator::new(handlers);
 
         // Set up extremely complex scenario data
-        debug_handler.set_function("getLiquidityData", DynSolValue::Tuple(vec![
-            DynSolValue::Uint(U256::from(5000000), 256),
-            DynSolValue::Uint(U256::from(3000000), 256),
-            DynSolValue::Uint(U256::from(8000000), 256),
-        ]));
+        debug_handler.set_function(
+            "getLiquidityData",
+            DynSolValue::Tuple(vec![
+                DynSolValue::Uint(U256::from(5000000), 256),
+                DynSolValue::Uint(U256::from(3000000), 256),
+                DynSolValue::Uint(U256::from(8000000), 256),
+            ]),
+        );
 
         debug_handler.set_function("calculateRewards", DynSolValue::Uint(U256::from(12500), 256));
         debug_handler.set_function("getMultiplier", DynSolValue::Uint(U256::from(150), 256)); // 1.5x
@@ -2765,7 +2911,11 @@ mod tests {
         // Verify extensive logging occurred
         let log = debug_handler.get_log();
         let total_operations = log.len();
-        assert!(total_operations >= 20, "Ultra complex expression should generate many log entries, got: {}", total_operations);
+        assert!(
+            total_operations >= 20,
+            "Ultra complex expression should generate many log entries, got: {}",
+            total_operations
+        );
 
         println!("Total operations logged: {}", total_operations);
         println!("Sample log entries: {:?}", log.iter().take(5).collect::<Vec<_>>());

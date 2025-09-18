@@ -19,6 +19,7 @@
 //! This module contains all the RPC method implementations for the debug server.
 
 mod artifact;
+mod expr;
 mod navigation;
 mod resolve;
 mod snapshot;
@@ -73,6 +74,7 @@ where
             "edb_getPrevCall" => navigation::get_prev_call(&self.context, params),
             "edb_getStorage" => storage::get_storage(&self.context, params),
             "edb_getStorageDiff" => storage::get_storage_diff(&self.context, params),
+            "edb_evalOnSnapshot" => expr::eval_on_snapshot(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,

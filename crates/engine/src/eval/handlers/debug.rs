@@ -1,8 +1,24 @@
+// EDB - Ethereum Debugger
+// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use alloy_dyn_abi::DynSolValue;
-use alloy_primitives::{Address, U256, I256};
+use alloy_primitives::{Address, I256, U256};
 use eyre::{bail, Result};
 
 use super::*;
@@ -83,22 +99,31 @@ impl SimulationDebugHandler {
     /// Generate a plausible default value for a type hint
     fn generate_default_value(&self, hint: &str) -> DynSolValue {
         match hint {
-            name if name.contains("balance") || name.contains("amount") || name.contains("value") => {
+            name if name.contains("balance")
+                || name.contains("amount")
+                || name.contains("value") =>
+            {
                 DynSolValue::Uint(U256::from(1000000), 256) // 1M as default balance
             }
-            name if name.contains("address") || name.contains("owner") || name.contains("sender") => {
+            name if name.contains("address")
+                || name.contains("owner")
+                || name.contains("sender") =>
+            {
                 DynSolValue::Address(Address::from([0x42; 20])) // Mock address
             }
             name if name.contains("count") || name.contains("length") || name.contains("index") => {
                 DynSolValue::Uint(U256::from(5), 256) // Default count/length
             }
-            name if name.contains("enabled") || name.contains("active") || name.contains("flag") => {
+            name if name.contains("enabled")
+                || name.contains("active")
+                || name.contains("flag") =>
+            {
                 DynSolValue::Bool(true) // Default boolean
             }
             name if name.contains("name") || name.contains("symbol") || name.contains("uri") => {
                 DynSolValue::String(format!("Mock_{}", name)) // Mock string
             }
-            _ => DynSolValue::Uint(U256::from(42), 256) // Default fallback
+            _ => DynSolValue::Uint(U256::from(42), 256), // Default fallback
         }
     }
 }
@@ -195,7 +220,10 @@ impl BlockHandler for DebugHandler {
 // Implement handler traits for SimulationDebugHandler
 impl VariableHandler for SimulationDebugHandler {
     fn get_variable_value(&self, name: &str, snapshot_id: usize) -> Result<DynSolValue> {
-        self.log_operation(format!("get_variable_value: name='{}', snapshot_id={}", name, snapshot_id));
+        self.log_operation(format!(
+            "get_variable_value: name='{}', snapshot_id={}",
+            name, snapshot_id
+        ));
 
         if let Ok(vars) = self.variables.lock() {
             if let Some(value) = vars.get(name) {
@@ -219,8 +247,10 @@ impl MappingArrayHandler for SimulationDebugHandler {
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
         let indices_str = indices.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(", ");
-        self.log_operation(format!("get_mapping_or_array_value: root={:?}, indices=[{}], snapshot_id={}",
-            root, indices_str, snapshot_id));
+        self.log_operation(format!(
+            "get_mapping_or_array_value: root={:?}, indices=[{}], snapshot_id={}",
+            root, indices_str, snapshot_id
+        ));
 
         // For arrays, return a mock element
         // For mappings, return a value based on the key
@@ -237,7 +267,7 @@ impl MappingArrayHandler for SimulationDebugHandler {
                 // String mapping - return based on key
                 self.generate_default_value(key)
             }
-            _ => DynSolValue::Uint(U256::from(42), 256)
+            _ => DynSolValue::Uint(U256::from(42), 256),
         };
 
         self.log_operation(format!("  -> returning: {:?}", result));
@@ -255,8 +285,10 @@ impl FunctionCallHandler for SimulationDebugHandler {
     ) -> Result<DynSolValue> {
         let args_str = args.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(", ");
         let callee_str = callee.map(|c| format!("{:?}", c)).unwrap_or_else(|| "None".to_string());
-        self.log_operation(format!("call_function: name='{}', args=[{}], callee={}, snapshot_id={}",
-            name, args_str, callee_str, snapshot_id));
+        self.log_operation(format!(
+            "call_function: name='{}', args=[{}], callee={}, snapshot_id={}",
+            name, args_str, callee_str, snapshot_id
+        ));
 
         if let Ok(funcs) = self.functions.lock() {
             if let Some(value) = funcs.get(name) {
@@ -273,7 +305,7 @@ impl FunctionCallHandler for SimulationDebugHandler {
             "name" => DynSolValue::String("MockToken".to_string()),
             "symbol" => DynSolValue::String("MTK".to_string()),
             "decimals" => DynSolValue::Uint(U256::from(18), 256),
-            _ => self.generate_default_value(name)
+            _ => self.generate_default_value(name),
         };
 
         self.log_operation(format!("  -> returning generated value: {:?}", result));
@@ -288,15 +320,17 @@ impl MemberAccessHandler for SimulationDebugHandler {
         member: &str,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        self.log_operation(format!("access_member: value={:?}, member='{}', snapshot_id={}",
-            value, member, snapshot_id));
+        self.log_operation(format!(
+            "access_member: value={:?}, member='{}', snapshot_id={}",
+            value, member, snapshot_id
+        ));
 
         // Handle common member accesses
         let result = match member {
             "length" => DynSolValue::Uint(U256::from(10), 256), // Mock array length
             "balance" => DynSolValue::Uint(U256::from(1000000), 256), // Mock balance
             "code" => DynSolValue::Bytes(vec![0x60, 0x80, 0x60, 0x40]), // Mock bytecode
-            _ => self.generate_default_value(member)
+            _ => self.generate_default_value(member),
         };
 
         self.log_operation(format!("  -> returning: {:?}", result));

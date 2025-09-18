@@ -21,7 +21,7 @@
 use crate::ui::spinner::Spinner;
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::types::{CallableAbiInfo, Code, SnapshotInfo, Trace};
+use edb_common::types::{CallableAbiInfo, Code, EdbSolValue, SnapshotInfo, Trace};
 use eyre::Result;
 use jsonrpsee::{
     core::client::ClientT,
@@ -328,6 +328,24 @@ impl RpcClient {
 
         serde_json::from_value(value)
             .map_err(|e| eyre::eyre!("Failed to parse storage diff: {}", e))
+    }
+
+    /// Evaluate expression on a given snapshot
+    pub async fn eval_on_snapshot(
+        &self,
+        snapshot_id: usize,
+        expr: &str,
+    ) -> Result<core::result::Result<EdbSolValue, String>> {
+        let value = self
+            .request_with_spinner(
+                "edb_evalOnSnapshot",
+                rpc_params!(snapshot_id, expr),
+                &format!("Evaluating expression on snapshot {}", snapshot_id),
+            )
+            .await?;
+
+        serde_json::from_value(value)
+            .map_err(|e| eyre::eyre!("Failed to parse evaluated value: {}", e))
     }
 }
 

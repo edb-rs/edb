@@ -34,18 +34,24 @@ use alloy_dyn_abi::{DynSolValue, EventExt, FunctionExt, JsonAbiExt};
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
 use edb_common::types::{
-    CallableAbiInfo, SolValueFormatter, SolValueFormatterContext as FormatCtx,
+    CallableAbiInfo, EdbSolValue, SolValueFormatter, SolValueFormatterContext as FormatCtx,
 };
 use eyre::Result;
 use std::{collections::HashSet, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::debug;
 
+// Generate a unique expression identifier by removing whitespace
+fn remove_whitespace(expr: &str) -> String {
+    expr.replace(|c: char| c.is_whitespace(), "")
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ResolverState {
     contract_abi: FetchCache<(Address, bool), JsonAbi>,
     callable_abi: FetchCache<Address, Vec<CallableAbiInfo>>,
     constructor_args: FetchCache<Address, Bytes>,
+    expr_value: FetchCache<(usize, String), core::result::Result<EdbSolValue, String>>,
 }
 
 impl ManagerStateTr for ResolverState {
@@ -65,6 +71,10 @@ impl ManagerStateTr for ResolverState {
         if self.constructor_args.need_update(&other.constructor_args) {
             self.constructor_args.update(&other.constructor_args);
         }
+
+        if self.expr_value.need_update(&other.expr_value) {
+            self.expr_value.update(&other.expr_value);
+        }
     }
 }
 
@@ -78,6 +88,9 @@ pub enum ResolverRequest {
 
     /// Request for contract constructor arguments
     ConstructorArgs(Address),
+
+    /// Evaluate expression on snapshot
+    ExprOnSnapshot(usize, String),
 }
 
 impl ManagerRequestTr<ResolverState> for ResolverRequest {
@@ -103,6 +116,13 @@ impl ManagerRequestTr<ResolverState> for ResolverRequest {
                 }
                 let args = rpc_client.get_constructor_args(address).await?;
                 state.constructor_args.insert(address, args);
+            }
+            ResolverRequest::ExprOnSnapshot(snapshot_id, expr) => {
+                if state.expr_value.has_cached(&(snapshot_id, expr.clone())) {
+                    return Ok(());
+                }
+                let value = rpc_client.eval_on_snapshot(snapshot_id, &expr).await?;
+                state.expr_value.insert((snapshot_id, expr), Some(value));
             }
         }
         Ok(())
@@ -214,6 +234,30 @@ impl Resolver {
 
         match self.state.contract_abi.get(&(address, recompiled)) {
             Some(abi) => abi.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Evaluate an expression on a specific snapshot
+    pub fn eval_on_snapshot(
+        &mut self,
+        snapshot_id: usize,
+        expr: &str,
+    ) -> Option<&core::result::Result<EdbSolValue, String>> {
+        let _ = self.pull_from_core(); // Try to update cache
+        let expr_key = remove_whitespace(expr);
+
+        if !self.state.expr_value.contains_key(&(snapshot_id, expr_key.clone())) {
+            debug!("Expression value not found in cache, fetching...");
+            self.new_fetching_request(ResolverRequest::ExprOnSnapshot(
+                snapshot_id,
+                expr_key.clone(),
+            ));
+            return None;
+        }
+
+        match self.state.expr_value.get(&(snapshot_id, expr_key)) {
+            Some(value) => value.as_ref(),
             _ => None,
         }
     }

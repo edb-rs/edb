@@ -105,4 +105,5 @@ pub mod error_codes {
     pub const TRACE_ENTRY_NOT_FOUND: i32 = -33003;
     pub const CODE_NOT_FOUND: i32 = -33004;
     pub const USID_NOT_FOUND: i32 = -33005;
+    pub const EVAL_FAILED: i32 = -33006;
 }

@@ -25,9 +25,10 @@ use crate::ui::borders::BorderPresets;
 use crate::ui::icons::Icons;
 use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
 use crate::{Spinner, SpinnerStyles};
+use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{Address, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use edb_common::types::SnapshotInfoDetail;
+use edb_common::types::{SnapshotInfoDetail, SolValueFormatterContext};
 use eyre::{bail, eyre, Result};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -77,7 +78,7 @@ enum TerminalMode {
     Vim,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PendingCommand {
     /// Step forward in execution
     StepForward(usize),
@@ -107,6 +108,8 @@ enum PendingCommand {
     ShowTransientStorage(usize, U256),
     /// Show current address information
     ShowAddress(usize),
+    /// Evaluate Solidity expression
+    EvalExpr(usize, String),
 }
 
 impl PendingCommand {
@@ -154,7 +157,17 @@ impl PendingCommand {
                     dm.execution.get_snapshot_info(*id)?;
                 }
                 PendingCommand::ShowStorage(id, slot) => {
-                    unimplemented!("MDZZ")
+                    let info = dm.execution.get_snapshot_info(*id)?;
+                    let target_address = info.target_address;
+                    let expr = format!(
+                        "edb_sload(address({}), {})",
+                        target_address.to_checksum(None),
+                        slot
+                    );
+                    dm.resolver.eval_on_snapshot(*id, &expr)?;
+                }
+                PendingCommand::EvalExpr(id, expr) => {
+                    dm.resolver.eval_on_snapshot(*id, expr)?;
                 }
             }
             Some(())
@@ -302,7 +315,25 @@ impl PendingCommand {
                 }
             }
             PendingCommand::ShowStorage(id, slot) => {
-                unimplemented!("MDZZ")
+                let info =
+                    dm.execution.get_snapshot_info(*id).ok_or(eyre!("No storage info found"))?;
+                let target_address = info.target_address;
+
+                let expr =
+                    format!("edb_sload(address({}), {})", target_address.to_checksum(None), slot);
+
+                let value = dm
+                    .resolver
+                    .eval_on_snapshot(*id, &expr)
+                    .ok_or(eyre!("No value found"))?
+                    .as_ref()
+                    .map_err(|e| eyre!("{e}"))?;
+
+                if let DynSolValue::Uint(ref v, _) = &**value {
+                    Ok(utils::format_value_with_decode(v))
+                } else {
+                    bail!("Expression evaluation did not return a uint value")
+                }
             }
             PendingCommand::ShowTransientStorage(id, slot) => {
                 let info =
@@ -317,7 +348,7 @@ impl PendingCommand {
                         Ok(format!("   {}: {}", slot, utils::format_value_with_decode(&value)))
                     }
                     SnapshotInfoDetail::Hook(_) => {
-                        bail!("No storage info available in source mode.")
+                        bail!("No transient storage info available in source mode.")
                     }
                 }
             }
@@ -328,6 +359,16 @@ impl PendingCommand {
                     "Address:          {}\nBytecode Address: {}",
                     info.target_address, info.bytecode_address
                 ))
+            }
+            PendingCommand::EvalExpr(_, expr) => {
+                let value =
+                    dm.resolver.eval_on_snapshot(id, expr).ok_or(eyre!("No value found"))?.clone();
+
+                let ctx = SolValueFormatterContext::new().with_ty(true).multi_line(true);
+
+                value
+                    .map(|v| format!("{} = {}", expr, dm.resolver.resolve_sol_value(&v, Some(ctx))))
+                    .map_err(|e| eyre!(e))
             }
         }
     }
@@ -524,8 +565,11 @@ impl TerminalPanel {
             }
             cmd if cmd.starts_with('$') => {
                 // Solidity expression evaluation
-                self.add_output(&format!("Evaluating: {}", &cmd[1..]));
-                self.add_output("Expression evaluation not yet implemented");
+                let id = dm.execution.get_current_snapshot();
+                let expr = cmd[1..].trim();
+
+                self.pending_command = Some(PendingCommand::EvalExpr(id, expr.to_string()));
+                self.spinner.start_loading("Fetching calldata...");
             }
             cmd => {
                 // Debug commands
@@ -665,7 +709,7 @@ impl TerminalPanel {
                 let slot = if parts.len() > 1 {
                     parts[1].parse::<U256>().unwrap_or(U256::ZERO)
                 } else {
-                    U256::ZERO
+                    bail!("Usage: sload <slot>");
                 };
                 self.pending_command = Some(PendingCommand::ShowStorage(id, slot));
                 self.spinner.start_loading(&format!("Fetching storage at slot {}...", slot));
@@ -675,7 +719,7 @@ impl TerminalPanel {
                 let slot = if parts.len() > 1 {
                     parts[1].parse::<U256>().unwrap_or(U256::ZERO)
                 } else {
-                    U256::ZERO
+                    bail!("Usage: tsload <slot>");
                 };
                 self.pending_command = Some(PendingCommand::ShowTransientStorage(id, slot));
                 self.spinner
@@ -1121,7 +1165,7 @@ impl TerminalPanel {
     /// Render the unified bash-like terminal view
     fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Update pending command
-        if self.pending_command.map_or(false, |cmd| !cmd.is_pending(dm)) {
+        if self.pending_command.as_ref().map_or(false, |cmd| !cmd.is_pending(dm)) {
             self.spinner.finish_loading();
             let pending_command = self.pending_command.take().unwrap();
             match pending_command.output_finished(dm) {

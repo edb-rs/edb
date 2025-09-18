@@ -1,11 +1,56 @@
+// EDB - Ethereum Debugger
+// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use std::sync::Arc;
 
 use alloy_dyn_abi::DynSolValue;
-use eyre::{bail, Result};
+use edb_common::types::CallableAbiEntry;
+use eyre::{bail, eyre, Result};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
+use tracing::debug;
 
 use super::*;
 use crate::EngineContext;
+
+static EDB_EVAL_PLACEHOLDER_MAGIC: &str = "edb_eval_placeholder";
+
+fn from_abi_info(entry: &CallableAbiEntry) -> Option<DynSolValue> {
+    if entry.is_function() {
+        return None; // Only handle non-function entries
+    }
+    let magic = DynSolValue::String(EDB_EVAL_PLACEHOLDER_MAGIC.to_string());
+    let serial_abi = DynSolValue::String(serde_json::to_string(entry).ok()?);
+
+    Some(DynSolValue::Tuple(vec![magic, serial_abi]))
+}
+
+fn into_abi_info(value: &DynSolValue) -> Option<CallableAbiEntry> {
+    if let DynSolValue::Tuple(elements) = value {
+        if elements.len() == 2 {
+            if let DynSolValue::String(magic) = &elements[0] {
+                if magic == EDB_EVAL_PLACEHOLDER_MAGIC {
+                    if let DynSolValue::String(serial_abi) = &elements[1] {
+                        return serde_json::from_str(serial_abi).ok();
+                    }
+                }
+            }
+        }
+    }
+    None
+}
 
 /// EDB-specific handler that uses EdbContext to resolve values
 pub struct EdbHandler<DB>
@@ -139,7 +184,40 @@ where
         callee: Option<&DynSolValue>,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to call function in snapshot
+        debug!(
+            "EdbHandler::call_function name='{}', args={:?}, callee={:?}, snapshot_id={}",
+            name, args, callee, snapshot_id
+        );
+
+        let (frame_id, snapshot) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
+            eyre::eyre!("Snapshot ID {} not found in EdbHandler::call_function", snapshot_id)
+        })?;
+
+        // Let's first handle our edb-specific pseudo-functions
+        if name == "edb_sload" && args.len() == 2 {
+            match (&args[0], &args[1]) {
+                (DynSolValue::Address(address), DynSolValue::Uint(slot, ..)) => {
+                    let db = snapshot.db();
+                    let cached_storage = db
+                        .cache
+                        .accounts
+                        .get(address)
+                        .map(|acc| &acc.storage)
+                        .ok_or(eyre!("Account {:?} not found in edb_sload", address))?;
+                    let value = cached_storage.get(slot).cloned().unwrap_or_default();
+
+                    return Ok(DynSolValue::Uint(value, 256));
+                }
+                _ => {
+                    bail!(
+                        "Invalid arguments to edb_sload: expected (string, u256), got ({:?}, {:?})",
+                        args[0],
+                        args[1]
+                    );
+                }
+            }
+        }
+
         bail!("EdbHandler::call_function not yet implemented for name='{}', args={:?}, callee={:?}, snapshot_id={}", name, args, callee, snapshot_id)
     }
 }
