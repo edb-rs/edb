@@ -47,7 +47,7 @@ dirs.workspace = true
 regex = "1.11"
 
 # common components
-edb-common = { path = "../common" }
+edb-common.workspace = true
 
 # alloy for trace formatting
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }

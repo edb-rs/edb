@@ -21,7 +21,7 @@ homepage = "https://medga.org/"
 repository = "https://github.com/edb-rs/EDB"
 keywords = ["solidity", "debugging", "debugger", "ethereum", "evm"]
 categories = ["development-tools"]
-exclude = ["benches/", "tests/", "test-data/", "testdata/"]
+exclude = ["benches/", "test-data/", "testdata/"]
 
 [workspace.lints.clippy]
 dbg-macro = "warn"
@@ -81,6 +81,15 @@ panic = "abort"
 codegen-units = 1
 
 [workspace.dependencies]
+# workspace crates
+edb-engine = { version = "0.0.1", path = "crates/engine" }
+edb-webui = { version = "0.0.1", path = "crates/webui" }
+edb-common = { version = "0.0.1", path = "crates/common" }
+edb-rpc-proxy = { version = "0.0.1", path = "crates/rpc-proxy" }
+edb-integration-tests = { version = "0.0.1", path = "crates/integration-tests" }
+edb-tui = { version = "0.0.1", path = "crates/tui" }
+edb = { version = "0.0.1", path = "crates/edb" }
+
 # alloy - matching Foundry's versions exactly (updated to latest)
 alloy-chains = "0.2"
 alloy-consensus = { version = "1.0.23", default-features = false }

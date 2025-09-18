@@ -8,6 +8,7 @@ authors.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
+description = "Common utilities for EDB"
 exclude.workspace = true
 
 [lints]
@@ -30,7 +31,12 @@ foundry-compilers = { workspace = true, features = ["svm-solc"] }
 
 # revm
 revm = { workspace = true, features = ["std", "serde", "alloydb"] }
-revm-context = { workspace = true, features = ["std", "serde", "optional_block_gas_limit", "optional_no_base_fee"] }
+revm-context = { workspace = true, features = [
+    "std",
+    "serde",
+    "optional_block_gas_limit",
+    "optional_no_base_fee",
+] }
 
 # async
 futures.workspace = true
@@ -55,8 +61,12 @@ indicatif.workspace = true
 once_cell.workspace = true
 rand.workspace = true
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "ansi", "local-time"] }
+tracing-subscriber = { workspace = true, features = [
+    "env-filter",
+    "fmt",
+    "ansi",
+    "local-time",
+] }
 tracing-appender = "0.2"
 serde_json.workspace = true
 serial_test.workspace = true
-

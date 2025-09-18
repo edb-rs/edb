@@ -16,8 +16,8 @@ workspace = true
 
 [dependencies]
 # EDB internal crates
-edb-common = { path = "../common" }
-edb-rpc-proxy = { path = "../rpc-proxy" }
+edb-common.workspace = true
+edb-rpc-proxy.workspace = true
 
 # Test dependencies
 tokio = { workspace = true, features = ["full"] }

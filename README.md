@@ -43,6 +43,8 @@ By inserting strategic debugging hooks during compilation, EDB creates contracts
 - Evaluate any Solidity expression against the current execution state
 - Compute complex queries combining multiple variables
 
+![EDB Demo](resources/edb-demo-min.gif)
+
 ## Installation
 
 ### Prerequisites

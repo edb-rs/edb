@@ -20,9 +20,9 @@ workspace = true
 
 [dependencies]
 # workspace crates
-edb-engine = { path = "../engine" }
-edb-webui = { path = "../webui" }
-edb-common = { path = "../common" }
+edb-engine.workspace = true
+edb-webui.workspace = true
+edb-common.workspace = true
 
 # alloy - using individual crates like Foundry does
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
