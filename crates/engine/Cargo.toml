@@ -43,6 +43,9 @@ revm = { workspace = true, features = [
     "alloydb",
 ] }
 
+# solang
+solang-parser = { workspace = true }
+
 # async
 tokio = { workspace = true, features = ["full"] }
 
