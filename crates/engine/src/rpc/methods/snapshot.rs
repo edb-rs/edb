@@ -153,6 +153,9 @@ where
                 })
                 .collect();
 
+            // Find state variables at this snapshot
+            let state_variables = hook_snapshot.state_variables.clone();
+
             SnapshotInfo {
                 id: snapshot.id(),
                 frame_id: snapshot.frame_id(),
@@ -172,6 +175,7 @@ where
                     id: snapshot.id(),
                     frame_id: *frame_id,
                     locals,
+                    state_variables,
                     path: source_analysis.path.clone(),
                     offset: source_location.start.unwrap_or(0),
                     length: source_location.length.unwrap_or(0),

@@ -105,6 +105,8 @@ enum PendingCommand {
     ShowStorage(usize, U256),
     /// Show transient storage at slot
     ShowTransientStorage(usize, U256),
+    /// Show current address information
+    ShowAddress(usize),
 }
 
 impl PendingCommand {
@@ -147,11 +149,12 @@ impl PendingCommand {
                 PendingCommand::ShowStack(id, ..)
                 | PendingCommand::ShowMemory(id, ..)
                 | PendingCommand::ShowCalldata(id)
-                | PendingCommand::ShowTransientStorage(id, ..) => {
+                | PendingCommand::ShowTransientStorage(id, ..)
+                | PendingCommand::ShowAddress(id) => {
                     dm.execution.get_snapshot_info(*id)?;
                 }
                 PendingCommand::ShowStorage(id, slot) => {
-                    unimplemented!()
+                    unimplemented!("MDZZ")
                 }
             }
             Some(())
@@ -261,7 +264,7 @@ impl PendingCommand {
                                 utils::format_bytes_with_decode(slice)
                                     .split('\n')
                                     .enumerate()
-                                    .map(|(i, line)| format!("{:>4} | {}", i * 32, line))
+                                    .map(|(i, line)| format!("{:>4} | {}", start + i * 32, line))
                                     .collect::<Vec<_>>()
                                     .join("\n")
                             ))
@@ -299,7 +302,7 @@ impl PendingCommand {
                 }
             }
             PendingCommand::ShowStorage(id, slot) => {
-                unimplemented!()
+                unimplemented!("MDZZ")
             }
             PendingCommand::ShowTransientStorage(id, slot) => {
                 let info =
@@ -317,6 +320,14 @@ impl PendingCommand {
                         bail!("No storage info available in source mode.")
                     }
                 }
+            }
+            PendingCommand::ShowAddress(id) => {
+                let info =
+                    dm.execution.get_snapshot_info(*id).ok_or(eyre!("No snapshot info found"))?;
+                Ok(format!(
+                    "Address:          {}\nBytecode Address: {}",
+                    info.target_address, info.bytecode_address
+                ))
             }
         }
     }
@@ -620,6 +631,11 @@ impl TerminalPanel {
             "break" => {
                 self.add_error("Breakpoint command not yet implemented");
             }
+            "address" => {
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::ShowAddress(id));
+                self.spinner.start_loading("Fetching current address...");
+            }
             "stack" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 5 };
@@ -694,6 +710,7 @@ impl TerminalPanel {
         self.add_output("  rcall, rc           - Step back from function call");
         self.add_output("");
         self.add_output("🔍 Inspection:");
+        self.add_output("  address                 - Show current address");
         self.add_output("  abi <address>           - Show callable ABI");
         self.add_output("  stack [count]           - Show current stack");
         self.add_output("  memory [offset] [count] - Show memory");

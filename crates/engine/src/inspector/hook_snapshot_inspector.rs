@@ -93,6 +93,8 @@ where
     pub database: Arc<CacheDB<DB>>,
     /// Value of accessible local variables
     pub locals: HashMap<UVID, Option<Arc<EdbSolValue>>>,
+    /// Value of state variables at this point (e.g., code address)
+    pub state_variables: HashMap<String, Option<Arc<EdbSolValue>>>,
     /// User-defined snapshot ID from call data
     pub usid: USID,
 }
@@ -387,6 +389,7 @@ where
                     database: Arc::new(snap),
                     locals,
                     usid,
+                    state_variables: HashMap::new(), // State variables can be filled in later
                 };
 
                 self.snapshots.update_last_frame_with_snapshot(current_frame_id, hook_snapshot);

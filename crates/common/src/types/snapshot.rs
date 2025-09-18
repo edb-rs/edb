@@ -86,8 +86,10 @@ pub struct HookSnapshotInfoDetail {
     pub offset: usize,
     /// Length of the step
     pub length: usize,
-    /// Local variables (shared via Arc when unchanged)
+    /// Local variables
     pub locals: HashMap<String, Option<Arc<EdbSolValue>>>,
+    /// State variables (at the current bytecode address)
+    pub state_variables: HashMap<String, Option<Arc<EdbSolValue>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
