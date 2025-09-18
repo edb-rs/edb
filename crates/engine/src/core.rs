@@ -202,19 +202,18 @@ impl Engine {
         let mut snapshots = self.get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         snapshots.analyze(&replay_result.execution_trace, &analysis_results)?;
         // Let's pack the debug context
-        let mut context = EngineContext {
-            cfg: ctx.cfg.clone(),
-            block: ctx.block.clone(),
+        let context = EngineContext::build(
+            fork_info,
+            ctx.cfg.clone(),
+            ctx.block.clone(),
             tx,
             tx_hash,
-            fork_info,
             snapshots,
             artifacts,
             recompiled_artifacts,
             analysis_results,
-            trace: replay_result.execution_trace,
-        };
-        context.finalize();
+            replay_result.execution_trace,
+        );
 
         let rpc_handle = start_debug_server(context).await?;
         info!("Debug RPC server started on port {}", rpc_handle.port());

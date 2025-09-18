@@ -68,6 +68,7 @@ where
             "edb_getSnapshotCount" => snapshot::get_snapshot_count(&self.context),
             "edb_getSnapshotInfo" => snapshot::get_snapshot_info(&self.context, params),
             "edb_getContractABI" => resolve::get_contract_abi(&self.context, params),
+            "edb_getCallableABI" => resolve::get_callable_abi(&self.context, params),
             "edb_getNextCall" => navigation::get_next_call(&self.context, params),
             "edb_getPrevCall" => navigation::get_prev_call(&self.context, params),
             "edb_getStorage" => storage::get_storage(&self.context, params),

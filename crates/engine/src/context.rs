@@ -14,10 +14,11 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use alloy_primitives::{Address, TxHash};
 use edb_common::{types::Trace, ForkInfo};
+use once_cell::sync::OnceCell;
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     database::CacheDB,
@@ -60,6 +61,9 @@ where
     pub analysis_results: HashMap<Address, AnalysisResult>,
     /// Execution trace showing call hierarchy and frame structure
     pub trace: Trace,
+    /// Relation between target addresses and their (delegated) code addresses
+    #[serde(skip)]
+    address_code_address_map: OnceCell<HashMap<Address, HashSet<Address>>>,
 }
 
 impl<DB> EngineContext<DB>
@@ -68,8 +72,40 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
+    /// Build a new EngineContext
+    pub fn build(
+        fork_info: ForkInfo,
+        cfg: CfgEnv,
+        block: BlockEnv,
+        tx: TxEnv,
+        tx_hash: TxHash,
+        snapshots: Snapshots<DB>,
+        artifacts: HashMap<Address, Artifact>,
+        recompiled_artifacts: HashMap<Address, Artifact>,
+        analysis_results: HashMap<Address, AnalysisResult>,
+        trace: Trace,
+    ) -> Self {
+        let mut context = Self {
+            fork_info,
+            cfg,
+            block,
+            tx,
+            tx_hash,
+            snapshots,
+            artifacts,
+            recompiled_artifacts,
+            analysis_results,
+            trace,
+            address_code_address_map: OnceCell::new(),
+        };
+
+        // Finalize the context to populate derived fields
+        context.finalize();
+        context
+    }
+
     /// Finalize the EngineContext
-    pub fn finalize(&mut self) {
+    fn finalize(&mut self) {
         self.finalize_trace();
     }
 
@@ -106,5 +142,16 @@ where
             Some(child_entry) => child_entry.parent_id == Some(parent_id),
             None => false,
         }
+    }
+
+    /// Get or initialize the address to code address mapping
+    pub fn address_code_address_map(&self) -> &HashMap<Address, HashSet<Address>> {
+        self.address_code_address_map.get_or_init(|| {
+            let mut map: HashMap<Address, HashSet<Address>> = HashMap::new();
+            for entry in &self.trace {
+                map.entry(entry.target).or_default().insert(entry.code_address);
+            }
+            map
+        })
     }
 }

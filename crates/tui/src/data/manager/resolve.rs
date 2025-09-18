@@ -33,15 +33,18 @@ use crate::{
 use alloy_dyn_abi::{DynSolValue, EventExt, FunctionExt, JsonAbiExt};
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{hex, Address, Bytes, LogData, Selector, U256};
-use edb_common::types::{SolValueFormatter, SolValueFormatterContext as FormatCtx};
+use edb_common::types::{
+    CallableAbiInfo, SolValueFormatter, SolValueFormatterContext as FormatCtx,
+};
 use eyre::Result;
-use std::{cell::RefCell, collections::HashSet, ops::Deref, sync::Arc};
+use std::{collections::HashSet, ops::Deref, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::debug;
 
 #[derive(Debug, Clone, Default)]
 pub struct ResolverState {
     contract_abi: FetchCache<(Address, bool), JsonAbi>,
+    callable_abi: FetchCache<Address, Vec<CallableAbiInfo>>,
     constructor_args: FetchCache<Address, Bytes>,
 }
 
@@ -55,6 +58,10 @@ impl ManagerStateTr for ResolverState {
             self.contract_abi.update(&other.contract_abi);
         }
 
+        if self.callable_abi.need_update(&other.callable_abi) {
+            self.callable_abi.update(&other.callable_abi);
+        }
+
         if self.constructor_args.need_update(&other.constructor_args) {
             self.constructor_args.update(&other.constructor_args);
         }
@@ -65,6 +72,9 @@ impl ManagerStateTr for ResolverState {
 pub enum ResolverRequest {
     /// Request for contract ABI
     ContractAbi(Address, bool),
+
+    /// Request for callable ABI list
+    CallableAbi(Address),
 
     /// Request for contract constructor arguments
     ConstructorArgs(Address),
@@ -79,6 +89,13 @@ impl ManagerRequestTr<ResolverState> for ResolverRequest {
                 }
                 let abi = rpc_client.get_contract_abi(address, recompiled).await?;
                 state.contract_abi.insert((address, recompiled), abi);
+            }
+            ResolverRequest::CallableAbi(address) => {
+                if state.callable_abi.has_cached(&address) {
+                    return Ok(());
+                }
+                let abi_list = rpc_client.get_callable_abi(address).await?;
+                state.callable_abi.insert(address, Some(abi_list));
             }
             ResolverRequest::ConstructorArgs(address) => {
                 if state.constructor_args.has_cached(&address) {
@@ -165,6 +182,22 @@ impl Resolver {
 
         match self.state.constructor_args.get(&address) {
             Some(args) => args.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Fetch the callable ABI list for a specific address
+    pub fn get_callable_abi_list(&mut self, address: Address) -> Option<&Vec<CallableAbiInfo>> {
+        let _ = self.pull_from_core(); // Try to update cache
+
+        if !self.state.callable_abi.contains_key(&address) {
+            debug!("Callable ABI list not found in cache, fetching...");
+            self.new_fetching_request(ResolverRequest::CallableAbi(address));
+            return None;
+        }
+
+        match self.state.callable_abi.get(&address) {
+            Some(abi) => abi.as_ref(),
             _ => None,
         }
     }
@@ -373,6 +406,15 @@ impl Resolver {
     /// Resolve and format address with label if available
     pub fn resolve_address_label(&mut self, address: Address) -> Option<String> {
         None
+    }
+
+    /// Resolve and format address
+    pub fn resolve_address(&mut self, address: Address) -> String {
+        if let Some(label) = self.resolve_address_label(address) {
+            label
+        } else {
+            format!("{}", address.to_checksum(None))
+        }
     }
 
     /// Resolve and format ether

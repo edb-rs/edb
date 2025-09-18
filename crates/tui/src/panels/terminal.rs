@@ -24,7 +24,8 @@ use crate::ui::borders::BorderPresets;
 use crate::ui::icons::Icons;
 use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
 use crate::{Spinner, SpinnerStyles};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use alloy_primitives::Address;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -90,6 +91,8 @@ enum PendingCommand {
     StepBackwardNoCallees(usize),
     /// Goto to a specific snapshot
     Goto(usize),
+    /// Fetch callable ABI for address
+    CallableAbi(Address),
 }
 
 impl PendingCommand {
@@ -126,6 +129,9 @@ impl PendingCommand {
                     dm.execution.get_snapshot_info(*id)?;
                     dm.execution.get_code(*id)?;
                 }
+                PendingCommand::CallableAbi(address) => {
+                    dm.resolver.get_callable_abi_list(*address)?;
+                }
             }
             Some(())
         }
@@ -160,6 +166,19 @@ impl PendingCommand {
                 Some(format!("Stepped to Snapshot {} without going into callees", prev_id))
             }
             PendingCommand::Goto(id) => Some(format!("Goto Snapshot {}", id)),
+            PendingCommand::CallableAbi(address) => {
+                let abi_list = dm.resolver.get_callable_abi_list(*address)?;
+                if abi_list.is_empty() {
+                    Some(format!("No callable ABI found for address {}", address))
+                } else {
+                    abi_list
+                        .iter()
+                        .map(|info| format!("{}", info))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                        .into()
+                }
+            }
         }
     }
 }
@@ -403,6 +422,41 @@ impl TerminalPanel {
                 self.spinner.start_loading(&format!("Stepping {} times...", count));
                 dm.execution.step(count)?;
             }
+            "reverse" | "rs" => {
+                let count =
+                    if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
+                self.pending_command = Some(PendingCommand::StepBackward(count));
+                self.spinner.start_loading(&format!("Reverse stepping {} times...", count));
+                dm.execution.reverse_step(count)?;
+            }
+            "call" | "c" => {
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::NextCall(id));
+                self.spinner.start_loading("Stepping to next function call...");
+                dm.execution.next_call()?;
+            }
+            "rcall" | "rc" => {
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::PrevCall(id));
+                self.spinner.start_loading("Stepping to previous function call...");
+                dm.execution.prev_call()?;
+            }
+            "abi" => {
+                if parts.len() < 2 {
+                    self.add_output("Usage: abi <address>");
+                    return Ok(());
+                }
+                let address_str = parts[1];
+                let address = match address_str.parse::<Address>() {
+                    Ok(addr) => addr,
+                    Err(_) => {
+                        self.add_error(&format!("Invalid address: {}", address_str));
+                        return Ok(());
+                    }
+                };
+                self.pending_command = Some(PendingCommand::CallableAbi(address));
+                self.spinner.start_loading(&format!("Fetching callable ABI for {}...", address));
+            }
             "goto" | "g" => {
                 // A secret debugging cmd
                 let mut id =
@@ -423,25 +477,6 @@ impl TerminalPanel {
                 } else {
                     self.add_error(&format!("No snapshot info found for id {}", id));
                 }
-            }
-            "reverse" | "rs" => {
-                let count =
-                    if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
-                self.pending_command = Some(PendingCommand::StepBackward(count));
-                self.spinner.start_loading(&format!("Reverse stepping {} times...", count));
-                dm.execution.reverse_step(count)?;
-            }
-            "call" | "c" => {
-                let id = dm.execution.get_current_snapshot();
-                self.pending_command = Some(PendingCommand::NextCall(id));
-                self.spinner.start_loading("Stepping to next function call...");
-                dm.execution.next_call()?;
-            }
-            "rcall" | "rc" => {
-                let id = dm.execution.get_current_snapshot();
-                self.pending_command = Some(PendingCommand::PrevCall(id));
-                self.spinner.start_loading("Stepping to previous function call...");
-                dm.execution.prev_call()?;
             }
             "break" => {
                 if parts.len() > 1 {
@@ -505,6 +540,7 @@ impl TerminalPanel {
         self.add_output("  stack            - Show current stack");
         self.add_output("  memory [offset]  - Show memory");
         self.add_output("  variables, vars  - Show variables in scope");
+        self.add_output("  abi <address>    - Show callable ABI");
         self.add_output("  reset            - Reset display panel");
         self.add_output("");
         self.add_output("🔴 Breakpoints:");
@@ -914,9 +950,11 @@ impl TerminalPanel {
         if self.pending_command.map_or(false, |cmd| !cmd.is_pending(dm)) {
             self.spinner.finish_loading();
             let pending_command = self.pending_command.take().unwrap();
-            self.add_output(
-                pending_command.output_finished(dm).as_deref().unwrap_or("Command completed"),
-            );
+            let output_str =
+                pending_command.output_finished(dm).unwrap_or("Command completed".to_string());
+            for line in output_str.lines() {
+                self.add_output(line);
+            }
         }
 
         // Start with all terminal history
@@ -1250,11 +1288,20 @@ impl PanelTr for TerminalPanel {
                 // In VIM mode, Esc does nothing (already in VIM mode)
                 return Ok(EventResponse::Handled);
             }
+            // Ctrl+[ is an alternative to Esc
+            KeyCode::Char('[') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.mode == TerminalMode::Insert {
+                    self.vim_goto_bottom();
+                    self.vim_number_prefix.clear();
+                    self.mode = TerminalMode::Vim;
+                    return Ok(EventResponse::Handled);
+                }
+                // In VIM mode, Esc does nothing (already in VIM mode)
+                return Ok(EventResponse::Handled);
+            }
 
             // Ctrl+C double-press for exit (works in both modes)
-            KeyCode::Char('c')
-                if event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('c') if event.modifiers.contains(KeyModifiers::CONTROL) => {
                 let now = Instant::now();
                 if let Some(last_time) = self.last_ctrl_c {
                     if now.duration_since(last_time).as_secs() < 2 {
@@ -1275,9 +1322,7 @@ impl PanelTr for TerminalPanel {
             }
 
             // Ctrl+L to clear terminal (works in both modes)
-            KeyCode::Char('l')
-                if event.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('l') if event.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.lines.clear();
                 self.add_system("Terminal cleared");
                 return Ok(EventResponse::Handled);

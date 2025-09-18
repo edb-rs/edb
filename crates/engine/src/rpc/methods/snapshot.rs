@@ -21,7 +21,6 @@ use std::sync::Arc;
 use edb_common::types::{
     HookSnapshotInfoDetail, OpcodeSnapshotInfoDetail, SnapshotInfo, SnapshotInfoDetail,
 };
-use foundry_compilers::artifacts::Mutability;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
@@ -92,6 +91,8 @@ where
                     message: format!("We do not find previous id for Snapshot {}", snapshot.id()),
                     data: None,
                 })?,
+                target_address: snapshot.target_address(),
+                bytecode_address: snapshot.bytecode_address(),
                 detail: SnapshotInfoDetail::Opcode(OpcodeSnapshotInfoDetail {
                     id: snapshot.id(),
                     frame_id: *frame_id,
@@ -165,6 +166,8 @@ where
                     message: format!("We do not find previous id for Snapshot {}", snapshot.id()),
                     data: None,
                 })?,
+                target_address: snapshot.target_address(),
+                bytecode_address: snapshot.bytecode_address(),
                 detail: SnapshotInfoDetail::Hook(HookSnapshotInfoDetail {
                     id: snapshot.id(),
                     frame_id: *frame_id,

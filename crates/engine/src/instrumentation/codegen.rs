@@ -1,3 +1,4 @@
+use edb_common::types::EDB_STATE_VAR_FLAG;
 use foundry_compilers::artifacts::{Mutability, StorageLocation, TypeName};
 use semver::Version;
 
@@ -6,8 +7,6 @@ use crate::{
     contains_function_type, contains_mapping_type, contains_user_defined_type, VersionRef,
     MAGIC_SNAPSHOT_NUMBER, MAGIC_VARIABLE_UPDATE_NUMBER,
 };
-
-static EDB_STATE_VAR_FLAG: &str = "_edb_state_var_";
 
 pub fn generate_step_hook(version: &VersionRef, usid: USID) -> Option<String> {
     // Solidity 0.4 does not support abi.encode, so we use a "0.4-compatible" way to encode the parameters.

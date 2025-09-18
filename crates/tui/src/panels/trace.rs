@@ -25,7 +25,7 @@ use crate::ui::status::StatusBar;
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{hex, Bytes};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
 use eyre::Result;
 use ratatui::{
@@ -1225,10 +1225,6 @@ impl PanelTr for TracePanel {
         // Handle VIM command mode first
         if self.inner.vim_command_mode {
             match event.code {
-                KeyCode::Char(c) => {
-                    self.inner.vim_command_buffer.push(c);
-                    Ok(EventResponse::Handled)
-                }
                 KeyCode::Backspace => {
                     self.inner.vim_command_buffer.pop();
                     Ok(EventResponse::Handled)
@@ -1240,6 +1236,16 @@ impl PanelTr for TracePanel {
                 KeyCode::Esc => {
                     self.inner.vim_command_buffer.clear();
                     self.inner.vim_command_mode = false;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('[') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Ctrl-[ is equivalent to Esc
+                    self.inner.vim_command_buffer.clear();
+                    self.inner.vim_command_mode = false;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char(c) => {
+                    self.inner.vim_command_buffer.push(c);
                     Ok(EventResponse::Handled)
                 }
                 _ => Ok(EventResponse::Handled),

@@ -24,13 +24,14 @@ use crate::ui::borders::BorderPresets;
 use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_primitives::Address;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edb_common::types::{Code, SnapshotInfoDetail};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    widgets::{Block, Borders, List, ListItem},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
 use std::collections::HashMap;
@@ -419,8 +420,11 @@ impl CodePanel {
 
     /// Render the main code content with syntax highlighting
     fn render_code_content(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::{List, ListItem, Paragraph};
+        let snapshot_id = dm.execution.get_display_snapshot();
+        let target_address =
+            dm.execution.get_snapshot_info(snapshot_id).map(|info| info.target_address);
+        let bytecode_address =
+            dm.execution.get_snapshot_info(snapshot_id).map(|info| info.bytecode_address);
 
         let lines = self.get_display_lines();
 
@@ -519,15 +523,21 @@ impl CodePanel {
                 height: 1,
             };
 
-            // Build comprehensive status using StatusBar
-            let exec_line =
-                self.current_execution_line.map_or("None".to_string(), |l| l.to_string());
-            let user_line = self.user_cursor_line.map_or("None".to_string(), |l| l.to_string());
+            let t_addr_str =
+                target_address.map_or("N/A".to_string(), |addr| dm.resolver.resolve_address(addr));
+            let b_addr_str = bytecode_address
+                .map_or("N/A".to_string(), |addr| dm.resolver.resolve_address(addr));
 
-            let mut status_bar = StatusBar::new()
-                .current_panel("Code".to_string())
-                .message(format!("► Exec: {} / {}", exec_line, lines.len()))
-                .message(format!("◯ User: {} / {}", user_line, lines.len()));
+            let mut status_bar = if target_address == bytecode_address {
+                StatusBar::new()
+                    .current_panel("Code".to_string())
+                    .message(format!("◉ Address: {}", t_addr_str))
+            } else {
+                StatusBar::new()
+                    .current_panel("Code".to_string())
+                    .message(format!("► Target: {}", t_addr_str))
+                    .message(format!("◯ Bytecode: {}", b_addr_str))
+            };
 
             if self.display_info.has_source_code {
                 status_bar = status_bar.message(format!(
@@ -1026,10 +1036,6 @@ impl PanelTr for CodePanel {
         // Handle VIM command mode first
         if self.vim_command_mode {
             match event.code {
-                KeyCode::Char(c) => {
-                    self.vim_command_buffer.push(c);
-                    Ok(EventResponse::Handled)
-                }
                 KeyCode::Backspace => {
                     self.vim_command_buffer.pop();
                     Ok(EventResponse::Handled)
@@ -1041,6 +1047,16 @@ impl PanelTr for CodePanel {
                 KeyCode::Esc => {
                     self.vim_command_buffer.clear();
                     self.vim_command_mode = false;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('[') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                    // Ctrl-[ is equivalent to Esc
+                    self.vim_command_buffer.clear();
+                    self.vim_command_mode = false;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char(c) => {
+                    self.vim_command_buffer.push(c);
                     Ok(EventResponse::Handled)
                 }
                 _ => Ok(EventResponse::Handled),

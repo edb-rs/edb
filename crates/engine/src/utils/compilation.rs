@@ -28,7 +28,6 @@ use foundry_compilers::{
 };
 use itertools::Itertools;
 use tracing::{debug, trace};
-use tracing_subscriber::fmt::format;
 
 use crate::{etherscan_rate_limit_guard, Artifact};
 

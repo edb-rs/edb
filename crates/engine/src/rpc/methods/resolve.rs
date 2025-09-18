@@ -17,6 +17,7 @@
 use std::sync::Arc;
 
 use alloy_primitives::Address;
+use edb_common::types::{parse_callable_abi_info, CallableAbiInfo, ContractTy};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
@@ -75,6 +76,83 @@ where
     let json_value = serde_json::to_value(abi).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize ABI: {}", e),
+        data: None,
+    })?;
+
+    debug!("Retrieved contract ABI for address {}", address);
+    Ok(json_value)
+}
+
+/// Get callable ABI information for an address.
+///
+/// This method returns the callable ABI information for the specified contract address.
+///
+/// # Parameters
+/// - `address`: The contract address
+///
+/// # Returns
+/// - A list of callable ABI information for associated addresses.
+pub fn get_callable_abi<DB>(
+    context: &Arc<EngineContext<DB>>,
+    params: Option<Value>,
+) -> Result<Value, RpcError>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    // Parse the address as the first argument
+    let address: Address = params
+        .as_ref()
+        .and_then(|p| p.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or_else(|| RpcError {
+            code: error_codes::INVALID_PARAMS,
+            message: "Invalid params: expected [address]".to_string(),
+            data: None,
+        })?;
+
+    // Let's figure whether the address is a normal, proxy, or implementation contract
+    let mut related_addresses: Vec<(Address, ContractTy)> = Vec::new();
+    if !context.address_code_address_map().contains_key(&address) {
+        // It is an implmentation contract
+        related_addresses.push((address, ContractTy::Implementation));
+    } else if context
+        .address_code_address_map()
+        .get(&address)
+        .is_some_and(|a| a.iter().any(|c| *c != address))
+    {
+        // It is an proxy contract
+        related_addresses.push((address, ContractTy::Proxy));
+        for impl_addr in context
+            .address_code_address_map()
+            .get(&address)
+            .unwrap()
+            .iter()
+            .filter(|c| **c != address)
+        {
+            related_addresses.push((*impl_addr, ContractTy::Implementation));
+        }
+    } else {
+        // It is a normal contract
+        related_addresses.push((address, ContractTy::Normal));
+    }
+
+    let abi_info = related_addresses
+        .into_iter()
+        .filter_map(|(addr, ty)| {
+            context.recompiled_artifacts.get(&addr).and_then(|artifact| {
+                artifact
+                    .contract()
+                    .and_then(|contract| Some(parse_callable_abi_info(addr, contract, ty)))
+            })
+        })
+        .collect::<Vec<CallableAbiInfo>>();
+
+    let json_value = serde_json::to_value(abi_info).map_err(|e| RpcError {
+        code: error_codes::INTERNAL_ERROR,
+        message: format!("Failed to serialize callable ABI: {}", e),
         data: None,
     })?;
 

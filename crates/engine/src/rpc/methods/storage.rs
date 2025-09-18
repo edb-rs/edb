@@ -4,14 +4,11 @@ use alloy_primitives::{
     map::foldhash::{HashMap, HashMapExt},
     U256,
 };
-use revm::{
-    database::{empty_db, CacheDB},
-    Database, DatabaseCommit, DatabaseRef,
-};
+use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::debug;
 
-use crate::{error_codes, methods::snapshot, EngineContext, RpcError};
+use crate::{error_codes, EngineContext, RpcError};
 
 pub fn get_storage_diff<DB>(
     context: &Arc<EngineContext<DB>>,

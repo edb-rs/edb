@@ -21,7 +21,7 @@
 use crate::ui::spinner::Spinner;
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::types::{Code, SnapshotInfo, Trace};
+use edb_common::types::{CallableAbiInfo, Code, SnapshotInfo, Trace};
 use eyre::Result;
 use jsonrpsee::{
     core::client::ClientT,
@@ -178,57 +178,6 @@ impl RpcClient {
 
 // Rpc methods
 impl RpcClient {
-    // XXX (ZZ): comment as a reference for now.
-    // /// Get current snapshot information
-    // pub async fn get_current_snapshot(&self) -> Result<Value> {
-    //     self.request_with_spinner(
-    //         "debug.getCurrentSnapshot",
-    //         rpc_params::build(),
-    //         "Getting current snapshot",
-    //     )
-    //     .await
-    // }
-
-    // /// Get total snapshot count
-    // pub async fn get_snapshot_count(&self) -> Result<Value> {
-    //     self.request_with_spinner(
-    //         "debug.getSnapshotCount",
-    //         rpc_params::build(),
-    //         "Getting snapshot count",
-    //     )
-    //     .await
-    // }
-
-    // /// Step to next snapshot
-    // pub async fn step_next(&self) -> Result<Value> {
-    //     self.request_with_spinner(
-    //         "debug.stepNext",
-    //         rpc_params::build(),
-    //         "Stepping to next snapshot",
-    //     )
-    //     .await
-    // }
-
-    // /// Step to previous snapshot
-    // pub async fn step_previous(&self) -> Result<Value> {
-    //     self.request_with_spinner(
-    //         "debug.stepPrevious",
-    //         rpc_params::build(),
-    //         "Stepping to previous snapshot",
-    //     )
-    //     .await
-    // }
-
-    // /// Set current snapshot to specific index
-    // pub async fn set_current_snapshot(&self, index: usize) -> Result<Value> {
-    //     self.request_with_spinner(
-    //         "debug.setCurrentSnapshot",
-    //         rpc_params::build_with_param(Some(index)),
-    //         &format!("Setting snapshot to {}", index),
-    //     )
-    //     .await
-    // }
-
     /// Get execution trace
     pub async fn get_trace(&self) -> Result<Trace> {
         let value = self
@@ -253,6 +202,20 @@ impl RpcClient {
 
         serde_json::from_value(value)
             .map_err(|e| eyre::eyre!("Failed to parse contract ABI: {}", e))
+    }
+
+    /// Get callable abi info
+    pub async fn get_callable_abi(&self, address: Address) -> Result<Vec<CallableAbiInfo>> {
+        let value = self
+            .request_with_spinner(
+                "edb_getCallableABI",
+                rpc_params!(address),
+                &format!("Fetching callable ABI for {}", address),
+            )
+            .await?;
+
+        serde_json::from_value(value)
+            .map_err(|e| eyre::eyre!("Failed to parse callable ABI: {}", e))
     }
 
     /// Get contract constructor arguments

@@ -14,6 +14,8 @@ pub struct SnapshotInfo {
     pub next_id: usize,
     pub prev_id: usize,
     pub detail: SnapshotInfoDetail,
+    pub target_address: Address,
+    pub bytecode_address: Address,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, From)]

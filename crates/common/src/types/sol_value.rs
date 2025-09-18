@@ -228,14 +228,15 @@ impl SolValueFormatter for DynSolValue {
                     label
                 } else {
                     let addr_str = if !ctx.shorten_long {
-                        format!("0x{:040x}", addr)
+                        addr.to_checksum(None)
                     } else if *addr == Address::ZERO {
                         "0x0000000000000000".to_string()
                     } else {
-                        let addr_str = format!("{:?}", addr);
+                        let addr_str = addr.to_checksum(None);
                         // Show more characters for better identification: 8 chars + ... + 6 chars
                         format!("{}...{}", &addr_str[..8], &addr_str[addr_str.len() - 6..])
                     };
+
                     if ctx.with_ty {
                         format!("address({})", addr_str)
                     } else {
