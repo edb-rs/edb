@@ -77,7 +77,7 @@ where
     /// Database state (shared via Arc within same context)
     pub database: Arc<CacheDB<DB>>,
     /// Transition storage
-    pub transition_storage: Arc<TransientStorage>,
+    pub transient_storage: Arc<TransientStorage>,
 }
 
 /// Collection of opcode snapshots
@@ -305,7 +305,7 @@ where
             stack: interp.stack.data().clone(),
             calldata: calldata.clone(),
             database: self.database.clone(),
-            transition_storage: self.transition_storage.clone(),
+            transient_storage: self.transition_storage.clone(),
         };
 
         // Add to snapshots for this frame

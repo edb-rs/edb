@@ -101,7 +101,7 @@ where
                     memory: opcode_snapshot.memory.as_ref().clone(),
                     stack: opcode_snapshot.stack.clone(),
                     calldata: opcode_snapshot.calldata.as_ref().clone(),
-                    transition_storage: opcode_snapshot.transition_storage.as_ref().clone(),
+                    transient_storage: opcode_snapshot.transient_storage.as_ref().clone(),
                 }),
             }
         }

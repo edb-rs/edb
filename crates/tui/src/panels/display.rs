@@ -20,6 +20,7 @@
 
 use super::{EventResponse, PanelTr, PanelType};
 use crate::data::DataManager;
+use crate::panels::utils;
 use crate::ui::borders::BorderPresets;
 use crate::ui::colors::ColorScheme;
 use crate::ui::status::StatusBar;
@@ -390,7 +391,7 @@ impl DisplayPanel {
         self.calldata = opcode_detail.calldata.clone();
 
         // Update transient storage (only for current address)
-        self.update_transient_storage(&opcode_detail.transition_storage, current_addr);
+        self.update_transient_storage(&opcode_detail.transient_storage, current_addr);
 
         Some(())
     }
@@ -477,7 +478,7 @@ impl DisplayPanel {
                     .iter()
                     .map(|item| {
                         let index_str = format!("[{:2}]", item.index);
-                        let value_str = self.format_value_with_decode(&item.value);
+                        let value_str = utils::format_value_with_decode(&item.value);
                         let diff_indicator = match item.diff_status {
                             DiffStatus::New => " [NEW]",
                             DiffStatus::Modified => " [CHG]",
@@ -511,8 +512,10 @@ impl DisplayPanel {
                 // Check storage changes
                 for (slot, (old_value, new_value)) in &self.storage_changes {
                     let slot_line = format!("• Slot: {:#066x}", slot);
-                    let old_line = format!("  Old:  {}", self.format_value_with_decode(old_value));
-                    let new_line = format!("  New:  {}", self.format_value_with_decode(new_value));
+                    let old_line =
+                        format!("  Old:  {}", utils::format_value_with_decode(old_value));
+                    let new_line =
+                        format!("  New:  {}", utils::format_value_with_decode(new_value));
 
                     max_width = max_width.max(slot_line.len());
                     max_width = max_width.max(old_line.len());
@@ -535,7 +538,7 @@ impl DisplayPanel {
                 // Check transient storage items
                 for (slot, value) in &self.transient_storage {
                     let slot_line = format!("• Slot: {:#066x}", slot);
-                    let val_line = format!("  Val:  {}", self.format_value_with_decode(value));
+                    let val_line = format!("  Val:  {}", utils::format_value_with_decode(value));
 
                     max_width = max_width.max(slot_line.len());
                     max_width = max_width.max(val_line.len());
@@ -576,34 +579,6 @@ impl DisplayPanel {
             self.horizontal_offset = 0;
             debug!("Switched to display mode: {:?}", self.mode);
         }
-    }
-
-    /// Format a U256 value with hex, optional decimal, and ASCII decode
-    fn format_value_with_decode(&self, value: &U256) -> String {
-        let hex_str = format!("{:#066x}", value);
-
-        // Small number decode (with consistent padding)
-        let num_part = if *value < U256::from(1_000_000u64) {
-            format!("({:>7})", value) // Right-align in 7 chars for consistency
-        } else {
-            "         ".to_string() // 9 spaces to match "(1000000)" width
-        };
-
-        // ASCII decode
-        let bytes = value.to_be_bytes::<32>();
-        let mut decoded = String::new();
-
-        // Only show ASCII if there are printable characters
-        for byte in bytes.iter().rev() {
-            // Start from least significant bytes
-            if byte.is_ascii_graphic() || *byte == b' ' {
-                decoded.push(*byte as char);
-            } else {
-                decoded.push('.');
-            }
-        }
-
-        format!("{} {} {}", hex_str, num_part, decoded.chars().rev().collect::<String>())
     }
 
     /// Calculate the number of display lines for storage
@@ -838,7 +813,7 @@ impl DisplayPanel {
 
                 // Format the stack item
                 let index_str = format!("[{:2}]", item.index);
-                let value_str = self.format_value_with_decode(&item.value);
+                let value_str = utils::format_value_with_decode(&item.value);
 
                 // Add diff indicator
                 let diff_indicator = match item.diff_status {
@@ -1056,13 +1031,14 @@ impl DisplayPanel {
                 // Previous value
                 if let Some(prev_val) = prev_storage {
                     display_items
-                        .push(format!("  Old:  {}", self.format_value_with_decode(&prev_val)));
+                        .push(format!("  Old:  {}", utils::format_value_with_decode(&prev_val)));
                     item_styles.push(StorageItemStyle::Normal);
                 }
 
                 // Value being written
                 if let Some(val) = value_to_write {
-                    display_items.push(format!("  New:  {}", self.format_value_with_decode(&val)));
+                    display_items
+                        .push(format!("  New:  {}", utils::format_value_with_decode(&val)));
                     item_styles.push(StorageItemStyle::StoreWrite);
                 }
 
@@ -1101,11 +1077,13 @@ impl DisplayPanel {
                 item_styles.push(StorageItemStyle::SlotLine);
 
                 // Old value
-                display_items.push(format!("  Old:  {}", self.format_value_with_decode(old_value)));
+                display_items
+                    .push(format!("  Old:  {}", utils::format_value_with_decode(old_value)));
                 item_styles.push(StorageItemStyle::Normal);
 
                 // New value with arrow
-                display_items.push(format!("  New:  {}", self.format_value_with_decode(new_value)));
+                display_items
+                    .push(format!("  New:  {}", utils::format_value_with_decode(new_value)));
                 item_styles.push(StorageItemStyle::ChangeLine);
 
                 // Add small separator between items
@@ -1243,7 +1221,8 @@ impl DisplayPanel {
 
                 // Value being written
                 if let Some(val) = value_to_write {
-                    display_items.push(format!("  New:  {}", self.format_value_with_decode(&val)));
+                    display_items
+                        .push(format!("  New:  {}", utils::format_value_with_decode(&val)));
                     item_styles.push(StorageItemStyle::StoreWrite);
                 }
 
@@ -1283,7 +1262,7 @@ impl DisplayPanel {
                 display_items.push(format!("• Slot: {:#066x}", slot));
                 item_styles.push(StorageItemStyle::SlotLine);
 
-                display_items.push(format!("  Val:  {}", self.format_value_with_decode(value)));
+                display_items.push(format!("  Val:  {}", utils::format_value_with_decode(value)));
                 item_styles.push(StorageItemStyle::ChangeLine);
 
                 // Add separator

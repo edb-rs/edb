@@ -20,13 +20,15 @@
 
 use super::{EventResponse, PanelTr, PanelType};
 use crate::data::DataManager;
+use crate::panels::utils;
 use crate::ui::borders::BorderPresets;
 use crate::ui::icons::Icons;
 use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
 use crate::{Spinner, SpinnerStyles};
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use eyre::Result;
+use edb_common::types::{SnapshotInfo, SnapshotInfoDetail};
+use eyre::{bail, eyre, Result};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
@@ -93,6 +95,16 @@ enum PendingCommand {
     Goto(usize),
     /// Fetch callable ABI for address
     CallableAbi(Address),
+    /// Show stack (top N items)
+    ShowStack(usize, usize),
+    /// Show memory at offset (N bytes)
+    ShowMemory(usize, usize, usize),
+    /// Show calldata
+    ShowCalldata(usize),
+    /// Show storage at slot
+    ShowStorage(usize, U256),
+    /// Show transient storage at slot
+    ShowTransientStorage(usize, U256),
 }
 
 impl PendingCommand {
@@ -132,6 +144,15 @@ impl PendingCommand {
                 PendingCommand::CallableAbi(address) => {
                     dm.resolver.get_callable_abi_list(*address)?;
                 }
+                PendingCommand::ShowStack(id, ..)
+                | PendingCommand::ShowMemory(id, ..)
+                | PendingCommand::ShowCalldata(id)
+                | PendingCommand::ShowTransientStorage(id, ..) => {
+                    dm.execution.get_snapshot_info(*id)?;
+                }
+                PendingCommand::ShowStorage(id, slot) => {
+                    unimplemented!()
+                }
             }
             Some(())
         }
@@ -140,43 +161,161 @@ impl PendingCommand {
     }
 
     /// Output when command is finished
-    fn output_finished(&self, dm: &mut DataManager) -> Option<String> {
+    fn output_finished(&self, dm: &mut DataManager) -> Result<String> {
         let id = dm.execution.get_current_snapshot();
         match self {
             PendingCommand::StepForward(count) => {
-                Some(format!("Stepped forward {} times to Snapshot {}", count, id))
+                Ok(format!("Stepped forward {} times to Snapshot {}", count, id))
             }
             PendingCommand::StepBackward(count) => {
-                Some(format!("Stepped backward {} times to Snapshot {}", count, id))
+                Ok(format!("Stepped backward {} times to Snapshot {}", count, id))
             }
             PendingCommand::NextCall(src_id) => {
-                let next_id = dm.execution.get_next_call(*src_id)?;
-                Some(format!("Goto Next Call at Snapshot {}", next_id))
+                let next_id =
+                    dm.execution.get_next_call(*src_id).ok_or(eyre!("No next call found"))?;
+                Ok(format!("Goto Next Call at Snapshot {}", next_id))
             }
             PendingCommand::PrevCall(src_id) => {
-                let prev_id = dm.execution.get_prev_call(*src_id)?;
-                Some(format!("Goto Previous Call at Snapshot {}", prev_id))
+                let prev_id =
+                    dm.execution.get_prev_call(*src_id).ok_or(eyre!("No previous call found"))?;
+                Ok(format!("Goto Previous Call at Snapshot {}", prev_id))
             }
             PendingCommand::StepForwardNoCallees(src_id) => {
-                let next_id = dm.execution.get_snapshot_info(*src_id)?.next_id;
-                Some(format!("Stepped to Snapshot {} without going into callees", next_id))
+                let next_id = dm
+                    .execution
+                    .get_snapshot_info(*src_id)
+                    .ok_or(eyre!("No next step found"))?
+                    .next_id;
+                Ok(format!("Stepped to Snapshot {} without going into callees", next_id))
             }
             PendingCommand::StepBackwardNoCallees(src_id) => {
-                let prev_id = dm.execution.get_snapshot_info(*src_id)?.prev_id;
-                Some(format!("Stepped to Snapshot {} without going into callees", prev_id))
+                let prev_id = dm
+                    .execution
+                    .get_snapshot_info(*src_id)
+                    .ok_or(eyre!("No previous step found"))?
+                    .prev_id;
+                Ok(format!("Stepped to Snapshot {} without going into callees", prev_id))
             }
-            PendingCommand::Goto(id) => Some(format!("Goto Snapshot {}", id)),
+            PendingCommand::Goto(id) => Ok(format!("Goto Snapshot {}", id)),
             PendingCommand::CallableAbi(address) => {
-                let abi_list = dm.resolver.get_callable_abi_list(*address)?;
+                let abi_list = dm
+                    .resolver
+                    .get_callable_abi_list(*address)
+                    .ok_or(eyre!("No callable ABI found"))?;
                 if abi_list.is_empty() {
-                    Some(format!("No callable ABI found for address {}", address))
+                    Ok(format!("No callable ABI found for address {}", address))
                 } else {
-                    abi_list
+                    Ok(abi_list
                         .iter()
                         .map(|info| format!("{}", info))
                         .collect::<Vec<_>>()
-                        .join("\n")
-                        .into()
+                        .join("\n"))
+                }
+            }
+            PendingCommand::ShowStack(id, count) => {
+                let info =
+                    dm.execution.get_snapshot_info(*id).ok_or(eyre!("No stack info found"))?;
+                match info.detail() {
+                    SnapshotInfoDetail::Opcode(detail) => {
+                        let stack = &detail.stack;
+                        if stack.is_empty() {
+                            Ok("Stack is empty".to_string())
+                        } else {
+                            let top_n =
+                                stack.iter().rev().take(*count).cloned().collect::<Vec<_>>();
+                            Ok(format!(
+                                "Top {} Stack Items (most recent first):\n{}",
+                                top_n.len(),
+                                top_n
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, val)| format!(
+                                        "{:>4} | {}",
+                                        i,
+                                        utils::format_value_with_decode(val)
+                                    ))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            ))
+                        }
+                    }
+                    SnapshotInfoDetail::Hook(_) => bail!("No stack info available in source mode."),
+                }
+            }
+            PendingCommand::ShowMemory(id, offset, count) => {
+                let info =
+                    dm.execution.get_snapshot_info(*id).ok_or(eyre!("No memory info found"))?;
+                match info.detail() {
+                    SnapshotInfoDetail::Opcode(detail) => {
+                        let memory = &detail.memory;
+                        if memory.is_empty() {
+                            Ok("Memory is empty".to_string())
+                        } else {
+                            let start = *offset;
+                            let end = std::cmp::min(start.saturating_add(*count), memory.len());
+                            let slice = &memory[start..end];
+                            Ok(format!(
+                                "Memory from offset {} ({} bytes):\n{}",
+                                start,
+                                slice.len(),
+                                utils::format_bytes_with_decode(slice)
+                                    .split('\n')
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:>4} | {}", i * 32, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            ))
+                        }
+                    }
+                    SnapshotInfoDetail::Hook(_) => {
+                        bail!("No memory info available in source mode.")
+                    }
+                }
+            }
+            PendingCommand::ShowCalldata(id) => {
+                let info =
+                    dm.execution.get_snapshot_info(*id).ok_or(eyre!("No calldata info found"))?;
+                match info.detail() {
+                    SnapshotInfoDetail::Opcode(detail) => {
+                        let calldata = &detail.calldata;
+                        if calldata.is_empty() {
+                            Ok("Calldata is empty".to_string())
+                        } else {
+                            Ok(format!(
+                                "Calldata ({} bytes):\n{}",
+                                calldata.len(),
+                                utils::format_bytes_with_decode(calldata)
+                                    .split('\n')
+                                    .enumerate()
+                                    .map(|(i, line)| format!("{:>4} | {}", i * 32, line))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            ))
+                        }
+                    }
+                    SnapshotInfoDetail::Hook(_) => {
+                        bail!("No calldata info available in source mode.")
+                    }
+                }
+            }
+            PendingCommand::ShowStorage(id, slot) => {
+                unimplemented!()
+            }
+            PendingCommand::ShowTransientStorage(id, slot) => {
+                let info =
+                    dm.execution.get_snapshot_info(*id).ok_or(eyre!("No storage info found"))?;
+                match info.detail() {
+                    SnapshotInfoDetail::Opcode(detail) => {
+                        let value = detail
+                            .transient_storage
+                            .get(&(info.target_address, *slot))
+                            .cloned()
+                            .unwrap_or(U256::ZERO);
+                        Ok(format!("   {}: {}", slot, utils::format_value_with_decode(&value)))
+                    }
+                    SnapshotInfoDetail::Hook(_) => {
+                        bail!("No storage info available in source mode.")
+                    }
                 }
             }
         }
@@ -479,27 +618,52 @@ impl TerminalPanel {
                 }
             }
             "break" => {
-                if parts.len() > 1 {
-                    self.add_output(&format!("Setting breakpoint at: {}", parts[1]));
-                    self.add_output("(Breakpoint functionality not yet implemented)");
-                } else {
-                    self.add_output("Usage: break <location>");
-                }
+                self.add_error("Breakpoint command not yet implemented");
             }
             "stack" => {
-                self.add_output("Displaying stack...");
-                self.add_output("(Stack display would switch display panel)");
+                let count =
+                    if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 5 };
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::ShowStack(id, count));
+                self.spinner.start_loading(&format!("Fetching stack (top {} items)...", count));
             }
             "memory" => {
-                self.add_output("Displaying memory...");
-                self.add_output("(Memory display would switch display panel)");
+                let offset =
+                    if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(0) } else { 0 };
+                let count =
+                    if parts.len() > 2 { parts[2].parse::<usize>().unwrap_or(256) } else { 256 };
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::ShowMemory(id, offset, count));
+                self.spinner.start_loading(&format!(
+                    "Fetching memory at offset {} ({} bytes)...",
+                    offset, count
+                ));
             }
-            "variables" | "vars" => {
-                self.add_output("Displaying variables...");
-                self.add_output("(Variable display would switch display panel)");
+            "calldata" => {
+                let id = dm.execution.get_current_snapshot();
+                self.pending_command = Some(PendingCommand::ShowCalldata(id));
+                self.spinner.start_loading("Fetching calldata...");
             }
-            "reset" => {
-                self.add_output("Resetting display panel to default view");
+            "sload" => {
+                let id = dm.execution.get_current_snapshot();
+                let slot = if parts.len() > 1 {
+                    parts[1].parse::<U256>().unwrap_or(U256::ZERO)
+                } else {
+                    U256::ZERO
+                };
+                self.pending_command = Some(PendingCommand::ShowStorage(id, slot));
+                self.spinner.start_loading(&format!("Fetching storage at slot {}...", slot));
+            }
+            "tsload" => {
+                let id = dm.execution.get_current_snapshot();
+                let slot = if parts.len() > 1 {
+                    parts[1].parse::<U256>().unwrap_or(U256::ZERO)
+                } else {
+                    U256::ZERO
+                };
+                self.pending_command = Some(PendingCommand::ShowTransientStorage(id, slot));
+                self.spinner
+                    .start_loading(&format!("Fetching transient storage at slot {}...", slot));
             }
             _ => {
                 self.add_output(&format!("Unknown command: {}", parts[0]));
@@ -515,40 +679,33 @@ impl TerminalPanel {
         self.add_output("📋 EDB Terminal Help");
         self.add_output("");
         self.add_output("🔄 Terminal Navigation (Vim-Style):");
-        self.add_output("  Esc              - Switch to VIM mode for navigation");
+        self.add_output("  Esc                - Switch to VIM mode for navigation");
         self.add_output("  (VIM mode) j/k/↑/↓ - Navigate lines (with auto-scroll)");
         self.add_output("  (VIM mode) 5j/3↓   - Move multiple lines with number prefix");
         self.add_output("  (VIM mode) gg/G    - Go to top/bottom");
         self.add_output("  (VIM mode) i       - Return to INSERT mode");
         self.add_output("");
-        self.add_output("🧭 Panel Navigation:");
-        self.add_output(
-            "  ESC              - Switch to terminal from any panel (or VIM mode in terminal)",
-        );
-        self.add_output("  Tab              - Cycle through panels");
-        self.add_output("  F1/F2/F3/F4      - Direct panel access (mobile layout)");
-        self.add_output("");
         self.add_output("🚀 Debug Commands:");
-        self.add_output("  next, n          - Step to next snapshot");
-        self.add_output("  prev, p          - Step to previous snapshot");
-        self.add_output("  step, s <count>  - Step multiple snapshots");
+        self.add_output("  next, n             - Step to next snapshot");
+        self.add_output("  prev, p             - Step to previous snapshot");
+        self.add_output("  step, s <count>     - Step multiple snapshots");
         self.add_output("  reverse, rs <count> - Reverse step multiple snapshots");
-        self.add_output("  call, c          - Step to next function call");
-        self.add_output("  rcall, rc        - Step back from function call");
+        self.add_output("  call, c             - Step to next function call");
+        self.add_output("  rcall, rc           - Step back from function call");
         self.add_output("");
         self.add_output("🔍 Inspection:");
-        self.add_output("  stack            - Show current stack");
-        self.add_output("  memory [offset]  - Show memory");
-        self.add_output("  variables, vars  - Show variables in scope");
-        self.add_output("  abi <address>    - Show callable ABI");
-        self.add_output("  reset            - Reset display panel");
+        self.add_output("  abi <address>           - Show callable ABI");
+        self.add_output("  stack [count]           - Show current stack");
+        self.add_output("  memory [offset] [count] - Show memory");
+        self.add_output("  calldata                - Show calldata");
+        self.add_output("  sload <slot>            - Show storage at slot");
+        self.add_output("  tsload <slot>           - Show transient storage at slot");
         self.add_output("");
         self.add_output("🔴 Breakpoints:");
         self.add_output("  break <location> - Set breakpoint");
         self.add_output("");
         self.add_output("💻 Solidity expressions (prefix with $):");
-        self.add_output("  $balance         - Evaluate variable");
-        self.add_output("  $msg.sender      - Evaluate expression");
+        self.add_output("  $<expr>          - Evaluate expression");
         self.add_output("");
         self.add_output("⚙️  Other:");
         self.add_output("  help, h          - Show this help");
@@ -950,10 +1107,18 @@ impl TerminalPanel {
         if self.pending_command.map_or(false, |cmd| !cmd.is_pending(dm)) {
             self.spinner.finish_loading();
             let pending_command = self.pending_command.take().unwrap();
-            let output_str =
-                pending_command.output_finished(dm).unwrap_or("Command completed".to_string());
-            for line in output_str.lines() {
-                self.add_output(line);
+            match pending_command.output_finished(dm) {
+                Ok(output) => {
+                    for line in output.lines() {
+                        self.add_output(line);
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("{e}");
+                    for line in error_msg.lines() {
+                        self.add_error(line);
+                    }
+                }
             }
         }
 

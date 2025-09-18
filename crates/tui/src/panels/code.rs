@@ -535,8 +535,8 @@ impl CodePanel {
             } else {
                 StatusBar::new()
                     .current_panel("Code".to_string())
-                    .message(format!("► Target: {}", t_addr_str))
-                    .message(format!("◯ Bytecode: {}", b_addr_str))
+                    .message(format!("► Proxy: {}", t_addr_str))
+                    .message(format!("◯ Impl: {}", b_addr_str))
             };
 
             if self.display_info.has_source_code {

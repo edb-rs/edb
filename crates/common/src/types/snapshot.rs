@@ -106,6 +106,6 @@ pub struct OpcodeSnapshotInfoDetail {
     pub stack: Vec<U256>,
     /// Call data for this execution context (shared via Arc within same context)
     pub calldata: Bytes,
-    /// Transition storage
-    pub transition_storage: TransientStorage,
+    /// Transient storage
+    pub transient_storage: TransientStorage,
 }

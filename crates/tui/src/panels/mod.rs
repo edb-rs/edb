@@ -101,6 +101,7 @@ pub mod display;
 pub mod help;
 pub mod terminal;
 pub mod trace;
+mod utils;
 
 pub use code::CodePanel;
 pub use display::DisplayPanel;
