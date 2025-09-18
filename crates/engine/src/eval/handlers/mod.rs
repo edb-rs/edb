@@ -64,6 +64,11 @@ pub trait TxHandler {
     fn get_tx_origin(&self, snapshot_id: usize) -> Result<DynSolValue>;
 }
 
+/// Handler trait for final expression validation
+pub trait ValidationHandler {
+    fn validate_value(&self, value: DynSolValue) -> Result<DynSolValue>;
+}
+
 /// Handler trait for block global variables
 pub trait BlockHandler {
     fn get_block_number(&self, snapshot_id: usize) -> Result<DynSolValue>;
@@ -80,6 +85,7 @@ pub struct EvaluatorHandlers {
     pub msg_handler: Option<Box<dyn MsgHandler>>,
     pub tx_handler: Option<Box<dyn TxHandler>>,
     pub block_handler: Option<Box<dyn BlockHandler>>,
+    pub validation_handler: Option<Box<dyn ValidationHandler>>,
 }
 
 impl Clone for EvaluatorHandlers {
@@ -135,6 +141,12 @@ impl EvaluatorHandlers {
     /// Set block handler
     pub fn with_block_handler(mut self, handler: Box<dyn BlockHandler>) -> Self {
         self.block_handler = Some(handler);
+        self
+    }
+
+    /// Set validation handler
+    pub fn with_validation_handler(mut self, handler: Box<dyn ValidationHandler>) -> Self {
+        self.validation_handler = Some(handler);
         self
     }
 }

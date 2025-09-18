@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{Address, I256, U256};
 use eyre::{bail, Result};
+use revm::handler::validation;
 
 use super::*;
 
@@ -214,6 +215,12 @@ impl BlockHandler for DebugHandler {
 
     fn get_block_timestamp(&self, snapshot_id: usize) -> Result<DynSolValue> {
         bail!("DebugHandler::get_block_timestamp called with snapshot_id={}", snapshot_id)
+    }
+}
+
+impl ValidationHandler for DebugHandler {
+    fn validate_value(&self, value: DynSolValue) -> Result<DynSolValue> {
+        Ok(value)
     }
 }
 
@@ -446,6 +453,12 @@ impl BlockHandler for Arc<SimulationDebugHandler> {
     }
 }
 
+impl ValidationHandler for Arc<SimulationDebugHandler> {
+    fn validate_value(&self, value: DynSolValue) -> Result<DynSolValue> {
+        Ok(value)
+    }
+}
+
 /// Create debug handlers for all traits (original error-only version)
 pub fn create_debug_handlers() -> EvaluatorHandlers {
     EvaluatorHandlers::new()
@@ -456,6 +469,7 @@ pub fn create_debug_handlers() -> EvaluatorHandlers {
         .with_msg_handler(Box::new(DebugHandler::new()))
         .with_tx_handler(Box::new(DebugHandler::new()))
         .with_block_handler(Box::new(DebugHandler::new()))
+        .with_validation_handler(Box::new(DebugHandler::new()))
 }
 
 /// Create simulation debug handlers that return mock values and log operations
@@ -468,7 +482,8 @@ pub fn create_simulation_debug_handlers() -> (EvaluatorHandlers, Arc<SimulationD
         .with_member_access_handler(Box::new(handler.clone()))
         .with_msg_handler(Box::new(handler.clone()))
         .with_tx_handler(Box::new(handler.clone()))
-        .with_block_handler(Box::new(handler.clone()));
+        .with_block_handler(Box::new(handler.clone()))
+        .with_validation_handler(Box::new(handler.clone()));
 
     (handlers, handler)
 }

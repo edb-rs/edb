@@ -95,7 +95,7 @@ enum PendingCommand {
     /// Goto to a specific snapshot
     Goto(usize),
     /// Fetch callable ABI for address
-    CallableAbi(Address),
+    CallableAbi(usize, Option<Address>),
     /// Show stack (top N items)
     ShowStack(usize, usize),
     /// Show memory at offset (N bytes)
@@ -146,8 +146,13 @@ impl PendingCommand {
                     dm.execution.get_snapshot_info(*id)?;
                     dm.execution.get_code(*id)?;
                 }
-                PendingCommand::CallableAbi(address) => {
-                    dm.resolver.get_callable_abi_list(*address)?;
+                PendingCommand::CallableAbi(id, address) => {
+                    if let Some(addr) = address {
+                        dm.resolver.get_callable_abi_list(*addr)?;
+                    } else {
+                        let info = dm.execution.get_snapshot_info(*id)?;
+                        dm.resolver.get_callable_abi_list(info.bytecode_address)?;
+                    }
                 }
                 PendingCommand::ShowStack(id, ..)
                 | PendingCommand::ShowMemory(id, ..)
@@ -213,11 +218,22 @@ impl PendingCommand {
                 Ok(format!("Stepped to Step {} without going into callees", prev_id))
             }
             PendingCommand::Goto(id) => Ok(format!("Goto Step {}", id)),
-            PendingCommand::CallableAbi(address) => {
+            PendingCommand::CallableAbi(id, address) => {
+                let address = if let Some(addr) = address {
+                    *addr
+                } else {
+                    let info = dm
+                        .execution
+                        .get_snapshot_info(*id)
+                        .ok_or(eyre!("No snapshot info found"))?;
+                    info.bytecode_address
+                };
+
                 let abi_list = dm
                     .resolver
-                    .get_callable_abi_list(*address)
+                    .get_callable_abi_list(address)
                     .ok_or(eyre!("No callable ABI found"))?;
+
                 if abi_list.is_empty() {
                     Ok(format!("No callable ABI found for address {}", address))
                 } else {
@@ -636,20 +652,19 @@ impl TerminalPanel {
                 dm.execution.prev_call()?;
             }
             "abi" => {
-                if parts.len() < 2 {
-                    self.add_output("Usage: abi <address>");
-                    return Ok(());
-                }
-                let address_str = parts[1];
-                let address = match address_str.parse::<Address>() {
-                    Ok(addr) => addr,
-                    Err(_) => {
-                        self.add_error(&format!("Invalid address: {}", address_str));
-                        return Ok(());
-                    }
+                let id = dm.execution.get_current_snapshot();
+                let address = if parts.len() > 1 {
+                    Some(parts[1].parse::<Address>().map_err(|e| eyre!("Invalid address: {}", e))?)
+                } else {
+                    None
                 };
-                self.pending_command = Some(PendingCommand::CallableAbi(address));
-                self.spinner.start_loading(&format!("Fetching callable ABI for {}...", address));
+
+                if let Some(addr) = address {
+                    self.spinner.start_loading(&format!("Fetching callable ABI for {}...", addr));
+                } else {
+                    self.spinner.start_loading("Fetching callable ABI for current address...");
+                }
+                self.pending_command = Some(PendingCommand::CallableAbi(id, address));
             }
             "goto" | "g" => {
                 // A secret debugging cmd
@@ -755,7 +770,7 @@ impl TerminalPanel {
         self.add_output("");
         self.add_output("🔍 Inspection:");
         self.add_output("  address                 - Show current address");
-        self.add_output("  abi <address>           - Show callable ABI");
+        self.add_output("  abi [address]           - Show callable ABI");
         self.add_output("  stack [count]           - Show current stack");
         self.add_output("  memory [offset] [count] - Show memory");
         self.add_output("  calldata                - Show calldata");

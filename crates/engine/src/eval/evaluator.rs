@@ -69,7 +69,14 @@ impl ExpressionEvaluator {
         let parsed_expr = parse_input(expr)?;
 
         // Evaluate the parsed expression
-        self.evaluate_expression(&parsed_expr, snapshot_id)
+        let value = self.evaluate_expression(&parsed_expr, snapshot_id)?;
+
+        // If a validation handler is set, validate the final value
+        if let Some(validation_handler) = &self.handlers.validation_handler {
+            validation_handler.validate_value(value)
+        } else {
+            Ok(value)
+        }
     }
 
     /// Main evaluation dispatcher for different expression types

@@ -139,19 +139,7 @@ where
                 })?;
 
             // Find local variables at this snapshot
-            let locals = hook_snapshot
-                .locals
-                .iter()
-                .filter_map(|(uvid, value)| {
-                    analysis_result.uvid_to_variable.get(uvid).and_then(|v| {
-                        if !v.declaration().state_variable {
-                            Some((v.declaration().name.clone(), value.clone()))
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .collect();
+            let locals = hook_snapshot.locals.clone();
 
             // Find state variables at this snapshot
             let state_variables = hook_snapshot.state_variables.clone();

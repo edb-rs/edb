@@ -92,7 +92,7 @@ where
     /// Database state at the hook point
     pub database: Arc<CacheDB<DB>>,
     /// Value of accessible local variables
-    pub locals: HashMap<UVID, Option<Arc<EdbSolValue>>>,
+    pub locals: HashMap<String, Option<Arc<EdbSolValue>>>,
     /// Value of state variables at this point (e.g., code address)
     pub state_variables: HashMap<String, Option<Arc<EdbSolValue>>>,
     /// User-defined snapshot ID from call data
@@ -375,8 +375,12 @@ where
         // Collect values of accessible variables
         let mut locals = HashMap::new();
         for variable in &step.read().accessible_variables {
+            if variable.declaration().state_variable {
+                continue;
+            }
             let uvid = variable.id();
-            locals.insert(uvid, self.uvid_values.get(&uvid).cloned());
+            let name = variable.declaration().name.clone();
+            locals.insert(name, self.uvid_values.get(&uvid).cloned());
         }
 
         // Update the last frame with this snapshot

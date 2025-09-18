@@ -17,13 +17,13 @@
 use std::sync::Arc;
 
 use alloy_dyn_abi::DynSolValue;
-use edb_common::types::CallableAbiEntry;
+use edb_common::types::{parse_callable_abi_entries, CallableAbiEntry, SnapshotInfoDetail};
 use eyre::{bail, eyre, Result};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use tracing::debug;
 
 use super::*;
-use crate::EngineContext;
+use crate::{EngineContext, SnapshotDetail};
 
 static EDB_EVAL_PLACEHOLDER_MAGIC: &str = "edb_eval_placeholder";
 
@@ -84,6 +84,7 @@ where
             .with_msg_handler(Box::new(EdbMsgHandler(handler.clone())))
             .with_tx_handler(Box::new(EdbTxHandler(handler.clone())))
             .with_block_handler(Box::new(EdbBlockHandler(handler.clone())))
+            .with_validation_handler(Box::new(EdbValidationHandler(handler.clone())))
     }
 }
 
@@ -137,6 +138,13 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+#[derive(Clone)]
+pub struct EdbValidationHandler<DB>(Arc<EdbHandler<DB>>)
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync;
+
 // Implement handler traits for each wrapper
 impl<DB> VariableHandler for EdbVariableHandler<DB>
 where
@@ -145,12 +153,51 @@ where
     <DB as Database>::Error: Clone + Send + Sync,
 {
     fn get_variable_value(&self, name: &str, snapshot_id: usize) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to fetch variable value from snapshot
-        bail!(
-            "EdbHandler::get_variable_value not yet implemented for name='{}', snapshot_id={}",
-            name,
-            snapshot_id
-        )
+        let snapshot = &self
+            .0
+            .context
+            .snapshots
+            .get(snapshot_id)
+            .ok_or_else(|| {
+                eyre::eyre!(
+                    "Snapshot ID {} not found in EdbHandler::get_variable_value",
+                    snapshot_id
+                )
+            })?
+            .1;
+
+        let SnapshotDetail::Hook(detail) = &snapshot.detail() else {
+            bail!("Cannot get variable value from opcode snapshot");
+        };
+
+        // Let's first check whether this could be a local or state variable
+        if let Some(Some(value)) =
+            detail.locals.get(name).or_else(|| detail.state_variables.get(name))
+        {
+            return Ok((**value).clone().into());
+        }
+
+        // Next, it might be a mapping/array variable
+        let bytecode_address = snapshot.bytecode_address();
+        let Some(contract) = self
+            .0
+            .context
+            .recompiled_artifacts
+            .get(&bytecode_address)
+            .and_then(|art| art.contract())
+        else {
+            bail!("No contract found for bytecode address {:?}", bytecode_address);
+        };
+
+        for entry in parse_callable_abi_entries(contract) {
+            if entry.name == name && entry.is_state_variable() {
+                if let Some(value) = from_abi_info(&entry) {
+                    return Ok(value);
+                }
+            }
+        }
+
+        bail!("No value found for name='{}', snapshot_id={}", name, snapshot_id)
     }
 }
 
@@ -166,8 +213,97 @@ where
         indices: Vec<DynSolValue>,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to fetch mapping/array value from snapshot
-        bail!("EdbHandler::get_mapping_or_array_value not yet implemented for root={:?}, indices={:?}, snapshot_id={}", root, indices, snapshot_id)
+        if let Some(abi_info) = into_abi_info(&root) {
+            let (_, info) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
+                eyre::eyre!(
+                    "Snapshot ID {} not found in EdbHandler::get_mapping_or_array_value",
+                    snapshot_id
+                )
+            })?;
+            let to = info.target_address();
+
+            self.0.context.call_in_derived_evm(snapshot_id, to, &abi_info.abi, &indices, None)
+        } else {
+            // Handle direct DynSolValue types recursively
+            if indices.is_empty() {
+                return Ok(root);
+            }
+
+            let (first_index, remaining_indices) = indices.split_first().unwrap();
+
+            let next_value = match &root {
+                DynSolValue::Tuple(elements) => {
+                    // For tuples, index should be a uint
+                    match first_index {
+                        DynSolValue::Uint(idx, _) => {
+                            let idx = idx.to::<usize>();
+                            if idx >= elements.len() {
+                                bail!(
+                                    "Index {} out of bounds for tuple with {} elements",
+                                    idx,
+                                    elements.len()
+                                );
+                            }
+                            elements[idx].clone()
+                        }
+                        _ => bail!(
+                            "Invalid index type for tuple access: expected uint, got {:?}",
+                            first_index
+                        ),
+                    }
+                }
+                DynSolValue::Array(elements) => {
+                    // For arrays, index should be a uint
+                    match first_index {
+                        DynSolValue::Uint(idx, _) => {
+                            let idx = idx.to::<usize>();
+                            if idx >= elements.len() {
+                                bail!(
+                                    "Index {} out of bounds for array with {} elements",
+                                    idx,
+                                    elements.len()
+                                );
+                            }
+                            elements[idx].clone()
+                        }
+                        _ => bail!(
+                            "Invalid index type for array access: expected uint, got {:?}",
+                            first_index
+                        ),
+                    }
+                }
+                DynSolValue::FixedArray(elements) => {
+                    // For fixed arrays, index should be a uint
+                    match first_index {
+                        DynSolValue::Uint(idx, _) => {
+                            let idx = idx.to::<usize>();
+                            if idx >= elements.len() {
+                                bail!(
+                                    "Index {} out of bounds for fixed array with {} elements",
+                                    idx,
+                                    elements.len()
+                                );
+                            }
+                            elements[idx].clone()
+                        }
+                        _ => bail!(
+                            "Invalid index type for fixed array access: expected uint, got {:?}",
+                            first_index
+                        ),
+                    }
+                }
+                _ => {
+                    bail!(
+                        "Cannot index into value of type {:?} with index {:?}",
+                        root,
+                        first_index
+                    );
+                }
+            };
+
+            // Recursively handle remaining indices - this is key because next_value might have abi_info
+            self.get_mapping_or_array_value(next_value, remaining_indices.to_vec(), snapshot_id)
+        }
     }
 }
 
@@ -282,5 +418,20 @@ where
     fn get_block_timestamp(&self, snapshot_id: usize) -> Result<DynSolValue> {
         // TODO: Implement using self.0.context to get block.timestamp from snapshot
         bail!("EdbHandler::get_block_timestamp not yet implemented for snapshot_id={}", snapshot_id)
+    }
+}
+
+impl<DB> ValidationHandler for EdbValidationHandler<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    fn validate_value(&self, value: DynSolValue) -> Result<DynSolValue> {
+        if into_abi_info(&value).is_some() {
+            bail!("Mapping or array value cannot be directly returned; please access a member or call a function to get a concrete value");
+        } else {
+            Ok(value)
+        }
     }
 }
