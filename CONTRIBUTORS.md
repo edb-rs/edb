@@ -56,7 +56,7 @@ We recognize different types of contributions:
 ## Special Thanks
 
 - **Ethereum Foundation** - [Ecosystem Support Program (ESP)](https://esp.ethereum.foundation/) for supporting innovative tooling development
-- **Foundry Team** - For creating the essential infrastructure that makes EDB possible:
+- **Ethereum Ecosystem Developers** - For creating the essential infrastructure that makes EDB possible:
   - [REVM](https://github.com/bluealloy/revm) - Fast and accurate EVM implementation
   - [Alloy](https://github.com/alloy-rs/alloy) - Comprehensive Ethereum types and utilities
   - [Foundry](https://github.com/foundry-rs/foundry) - Revolutionary development toolkit
