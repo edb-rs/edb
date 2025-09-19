@@ -482,18 +482,50 @@ impl TerminalPanel {
             .unwrap_or(0);
     }
 
-    /// Apply horizontal offset to a string for horizontal scrolling (vim mode only)
-    fn apply_horizontal_offset(&self, text: String) -> String {
+    /// Apply horizontal offset to a styled line for horizontal scrolling (exactly like code panel)
+    fn apply_horizontal_offset_to_line<'a>(
+        &self,
+        line: ratatui::text::Line<'a>,
+    ) -> ratatui::text::Line<'a> {
+        use ratatui::text::{Line, Span};
+
         if self.mode != TerminalMode::Vim || self.horizontal_offset == 0 {
-            return text;
+            return line;
         }
 
-        let chars: Vec<char> = text.chars().collect();
-        if self.horizontal_offset >= chars.len() {
-            String::new()
-        } else {
-            chars[self.horizontal_offset..].iter().collect()
+        // Calculate the visual width of each span
+        let mut accumulated_width = 0;
+        let mut new_spans = Vec::new();
+        let mut started_content = false;
+
+        for span in line.spans {
+            let span_width = span.content.chars().count();
+
+            if accumulated_width + span_width <= self.horizontal_offset {
+                // This span is completely before the viewport
+                accumulated_width += span_width;
+            } else if accumulated_width >= self.horizontal_offset {
+                // This span is completely within the viewport
+                new_spans.push(span);
+                started_content = true;
+            } else {
+                // This span is partially visible - need to trim the beginning
+                let skip_chars = self.horizontal_offset - accumulated_width;
+                let visible_content: String = span.content.chars().skip(skip_chars).collect();
+                if !visible_content.is_empty() {
+                    new_spans.push(Span::styled(visible_content, span.style));
+                    started_content = true;
+                }
+                accumulated_width += span_width;
+            }
         }
+
+        // If we've scrolled past all content, show empty line
+        if !started_content {
+            new_spans.push(Span::raw(""));
+        }
+
+        Line::from(new_spans)
     }
 
     /// Add a line to the terminal with specified type
@@ -1051,22 +1083,33 @@ impl TerminalPanel {
                 self.vim_move_cursor_up(1);
                 Ok(EventResponse::Handled)
             }
-            // Horizontal scrolling in vim mode
+            // Horizontal scrolling in vim mode (exactly like code panel)
             KeyCode::Char('h') | KeyCode::Left => {
+                let count = if self.vim_number_prefix.is_empty() {
+                    1
+                } else {
+                    self.vim_number_prefix.parse::<usize>().unwrap_or(1)
+                };
                 if self.horizontal_offset > 0 {
-                    self.horizontal_offset = self.horizontal_offset.saturating_sub(5);
-                    debug!("VIM mode: scrolled left to offset {}", self.horizontal_offset);
+                    self.horizontal_offset = self.horizontal_offset.saturating_sub(count * 5);
                 }
+                self.vim_number_prefix.clear();
                 Ok(EventResponse::Handled)
             }
             KeyCode::Char('l') | KeyCode::Right => {
+                let count = if self.vim_number_prefix.is_empty() {
+                    1
+                } else {
+                    self.vim_number_prefix.parse::<usize>().unwrap_or(1)
+                };
                 if self.max_line_width > self.content_width {
                     let max_scroll = self.max_line_width.saturating_sub(self.content_width);
                     if self.horizontal_offset < max_scroll {
-                        self.horizontal_offset = (self.horizontal_offset + 5).min(max_scroll);
-                        debug!("VIM mode: scrolled right to offset {}", self.horizontal_offset);
+                        self.horizontal_offset =
+                            (self.horizontal_offset + count * 5).min(max_scroll);
                     }
                 }
+                self.vim_number_prefix.clear();
                 Ok(EventResponse::Handled)
             }
 
@@ -1534,14 +1577,11 @@ impl TerminalPanel {
                     )
                 };
 
-                // Apply horizontal scrolling in vim mode
+                // Apply horizontal scrolling in vim mode (properly handle styled lines)
                 let scrolled_line = if self.mode == TerminalMode::Vim && self.horizontal_offset > 0
                 {
-                    // Apply offset to the line
-                    let text =
-                        styled_line.spans.iter().map(|s| s.content.as_ref()).collect::<String>();
-                    let scrolled_text = self.apply_horizontal_offset(text);
-                    Line::from(Span::styled(scrolled_text, base_style))
+                    // Apply horizontal offset to styled line (similar to code panel)
+                    self.apply_horizontal_offset_to_line(styled_line)
                 } else {
                     styled_line
                 };

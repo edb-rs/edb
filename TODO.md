@@ -42,6 +42,11 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Visual mode selection
   - Search and replace with Vim patterns
 
+- [ ] **State Variable Update Optimization**
+  - Inject calls at each step in non-view/non-pure functions to prevent delayed updates over state variables
+  - Ensure real-time state synchronization during debugging
+  - Optimize state tracking for immediate feedback during execution
+
 ### 🤖 Milestone 2: Intelligence & Decoding
 **Goal**: Enhanced contract understanding and automatic decoding capabilities
 
