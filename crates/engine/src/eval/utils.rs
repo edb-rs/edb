@@ -141,7 +141,7 @@ mod tests {
                         }
                     }
                     _ => {
-                        panic!("Right operand is neither subtraction nor parenthesis: {:?}", right)
+                        panic!("Right operand is neither subtraction nor parenthesis: {right:?}")
                     }
                 }
             } else {

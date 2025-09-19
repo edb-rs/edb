@@ -317,8 +317,7 @@ fn extract_type_cast(s: &str) -> Result<(Option<String>, &str)> {
     ];
 
     for prefix in &type_prefixes {
-        if s.starts_with(prefix) {
-            let after_type = &s[prefix.len()..];
+        if let Some(after_type) = s.strip_prefix(prefix) {
             if after_type.starts_with('(') {
                 // Find matching closing parenthesis
                 let mut depth = 0;
@@ -383,9 +382,7 @@ fn validate_type_cast(cast_type: &str, param_type: &str) -> Result<()> {
     }
 
     Err(eyre!(
-        "Type cast '{}' is not compatible with expected parameter type '{}'",
-        cast_type,
-        param_type
+        "Type cast '{cast_type}' is not compatible with expected parameter type '{param_type}'"
     ))
 }
 
@@ -393,10 +390,10 @@ fn validate_type_cast(cast_type: &str, param_type: &str) -> Result<()> {
 fn parse_address(s: &str) -> Result<Address> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
-        s.parse().map_err(|e| eyre!("Invalid address '{}': {}", s, e))
+        s.parse().map_err(|e| eyre!("Invalid address '{s}': {e}"))
     } else {
         // Try parsing as hex without 0x prefix
-        format!("0x{}", s).parse().map_err(|e| eyre!("Invalid address '{}': {}", s, e))
+        format!("0x{s}").parse().map_err(|e| eyre!("Invalid address '{s}': {e}"))
     }
 }
 
@@ -420,8 +417,7 @@ fn parse_int(s: &str, _size: usize) -> Result<I256> {
         Ok(I256::from_raw(uint_val))
     } else {
         // For decimal, check if negative
-        if s.starts_with('-') {
-            let positive_part = &s[1..];
+        if let Some(positive_part) = s.strip_prefix('-') {
             let uint_val = U256::from_str_radix(positive_part, 10)
                 .map_err(|e| eyre!("Invalid decimal int '{}': {}", s, e))?;
             Ok(-I256::from_raw(uint_val))
@@ -656,7 +652,7 @@ mod tests {
 
         assert_eq!(
             parse_function_call_text("noArgs()").unwrap(),
-            ("noArgs".to_string(), "".to_string())
+            ("noArgs".to_string(), String::new())
         );
     }
 
