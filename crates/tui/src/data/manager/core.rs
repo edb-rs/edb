@@ -93,14 +93,14 @@ where
     }
 
     /// Check if reference has new entries that are not in cache
-    pub fn need_update(&self, reference: &FetchCache<K, V>) -> bool {
+    pub fn need_update(&self, reference: &Self) -> bool {
         reference.keys().any(|key| !self.data.contains_key(key))
     }
 
     /// Update cache based on reference map
     /// - Adds/updates entries from reference as Some(value)
     /// - Marks keys not in reference as None (fetched-invalid)
-    pub fn update(&mut self, reference: &FetchCache<K, V>) {
+    pub fn update(&mut self, reference: &Self) {
         // Add/update entries from reference
         for (key, value) in reference {
             if !self.data.contains_key(key) {

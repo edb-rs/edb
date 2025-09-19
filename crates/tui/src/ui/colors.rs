@@ -159,83 +159,83 @@ pub enum Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Theme::ModernIDE
+        Self::ModernIDE
     }
 }
 
 impl Theme {
     /// Get all available themes
-    pub fn all() -> &'static [Theme] {
+    pub fn all() -> &'static [Self] {
         &[
-            Theme::CyberpunkDark,
-            Theme::TerminalHacker,
-            Theme::ModernIDE,
-            Theme::HighContrast,
-            Theme::SolarizedDark,
-            Theme::MonokaiPro,
-            Theme::NordDark,
-            Theme::DraculaDark,
-            Theme::VSCodeLight,
+            Self::CyberpunkDark,
+            Self::TerminalHacker,
+            Self::ModernIDE,
+            Self::HighContrast,
+            Self::SolarizedDark,
+            Self::MonokaiPro,
+            Self::NordDark,
+            Self::DraculaDark,
+            Self::VSCodeLight,
         ]
     }
 
     /// Get internal name for configuration files
     pub fn name(&self) -> &'static str {
         match self {
-            Theme::CyberpunkDark => "neon_purple",
-            Theme::TerminalHacker => "matrix_green",
-            Theme::ModernIDE => "vscode_dark",
-            Theme::HighContrast => "accessibility",
-            Theme::SolarizedDark => "solarized_dark",
-            Theme::MonokaiPro => "monokai_pro",
-            Theme::NordDark => "nord_dark",
-            Theme::DraculaDark => "dracula_dark",
-            Theme::VSCodeLight => "vscode_light",
+            Self::CyberpunkDark => "neon_purple",
+            Self::TerminalHacker => "matrix_green",
+            Self::ModernIDE => "vscode_dark",
+            Self::HighContrast => "accessibility",
+            Self::SolarizedDark => "solarized_dark",
+            Self::MonokaiPro => "monokai_pro",
+            Self::NordDark => "nord_dark",
+            Self::DraculaDark => "dracula_dark",
+            Self::VSCodeLight => "vscode_light",
         }
     }
 
     /// Get display name for UI
     pub fn display_name(&self) -> &'static str {
         match self {
-            Theme::CyberpunkDark => "Neon Purple",
-            Theme::TerminalHacker => "Matrix Green",
-            Theme::ModernIDE => "VS Code Dark",
-            Theme::HighContrast => "High Contrast",
-            Theme::SolarizedDark => "Solarized Dark",
-            Theme::MonokaiPro => "Monokai Pro",
-            Theme::NordDark => "Nord Dark",
-            Theme::DraculaDark => "Dracula",
-            Theme::VSCodeLight => "VS Code Light",
+            Self::CyberpunkDark => "Neon Purple",
+            Self::TerminalHacker => "Matrix Green",
+            Self::ModernIDE => "VS Code Dark",
+            Self::HighContrast => "High Contrast",
+            Self::SolarizedDark => "Solarized Dark",
+            Self::MonokaiPro => "Monokai Pro",
+            Self::NordDark => "Nord Dark",
+            Self::DraculaDark => "Dracula",
+            Self::VSCodeLight => "VS Code Light",
         }
     }
 
     /// Get detailed theme description
     pub fn description(&self) -> &'static str {
         match self {
-            Theme::CyberpunkDark => "Neon purple cyberpunk theme",
-            Theme::TerminalHacker => "Classic green terminal theme",
-            Theme::ModernIDE => "Professional VS Code dark theme",
-            Theme::HighContrast => "High contrast accessibility theme",
-            Theme::SolarizedDark => "Warm Solarized dark theme",
-            Theme::MonokaiPro => "Vibrant Monokai theme",
-            Theme::NordDark => "Cool Arctic-inspired theme",
-            Theme::DraculaDark => "Purple Dracula theme",
-            Theme::VSCodeLight => "Clean VS Code light theme",
+            Self::CyberpunkDark => "Neon purple cyberpunk theme",
+            Self::TerminalHacker => "Classic green terminal theme",
+            Self::ModernIDE => "Professional VS Code dark theme",
+            Self::HighContrast => "High contrast accessibility theme",
+            Self::SolarizedDark => "Warm Solarized dark theme",
+            Self::MonokaiPro => "Vibrant Monokai theme",
+            Self::NordDark => "Cool Arctic-inspired theme",
+            Self::DraculaDark => "Purple Dracula theme",
+            Self::VSCodeLight => "Clean VS Code light theme",
         }
     }
 
     /// Get the next theme in the cycle
-    pub fn next(&self) -> Theme {
+    pub fn next(&self) -> Self {
         match self {
-            Theme::CyberpunkDark => Theme::TerminalHacker,
-            Theme::TerminalHacker => Theme::ModernIDE,
-            Theme::ModernIDE => Theme::HighContrast,
-            Theme::HighContrast => Theme::SolarizedDark,
-            Theme::SolarizedDark => Theme::MonokaiPro,
-            Theme::MonokaiPro => Theme::NordDark,
-            Theme::NordDark => Theme::DraculaDark,
-            Theme::DraculaDark => Theme::VSCodeLight,
-            Theme::VSCodeLight => Theme::CyberpunkDark,
+            Self::CyberpunkDark => Self::TerminalHacker,
+            Self::TerminalHacker => Self::ModernIDE,
+            Self::ModernIDE => Self::HighContrast,
+            Self::HighContrast => Self::SolarizedDark,
+            Self::SolarizedDark => Self::MonokaiPro,
+            Self::MonokaiPro => Self::NordDark,
+            Self::NordDark => Self::DraculaDark,
+            Self::DraculaDark => Self::VSCodeLight,
+            Self::VSCodeLight => Self::CyberpunkDark,
         }
     }
 }

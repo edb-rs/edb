@@ -269,7 +269,7 @@ pub mod api {
 
         // Try common ports
         for port in [3030, 8545, 8546, 9944] {
-            let url = format!("http://localhost:{}", port);
+            let url = format!("http://localhost:{port}");
             if RpcClient::test_connection(&url).await.is_ok() {
                 config.rpc_url = url;
                 break;

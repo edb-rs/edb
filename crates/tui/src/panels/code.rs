@@ -225,7 +225,7 @@ impl CodePanel {
         let line_num_width = max_line_num.to_string().len().max(3);
 
         // Create line number with background
-        let line_num_text = format!("{:>width$} ", line_num, width = line_num_width);
+        let line_num_text = format!("{line_num:>line_num_width$} ");
         let line_num_span = Span::styled(
             line_num_text,
             Style::default().fg(dm.theme.line_number).bg(dm.theme.line_number_bg),
@@ -450,9 +450,8 @@ impl CodePanel {
             .iter()
             .map(|(line_idx, line)| {
                 let line_num = line_idx + 1;
-                let is_execution =
-                    self.current_execution_line.map_or(false, |exec| exec == line_num);
-                let is_user_cursor = self.user_cursor_line.map_or(false, |user| user == line_num);
+                let is_execution = self.current_execution_line == Some(line_num);
+                let is_user_cursor = self.user_cursor_line == Some(line_num);
                 let has_breakpoint = false; // TODO
 
                 // Start with syntax-highlighted line
@@ -478,7 +477,7 @@ impl CodePanel {
                 // Insert breakpoint and cursor indicators after line number
                 let mut new_spans = vec![highlighted_line.spans[0].clone()]; // Line number
                 new_spans.push(breakpoint_indicator);
-                new_spans.push(Span::raw(format!("{} │ ", cursor_indicator)));
+                new_spans.push(Span::raw(format!("{cursor_indicator} │ ")));
 
                 // Add the syntax highlighted content (skip the line number span)
                 if highlighted_line.spans.len() > 1 {
@@ -531,12 +530,12 @@ impl CodePanel {
             let mut status_bar = if target_address == bytecode_address {
                 StatusBar::new()
                     .current_panel("Code".to_string())
-                    .message(format!("◉ Address: {}", t_addr_str))
+                    .message(format!("◉ Address: {t_addr_str}"))
             } else {
                 StatusBar::new()
                     .current_panel("Code".to_string())
-                    .message(format!("► Proxy: {}", t_addr_str))
-                    .message(format!("◯ Impl: {}", b_addr_str))
+                    .message(format!("► Proxy: {t_addr_str}"))
+                    .message(format!("◯ Impl: {b_addr_str}"))
             };
 
             if self.display_info.has_source_code {
@@ -573,7 +572,7 @@ impl CodePanel {
                 }
                 indicator.push(']');
 
-                format!("{}{}", status_text, indicator)
+                format!("{status_text}{indicator}")
             } else {
                 status_text
             };
@@ -824,7 +823,7 @@ impl CodePanel {
                     .sources
                     .get(execution_path)
                     .zip(exec_source_offset)
-                    .and_then(|(s, offset)| Some(s[..offset + 1].lines().count()))
+                    .map(|(s, offset)| s[..offset + 1].lines().count())
                     .unwrap_or_default(); // 1-based
                 self.move_to(execution_line);
             }
@@ -846,11 +845,8 @@ impl CodePanel {
                     self.opcodes.sort_by_key(|(pc, _)| *pc);
                     self.sources.clear();
 
-                    self.opcode_lines = self
-                        .opcodes
-                        .iter()
-                        .map(|(pc, insn)| format!("{:05}: {}", pc, insn))
-                        .collect();
+                    self.opcode_lines =
+                        self.opcodes.iter().map(|(pc, insn)| format!("{pc:05}: {insn}")).collect();
                     self.source_lines.clear();
 
                     // Calculate max line width for horizontal scrolling
@@ -937,7 +933,7 @@ impl CodePanel {
                     let execution_line = self
                         .sources
                         .get(display_path)
-                        .and_then(|s| Some(s[..offset + 1].lines().count()))
+                        .map(|s| s[..offset + 1].lines().count())
                         .unwrap_or_default(); // 1-based
                     self.current_execution_line = Some(execution_line);
                 }
@@ -989,7 +985,7 @@ impl PanelTr for CodePanel {
             String::new()
         };
 
-        format!("{} {} - {}{}", mode_str, availability, path_str, file_count)
+        format!("{mode_str} {availability} - {path_str}{file_count}")
     }
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {

@@ -120,10 +120,10 @@ pub enum Panel {
 impl PanelTr for Panel {
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, data_manager: &mut DataManager) {
         match self {
-            Panel::Code(panel) => panel.render(frame, area, data_manager),
-            Panel::Display(panel) => panel.render(frame, area, data_manager),
-            Panel::Terminal(panel) => panel.render(frame, area, data_manager),
-            Panel::Trace(panel) => panel.render(frame, area, data_manager),
+            Self::Code(panel) => panel.render(frame, area, data_manager),
+            Self::Display(panel) => panel.render(frame, area, data_manager),
+            Self::Terminal(panel) => panel.render(frame, area, data_manager),
+            Self::Trace(panel) => panel.render(frame, area, data_manager),
         }
     }
 
@@ -133,10 +133,10 @@ impl PanelTr for Panel {
         data_manager: &mut DataManager,
     ) -> Result<EventResponse> {
         match self {
-            Panel::Code(panel) => panel.handle_key_event(event, data_manager),
-            Panel::Display(panel) => panel.handle_key_event(event, data_manager),
-            Panel::Terminal(panel) => panel.handle_key_event(event, data_manager),
-            Panel::Trace(panel) => panel.handle_key_event(event, data_manager),
+            Self::Code(panel) => panel.handle_key_event(event, data_manager),
+            Self::Display(panel) => panel.handle_key_event(event, data_manager),
+            Self::Terminal(panel) => panel.handle_key_event(event, data_manager),
+            Self::Trace(panel) => panel.handle_key_event(event, data_manager),
         }
     }
 
@@ -146,55 +146,55 @@ impl PanelTr for Panel {
         data_manager: &mut DataManager,
     ) -> Result<EventResponse> {
         match self {
-            Panel::Code(panel) => panel._handle_mouse_event(event, data_manager),
-            Panel::Display(panel) => panel._handle_mouse_event(event, data_manager),
-            Panel::Terminal(panel) => panel._handle_mouse_event(event, data_manager),
-            Panel::Trace(panel) => panel._handle_mouse_event(event, data_manager),
+            Self::Code(panel) => panel._handle_mouse_event(event, data_manager),
+            Self::Display(panel) => panel._handle_mouse_event(event, data_manager),
+            Self::Terminal(panel) => panel._handle_mouse_event(event, data_manager),
+            Self::Trace(panel) => panel._handle_mouse_event(event, data_manager),
         }
     }
 
     fn on_focus(&mut self) {
         match self {
-            Panel::Code(panel) => panel.on_focus(),
-            Panel::Display(panel) => panel.on_focus(),
-            Panel::Terminal(panel) => panel.on_focus(),
-            Panel::Trace(panel) => panel.on_focus(),
+            Self::Code(panel) => panel.on_focus(),
+            Self::Display(panel) => panel.on_focus(),
+            Self::Terminal(panel) => panel.on_focus(),
+            Self::Trace(panel) => panel.on_focus(),
         }
     }
 
     fn on_blur(&mut self) {
         match self {
-            Panel::Code(panel) => panel.on_blur(),
-            Panel::Display(panel) => panel.on_blur(),
-            Panel::Terminal(panel) => panel.on_blur(),
-            Panel::Trace(panel) => panel.on_blur(),
+            Self::Code(panel) => panel.on_blur(),
+            Self::Display(panel) => panel.on_blur(),
+            Self::Terminal(panel) => panel.on_blur(),
+            Self::Trace(panel) => panel.on_blur(),
         }
     }
 
     fn panel_type(&self) -> PanelType {
         match self {
-            Panel::Code(_) => PanelType::Code,
-            Panel::Display(_) => PanelType::Display,
-            Panel::Terminal(_) => PanelType::Terminal,
-            Panel::Trace(_) => PanelType::Trace,
+            Self::Code(_) => PanelType::Code,
+            Self::Display(_) => PanelType::Display,
+            Self::Terminal(_) => PanelType::Terminal,
+            Self::Trace(_) => PanelType::Trace,
         }
     }
 
     fn title(&self, _dm: &mut DataManager) -> String {
         match self {
-            Panel::Code(_) => "Code".to_string(),
-            Panel::Display(_) => "Display".to_string(),
-            Panel::Terminal(_) => "Terminal".to_string(),
-            Panel::Trace(_) => "Trace".to_string(),
+            Self::Code(_) => "Code".to_string(),
+            Self::Display(_) => "Display".to_string(),
+            Self::Terminal(_) => "Terminal".to_string(),
+            Self::Trace(_) => "Trace".to_string(),
         }
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         match self {
-            Panel::Code(panel) => panel.as_any_mut(),
-            Panel::Display(panel) => panel.as_any_mut(),
-            Panel::Terminal(panel) => panel.as_any_mut(),
-            Panel::Trace(panel) => panel.as_any_mut(),
+            Self::Code(panel) => panel.as_any_mut(),
+            Self::Display(panel) => panel.as_any_mut(),
+            Self::Terminal(panel) => panel.as_any_mut(),
+            Self::Trace(panel) => panel.as_any_mut(),
         }
     }
 }

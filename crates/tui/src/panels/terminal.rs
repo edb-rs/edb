@@ -186,40 +186,36 @@ impl PendingCommand {
     fn output_finished(&self, dm: &mut DataManager) -> Result<String> {
         let id = dm.execution.get_current_snapshot();
         match self {
-            PendingCommand::StepForward(count) => {
-                Ok(format!("Stepped forward {} times to Step {}", count, id))
-            }
-            PendingCommand::StepBackward(count) => {
-                Ok(format!("Stepped backward {} times to Step {}", count, id))
-            }
-            PendingCommand::NextCall(src_id) => {
+            Self::StepForward(count) => Ok(format!("Stepped forward {count} times to Step {id}")),
+            Self::StepBackward(count) => Ok(format!("Stepped backward {count} times to Step {id}")),
+            Self::NextCall(src_id) => {
                 let next_id =
                     dm.execution.get_next_call(*src_id).ok_or(eyre!("No next call found"))?;
-                Ok(format!("Goto Next Call at Step {}", next_id))
+                Ok(format!("Goto Next Call at Step {next_id}"))
             }
-            PendingCommand::PrevCall(src_id) => {
+            Self::PrevCall(src_id) => {
                 let prev_id =
                     dm.execution.get_prev_call(*src_id).ok_or(eyre!("No previous call found"))?;
-                Ok(format!("Goto Previous Call at Step {}", prev_id))
+                Ok(format!("Goto Previous Call at Step {prev_id}"))
             }
-            PendingCommand::StepForwardNoCallees(src_id) => {
+            Self::StepForwardNoCallees(src_id) => {
                 let next_id = dm
                     .execution
                     .get_snapshot_info(*src_id)
                     .ok_or(eyre!("No next step found"))?
                     .next_id;
-                Ok(format!("Stepped to Step {} without going into callees", next_id))
+                Ok(format!("Stepped to Step {next_id} without going into callees"))
             }
-            PendingCommand::StepBackwardNoCallees(src_id) => {
+            Self::StepBackwardNoCallees(src_id) => {
                 let prev_id = dm
                     .execution
                     .get_snapshot_info(*src_id)
                     .ok_or(eyre!("No previous step found"))?
                     .prev_id;
-                Ok(format!("Stepped to Step {} without going into callees", prev_id))
+                Ok(format!("Stepped to Step {prev_id} without going into callees"))
             }
-            PendingCommand::Goto(id) => Ok(format!("Goto Step {}", id)),
-            PendingCommand::CallableAbi(id, address) => {
+            Self::Goto(id) => Ok(format!("Goto Step {id}")),
+            Self::CallableAbi(id, address) => {
                 let address = if let Some(addr) = address {
                     *addr
                 } else {
@@ -236,16 +232,12 @@ impl PendingCommand {
                     .ok_or(eyre!("No callable ABI found"))?;
 
                 if abi_list.is_empty() {
-                    Ok(format!("No callable ABI found for address {}", address))
+                    Ok(format!("No callable ABI found for address {address}"))
                 } else {
-                    Ok(abi_list
-                        .iter()
-                        .map(|info| format!("{}", info))
-                        .collect::<Vec<_>>()
-                        .join("\n"))
+                    Ok(abi_list.iter().map(|info| format!("{info}")).collect::<Vec<_>>().join("\n"))
                 }
             }
-            PendingCommand::ShowStack(id, count) => {
+            Self::ShowStack(id, count) => {
                 let info =
                     dm.execution.get_snapshot_info(*id).ok_or(eyre!("No stack info found"))?;
                 match info.detail() {
@@ -275,7 +267,7 @@ impl PendingCommand {
                     SnapshotInfoDetail::Hook(_) => bail!("No stack info available in source mode."),
                 }
             }
-            PendingCommand::ShowMemory(id, offset, count) => {
+            Self::ShowMemory(id, offset, count) => {
                 let info =
                     dm.execution.get_snapshot_info(*id).ok_or(eyre!("No memory info found"))?;
                 match info.detail() {
@@ -305,7 +297,7 @@ impl PendingCommand {
                     }
                 }
             }
-            PendingCommand::ShowCalldata(id) => {
+            Self::ShowCalldata(id) => {
                 let info =
                     dm.execution.get_snapshot_info(*id).ok_or(eyre!("No calldata info found"))?;
                 match info.detail() {
@@ -331,7 +323,7 @@ impl PendingCommand {
                     }
                 }
             }
-            PendingCommand::ShowStorage(id, slot) => {
+            Self::ShowStorage(id, slot) => {
                 let info =
                     dm.execution.get_snapshot_info(*id).ok_or(eyre!("No storage info found"))?;
                 let target_address = info.target_address;
@@ -352,7 +344,7 @@ impl PendingCommand {
                     bail!("Expression evaluation did not return a uint value")
                 }
             }
-            PendingCommand::ShowTransientStorage(id, slot) => {
+            Self::ShowTransientStorage(id, slot) => {
                 let info =
                     dm.execution.get_snapshot_info(*id).ok_or(eyre!("No storage info found"))?;
                 match info.detail() {
@@ -369,7 +361,7 @@ impl PendingCommand {
                     }
                 }
             }
-            PendingCommand::ShowAddress(id) => {
+            Self::ShowAddress(id) => {
                 let info =
                     dm.execution.get_snapshot_info(*id).ok_or(eyre!("No snapshot info found"))?;
                 Ok(format!(
@@ -377,7 +369,7 @@ impl PendingCommand {
                     info.target_address, info.bytecode_address
                 ))
             }
-            PendingCommand::EvalExpr(_, expr) => {
+            Self::EvalExpr(_, expr) => {
                 let value =
                     dm.resolver.eval_on_snapshot(id, expr).ok_or(eyre!("No value found"))?.clone();
 
@@ -524,12 +516,12 @@ impl TerminalPanel {
 
     /// Add system message (convenience method)
     pub fn add_system(&mut self, line: &str) {
-        self.add_line(&format!("⚡ {}", line), LineType::System);
+        self.add_line(&format!("⚡ {line}"), LineType::System);
     }
 
     /// Add command line (convenience method)
     pub fn add_command(&mut self, command: &str) {
-        self.add_line(&format!("> {}", command), LineType::Command);
+        self.add_line(&format!("> {command}"), LineType::Command);
     }
 
     /// Execute a command
@@ -538,7 +530,7 @@ impl TerminalPanel {
 
         // Add command to history
         if !command.trim().is_empty()
-            && !self.command_history.back().map_or(false, |last| last == command)
+            && self.command_history.back().is_none_or(|last| last != command)
         {
             if self.command_history.len() >= MAX_COMMAND_HISTORY {
                 self.command_history.pop_front();
@@ -594,7 +586,7 @@ impl TerminalPanel {
             cmd => {
                 // Debug commands
                 if let Err(e) = self.handle_debug_command(cmd, dm) {
-                    let error_msg = format!("Error: {}", e);
+                    let error_msg = format!("Error: {e}");
                     self.add_output(&error_msg);
                 }
             }
@@ -633,14 +625,14 @@ impl TerminalPanel {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.pending_command = Some(PendingCommand::StepForward(count));
-                self.spinner.start_loading(&format!("Stepping {} times...", count));
+                self.spinner.start_loading(&format!("Stepping {count} times..."));
                 dm.execution.step(count)?;
             }
             "reverse" | "rs" => {
                 let count =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 1 };
                 self.pending_command = Some(PendingCommand::StepBackward(count));
-                self.spinner.start_loading(&format!("Reverse stepping {} times...", count));
+                self.spinner.start_loading(&format!("Reverse stepping {count} times..."));
                 dm.execution.reverse_step(count)?;
             }
             "call" | "c" => {
@@ -664,7 +656,7 @@ impl TerminalPanel {
                 };
 
                 if let Some(addr) = address {
-                    self.spinner.start_loading(&format!("Fetching callable ABI for {}...", addr));
+                    self.spinner.start_loading(&format!("Fetching callable ABI for {addr}..."));
                 } else {
                     self.spinner.start_loading("Fetching callable ABI for current address...");
                 }
@@ -676,19 +668,19 @@ impl TerminalPanel {
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 0 };
                 id = dm.execution.get_sanitized_id(id);
                 self.pending_command = Some(PendingCommand::Goto(id));
-                self.spinner.start_loading(&format!("Going to snapshot {}...", id));
+                self.spinner.start_loading(&format!("Going to snapshot {id}..."));
                 dm.execution.goto(id)?;
             }
             "info" => {
                 // A secret debugging cmd
                 let id = dm.execution.get_current_snapshot();
                 if let Some(info) = dm.execution.get_snapshot_info(id) {
-                    let info_str = format!("{:#?}", info);
+                    let info_str = format!("{info:#?}");
                     for line in info_str.lines() {
-                        self.add_output(&format!("{}", line));
+                        self.add_output(&line.to_string());
                     }
                 } else {
-                    self.add_error(&format!("No snapshot info found for id {}", id));
+                    self.add_error(&format!("No snapshot info found for id {id}"));
                 }
             }
             "break" => {
@@ -704,7 +696,7 @@ impl TerminalPanel {
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 5 };
                 let id = dm.execution.get_current_snapshot();
                 self.pending_command = Some(PendingCommand::ShowStack(id, count));
-                self.spinner.start_loading(&format!("Fetching stack (top {} items)...", count));
+                self.spinner.start_loading(&format!("Fetching stack (top {count} items)..."));
             }
             "memory" => {
                 let offset =
@@ -714,8 +706,7 @@ impl TerminalPanel {
                 let id = dm.execution.get_current_snapshot();
                 self.pending_command = Some(PendingCommand::ShowMemory(id, offset, count));
                 self.spinner.start_loading(&format!(
-                    "Fetching memory at offset {} ({} bytes)...",
-                    offset, count
+                    "Fetching memory at offset {offset} ({count} bytes)..."
                 ));
             }
             "calldata" => {
@@ -731,7 +722,7 @@ impl TerminalPanel {
                     bail!("Usage: sload <slot>");
                 };
                 self.pending_command = Some(PendingCommand::ShowStorage(id, slot));
-                self.spinner.start_loading(&format!("Fetching storage at slot {}...", slot));
+                self.spinner.start_loading(&format!("Fetching storage at slot {slot}..."));
             }
             "tsload" => {
                 let id = dm.execution.get_current_snapshot();
@@ -742,7 +733,7 @@ impl TerminalPanel {
                 };
                 self.pending_command = Some(PendingCommand::ShowTransientStorage(id, slot));
                 self.spinner
-                    .start_loading(&format!("Fetching transient storage at slot {}...", slot));
+                    .start_loading(&format!("Fetching transient storage at slot {slot}..."));
             }
             _ => {
                 self.add_output(&format!("Unknown command: {}", parts[0]));
@@ -825,7 +816,7 @@ impl TerminalPanel {
         self.add_output("Available themes:");
         for (name, _display_name, description) in themes {
             let marker = if name == active_theme { "→" } else { " " };
-            self.add_output(&format!("{} {} | {}", marker, name, description));
+            self.add_output(&format!("{marker} {name} | {description}"));
         }
         self.add_output("");
         self.add_output("Usage:");
@@ -847,17 +838,16 @@ impl TerminalPanel {
         match theme {
             Ok(_) => {
                 self.add_system(&format!(
-                    "Switched to '{}' theme - changes will apply immediately",
-                    theme_name
+                    "Switched to '{theme_name}' theme - changes will apply immediately"
                 ));
                 // Theme changes take effect immediately via the shared ThemeManager
             }
             Err(e) => {
-                self.add_error(&format!("Failed to switch theme: {}", e));
+                self.add_error(&format!("Failed to switch theme: {e}"));
                 self.add_output("Available themes:");
                 let themes = dm.theme.list_themes();
                 for (_name, display_name, description) in themes {
-                    self.add_output(&format!("  {} - {}", display_name, description));
+                    self.add_output(&format!("  {display_name} - {description}"));
                 }
             }
         }
@@ -1407,7 +1397,7 @@ impl TerminalPanel {
     /// Render the unified bash-like terminal view
     fn render_unified_terminal(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         // Update pending command
-        if self.pending_command.as_ref().map_or(false, |cmd| !cmd.is_pending(dm)) {
+        if self.pending_command.as_ref().is_some_and(|cmd| !cmd.is_pending(dm)) {
             self.spinner.finish_loading();
             let pending_command = self.pending_command.take().unwrap();
             match pending_command.output_finished(dm) {
@@ -1659,7 +1649,7 @@ impl TerminalPanel {
                 }
                 indicator.push(']');
 
-                format!("{}{}", status_text, indicator)
+                format!("{status_text}{indicator}")
             } else {
                 status_text
             };
@@ -1704,7 +1694,7 @@ impl PanelTr for TerminalPanel {
 
     fn title(&self, _dm: &mut DataManager) -> String {
         let status = if let Some((current, total)) = self.snapshot_info {
-            format!(" [{}/{}]", current, total)
+            format!(" [{current}/{total}]")
         } else {
             String::new()
         };

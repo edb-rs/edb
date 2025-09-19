@@ -28,7 +28,7 @@ use tracing::{debug, info, warn};
 use crate::Theme;
 
 /// Main configuration structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// Current theme configuration
     pub theme: ThemeConfig,
@@ -94,16 +94,9 @@ pub struct DisplayPanelConfig {
     pub show_types: bool,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self { theme: ThemeConfig::default(), panels: PanelConfig::default() }
-    }
-}
-
 impl Default for ThemeConfig {
     fn default() -> Self {
-        let themes =
-            Theme::all().iter().map(|theme| (theme.name().to_string(), theme.clone())).collect();
+        let themes = Theme::all().iter().map(|theme| (theme.name().to_string(), *theme)).collect();
 
         Self { active: Theme::default().name().to_string(), themes }
     }
@@ -140,9 +133,9 @@ impl Config {
         }
 
         let content = fs::read_to_string(&config_path)
-            .with_context(|| format!("Failed to read config file: {:?}", config_path))?;
+            .with_context(|| format!("Failed to read config file: {config_path:?}"))?;
 
-        let config: Config =
+        let config: Self =
             toml::from_str(&content).with_context(|| "Failed to parse config file as TOML")?;
 
         debug!("Loaded configuration from {:?}", config_path);
@@ -156,9 +149,9 @@ impl Config {
         }
 
         let content = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read config file: {:?}", path))?;
+            .with_context(|| format!("Failed to read config file: {path:?}"))?;
 
-        let config: Config =
+        let config: Self =
             toml::from_str(&content).with_context(|| "Failed to parse config file as TOML")?;
 
         debug!("Loaded configuration from {:?}", path);
@@ -173,7 +166,7 @@ impl Config {
             toml::to_string_pretty(self).with_context(|| "Failed to serialize config to TOML")?;
 
         fs::write(&config_path, content)
-            .with_context(|| format!("Failed to write config file: {:?}", config_path))?;
+            .with_context(|| format!("Failed to write config file: {config_path:?}"))?;
 
         debug!("Saved configuration to {:?}", config_path);
         Ok(())

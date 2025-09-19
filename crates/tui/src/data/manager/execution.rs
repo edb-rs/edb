@@ -71,7 +71,7 @@ impl ManagerStateTr for ExecutionState {
         })
     }
 
-    fn update(&mut self, other: &ExecutionState) {
+    fn update(&mut self, other: &Self) {
         if self.snapshot_info.need_update(&other.snapshot_info) {
             self.snapshot_info.update(&other.snapshot_info);
         }
@@ -117,7 +117,7 @@ pub enum ExecutionStatus {
 
 impl ExecutionStatus {
     pub fn is_waiting(&self) -> bool {
-        !matches!(self, ExecutionStatus::Normal)
+        !matches!(self, Self::Normal)
     }
 }
 
@@ -128,7 +128,7 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
         state: &mut ExecutionState,
     ) -> Result<()> {
         match self {
-            ExecutionRequest::SnapshotInfo(id) => {
+            Self::SnapshotInfo(id) => {
                 if state.snapshot_info.contains_key(&id) {
                     return Ok(());
                 }
@@ -136,7 +136,7 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                 let info = rpc_client.get_snapshot_info(id).await?;
                 state.snapshot_info.insert(id, Some(info));
             }
-            ExecutionRequest::Code(id) => {
+            Self::Code(id) => {
                 if state.snapshot_info.get(&id).is_none() {
                     let info = rpc_client.get_snapshot_info(id).await?;
                     state.snapshot_info.insert(id, Some(info));
@@ -161,7 +161,7 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                 let code = rpc_client.get_code(id).await?;
                 state.code.insert(bytecode_address, Some(code));
             }
-            ExecutionRequest::NextCall(id) => {
+            Self::NextCall(id) => {
                 if state.next_call.contains_key(&id) {
                     return Ok(());
                 }
@@ -176,7 +176,7 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                     state.next_call.insert(i, Some(next_call));
                 }
             }
-            ExecutionRequest::PrevCall(id) => {
+            Self::PrevCall(id) => {
                 if state.prev_call.contains_key(&id) {
                     return Ok(());
                 }
@@ -191,7 +191,7 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                     state.prev_call.insert(i, Some(prev_call));
                 }
             }
-            ExecutionRequest::Storage(id, slot) => {
+            Self::Storage(id, slot) => {
                 if state.storage.contains_key(&(id, slot)) {
                     return Ok(());
                 }
@@ -199,7 +199,7 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                 let value = rpc_client.get_storage(id, slot).await?;
                 state.storage.insert((id, slot), Some(value));
             }
-            ExecutionRequest::StorageDiff(id) => {
+            Self::StorageDiff(id) => {
                 if state.storage_diff.contains_key(&id) {
                     return Ok(());
                 }

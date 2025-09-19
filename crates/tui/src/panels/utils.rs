@@ -18,11 +18,11 @@ use alloy_primitives::U256;
 
 /// Format a U256 value with hex, optional decimal, and ASCII decode
 pub fn format_value_with_decode(value: &U256) -> String {
-    let hex_str = format!("{:#066x}", value);
+    let hex_str = format!("{value:#066x}");
 
     // Small number decode (with consistent padding)
     let num_part = if *value < U256::from(1_000_000u64) {
-        format!("({:>7})", value) // Right-align in 7 chars for consistency
+        format!("({value:>7})") // Right-align in 7 chars for consistency
     } else {
         "         ".to_string() // 9 spaces to match "(1000000)" width
     };
@@ -49,8 +49,8 @@ pub fn format_value_with_decode(value: &U256) -> String {
 pub fn format_bytes_with_decode(bytes: &[u8]) -> String {
     let mut lines = Vec::new();
     for chunk in bytes.chunks(32) {
-        let hex_str = chunk.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join("");
-        let hex_str = format!("0x{:64}", hex_str);
+        let hex_str = chunk.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join("");
+        let hex_str = format!("0x{hex_str:64}");
 
         let mut num = U256::ZERO;
         for &b in chunk {
@@ -59,7 +59,7 @@ pub fn format_bytes_with_decode(bytes: &[u8]) -> String {
 
         // Small number decode (with consistent padding)
         let num_part = if num < U256::from(1_000_000u64) {
-            format!("({:>7})", num) // Right-align in 7 chars for consistency
+            format!("({num:>7})") // Right-align in 7 chars for consistency
         } else {
             "         ".to_string() // 9 spaces to match "(1000000)" width
         };
@@ -68,7 +68,7 @@ pub fn format_bytes_with_decode(bytes: &[u8]) -> String {
             .iter()
             .map(|b| if b.is_ascii_graphic() { *b as char } else { '.' })
             .collect::<String>();
-        lines.push(format!("{} {} {}", hex_str, num_part, ascii_part));
+        lines.push(format!("{hex_str} {num_part} {ascii_part}"));
     }
     lines.join("\n")
 }

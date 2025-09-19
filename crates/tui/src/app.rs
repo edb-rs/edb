@@ -64,6 +64,12 @@ pub struct ConnectionStatus {
     pub failure_count: u32,
 }
 
+impl Default for ConnectionStatus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionStatus {
     /// Create new connection status in disconnected state
     pub fn new() -> Self {
@@ -99,7 +105,7 @@ impl ConnectionStatus {
     pub fn status_display(&self) -> String {
         if self.connected {
             if let Some(response_time) = self.response_time_ms {
-                format!("🟢 Connected ({}ms)", response_time)
+                format!("🟢 Connected ({response_time}ms)")
             } else {
                 "🟢 Connected".to_string()
             }
@@ -116,7 +122,7 @@ impl ConnectionStatus {
     pub fn detailed_status(&self) -> String {
         let base = self.status_display();
         if let Some(error) = &self.error_message {
-            format!("{} - {}", base, error)
+            format!("{base} - {error}")
         } else {
             base
         }
@@ -233,7 +239,7 @@ impl App {
                 debug!("Health check successful: {}ms", response_time);
             }
             Err(e) => {
-                let error_msg = format!("{}", e);
+                let error_msg = format!("{e}");
                 self.connection_status.mark_failure(error_msg.clone());
                 warn!("Health check failed: {}", error_msg);
             }
@@ -408,11 +414,11 @@ impl App {
 
         status_spans.extend_from_slice(&[
             Span::raw(" | "),
-            Span::styled(format!("Server: {}", server_url), Style::default().fg(Color::Cyan)),
+            Span::styled(format!("Server: {server_url}"), Style::default().fg(Color::Cyan)),
             Span::raw(" | "),
-            Span::styled(format!("Panel: {}", panel_name), Style::default().fg(Color::White)),
+            Span::styled(format!("Panel: {panel_name}"), Style::default().fg(Color::White)),
             Span::raw(" | "),
-            Span::styled(format!("Layout: {}", layout_type), Style::default().fg(Color::Gray)),
+            Span::styled(format!("Layout: {layout_type}"), Style::default().fg(Color::Gray)),
             Span::raw(" | "),
             Span::styled("Press ? for help", Style::default().fg(Color::Gray)),
         ]);
@@ -483,13 +489,13 @@ impl App {
                 if key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 self.should_exit = true;
-                return Ok(EventResponse::Exit);
+                Ok(EventResponse::Exit)
             }
             KeyCode::Char('?') => {
                 // Open help overlay with '?'
                 self.show_help = true;
                 self.help_overlay.reset_scroll();
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::Esc => {
                 // ESC: Context-aware navigation
@@ -503,7 +509,7 @@ impl App {
                     self.current_panel = PanelType::Terminal;
                     return Ok(EventResponse::Handled);
                 }
-                return Ok(EventResponse::NotHandled);
+                Ok(EventResponse::NotHandled)
             }
             KeyCode::Char(' ') => {
                 match self.layout_manager.layout_type() {
@@ -518,13 +524,13 @@ impl App {
                                 _ => PanelType::Code, // Fallback (shouldn't happen)
                             };
                             self.current_panel = self.full_left_panel;
-                            return Ok(EventResponse::Handled);
+                            Ok(EventResponse::Handled)
                         } else {
                             // Forward to current panel if not on Code/Trace
                             if let Some(panel) = self.panels.get_mut(&self.current_panel) {
                                 return panel.handle_key_event(key, data_manager);
                             }
-                            return Ok(EventResponse::NotHandled);
+                            Ok(EventResponse::NotHandled)
                         }
                     }
                     LayoutType::Compact => {
@@ -537,13 +543,13 @@ impl App {
                                 _ => PanelType::Code, // Fallback
                             };
                             self.current_panel = self.compact_main_panel;
-                            return Ok(EventResponse::Handled);
+                            Ok(EventResponse::Handled)
                         } else {
                             // Forward to terminal if focused on terminal
                             if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
                                 return panel.handle_key_event(key, data_manager);
                             }
-                            return Ok(EventResponse::NotHandled);
+                            Ok(EventResponse::NotHandled)
                         }
                     }
                     _ => {
@@ -551,17 +557,17 @@ impl App {
                         if let Some(panel) = self.panels.get_mut(&self.current_panel) {
                             return panel.handle_key_event(key, data_manager);
                         }
-                        return Ok(EventResponse::NotHandled);
+                        Ok(EventResponse::NotHandled)
                     }
                 }
             }
             KeyCode::Tab => {
                 self.cycle_panels(false);
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::BackTab => {
                 self.cycle_panels(true);
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
 
             // Function keys for mobile layout
@@ -570,25 +576,25 @@ impl App {
                     self.compact_main_panel = PanelType::Trace;
                 }
                 self.current_panel = PanelType::Trace;
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::F(2) => {
                 if self.layout_manager.layout_type() != LayoutType::Compact {
                     self.compact_main_panel = PanelType::Code;
                 }
                 self.current_panel = PanelType::Code;
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::F(3) => {
                 if self.layout_manager.layout_type() != LayoutType::Compact {
                     self.compact_main_panel = PanelType::Display;
                 }
                 self.current_panel = PanelType::Display;
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::F(4) => {
                 self.current_panel = PanelType::Terminal;
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
 
             // Global exit shortcuts
@@ -599,25 +605,25 @@ impl App {
                 if self.current_panel == PanelType::Terminal {
                     // Forward to terminal to handle double-press logic
                     if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-                        return panel.handle_key_event(key, data_manager);
+                        panel.handle_key_event(key, data_manager)
                     } else {
-                        return Ok(EventResponse::NotHandled);
+                        Ok(EventResponse::NotHandled)
                     }
                 } else {
                     // From other panels, Ctrl+C switches to terminal
                     self.current_panel = PanelType::Terminal;
-                    return Ok(EventResponse::Handled);
+                    Ok(EventResponse::Handled)
                 }
             }
             KeyCode::Char('d')
                 if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
                 // Ctrl+D is immediate exit (EOF signal)
-                return Ok(EventResponse::Exit);
+                Ok(EventResponse::Exit)
             }
             KeyCode::Char('q') if key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => {
                 // Alt+Q for quick exit
-                return Ok(EventResponse::Exit);
+                Ok(EventResponse::Exit)
             }
 
             // Panel boundary resize with Ctrl+Shift+arrow keys
@@ -629,7 +635,7 @@ impl App {
                 if self.layout_manager.layout_type() == LayoutType::Full {
                     self.handle_boundary_resize(ResizeDirection::Left);
                 }
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::Right
                 if key.modifiers.contains(
@@ -639,7 +645,7 @@ impl App {
                 if self.layout_manager.layout_type() == LayoutType::Full {
                     self.handle_boundary_resize(ResizeDirection::Right);
                 }
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::Up
                 if key.modifiers.contains(
@@ -649,7 +655,7 @@ impl App {
                 if self.layout_manager.layout_type() != LayoutType::Mobile {
                     self.handle_boundary_resize(ResizeDirection::Up);
                 }
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
             KeyCode::Down
                 if key.modifiers.contains(
@@ -659,7 +665,7 @@ impl App {
                 if self.layout_manager.layout_type() != LayoutType::Mobile {
                     self.handle_boundary_resize(ResizeDirection::Down);
                 }
-                return Ok(EventResponse::Handled);
+                Ok(EventResponse::Handled)
             }
 
             _ => {
@@ -667,7 +673,7 @@ impl App {
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
                     return panel.handle_key_event(key, data_manager);
                 }
-                return Ok(EventResponse::NotHandled);
+                Ok(EventResponse::NotHandled)
             }
         }
     }

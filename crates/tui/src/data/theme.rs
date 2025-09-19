@@ -55,7 +55,7 @@ impl Default for Theme {
     fn default() -> Self {
         let config = Config::load().unwrap_or_default();
         let color_scheme = if let Some(theme) = config.get_active_theme() {
-            theme.clone().into()
+            (*theme).into()
         } else {
             ColorScheme::default()
         };
@@ -93,7 +93,7 @@ impl Theme {
 
         // Update current state
         if let Some(theme) = self.config.get_active_theme() {
-            self.color_scheme = theme.clone().into();
+            self.color_scheme = (*theme).into();
             self.active_theme = theme_name.to_string();
             info!("Theme switched to: {}", theme_name);
         }
@@ -129,7 +129,7 @@ impl Theme {
         self.panel_configs = new_config.panels.clone();
 
         if let Some(theme) = new_config.get_active_theme() {
-            self.color_scheme = theme.clone().into();
+            self.color_scheme = (*theme).into();
             self.active_theme = new_config.theme.active.clone();
         }
 

@@ -88,13 +88,13 @@ impl DisplayMode {
     /// Get display name for the mode
     pub fn name(&self) -> &'static str {
         match self {
-            DisplayMode::Variables => "Variables",
-            DisplayMode::_Breakpoints => "Breakpoints",
-            DisplayMode::Stack => "Stack",
-            DisplayMode::Memory => "Memory",
-            DisplayMode::CallData => "Call Data",
-            DisplayMode::Storage => "Storage",
-            DisplayMode::TransientStorage => "Transient Storage",
+            Self::Variables => "Variables",
+            Self::_Breakpoints => "Breakpoints",
+            Self::Stack => "Stack",
+            Self::Memory => "Memory",
+            Self::CallData => "Call Data",
+            Self::Storage => "Storage",
+            Self::TransientStorage => "Transient Storage",
         }
     }
 }
@@ -470,7 +470,7 @@ impl DisplayPanel {
                             DiffStatus::Modified => " [CHG]",
                             _ => "",
                         };
-                        format!("{} {} {}", index_str, value_str, diff_indicator).len()
+                        format!("{index_str} {value_str} {diff_indicator}").len()
                     })
                     .max()
                     .unwrap_or(0)
@@ -497,7 +497,7 @@ impl DisplayPanel {
 
                 // Check storage changes
                 for (slot, (old_value, new_value)) in &self.storage_changes {
-                    let slot_line = format!("• Slot: {:#066x}", slot);
+                    let slot_line = format!("• Slot: {slot:#066x}");
                     let old_line =
                         format!("  Old:  {}", utils::format_value_with_decode(old_value));
                     let new_line =
@@ -523,7 +523,7 @@ impl DisplayPanel {
 
                 // Check transient storage items
                 for (slot, value) in &self.transient_storage {
-                    let slot_line = format!("• Slot: {:#066x}", slot);
+                    let slot_line = format!("• Slot: {slot:#066x}");
                     let val_line = format!("  Val:  {}", utils::format_value_with_decode(value));
 
                     max_width = max_width.max(slot_line.len());
@@ -753,7 +753,7 @@ impl DisplayPanel {
                 if self.calldata.is_empty() {
                     0
                 } else {
-                    (self.calldata.len() + 31) / 32
+                    self.calldata.len().div_ceil(32)
                 }
             }
             DisplayMode::Storage => self.storage_display_lines,
@@ -807,7 +807,7 @@ impl DisplayPanel {
                     _ => "",
                 };
 
-                let content = format!("{} {} {}", index_str, value_str, diff_indicator);
+                let content = format!("{index_str} {value_str} {diff_indicator}");
 
                 // Apply styling based on diff status and selection
                 let mut style = if is_selected && self.focused {
@@ -911,7 +911,7 @@ impl DisplayPanel {
 
         for (chunk_idx, chunk) in calldata_bytes.chunks(32).enumerate() {
             let offset = chunk_idx * 32;
-            let offset_str = format!("0x{:04x}:", offset);
+            let offset_str = format!("0x{offset:04x}:");
 
             // Format bytes (hex only for calldata, no ASCII decoding)
             let byte_spans = format_bytes_hex_only(chunk, &[], &dm.theme);
@@ -1010,7 +1010,7 @@ impl DisplayPanel {
                 item_styles.push(StorageItemStyle::Normal);
 
                 // Target slot
-                display_items.push(format!("  Slot: {:#066x}", target_slot));
+                display_items.push(format!("  Slot: {target_slot:#066x}"));
                 item_styles.push(StorageItemStyle::StoreInfo);
 
                 // Previous value
@@ -1058,7 +1058,7 @@ impl DisplayPanel {
 
             for (slot, (old_value, new_value)) in sorted_changes {
                 // Slot line
-                display_items.push(format!("• Slot: {:#066x}", slot));
+                display_items.push(format!("• Slot: {slot:#066x}"));
                 item_styles.push(StorageItemStyle::SlotLine);
 
                 // Old value
@@ -1195,13 +1195,13 @@ impl DisplayPanel {
                 };
 
                 // Add special TSTORE indicator
-                display_items.push(format!("▶ TSTORE Operation"));
+                display_items.push("▶ TSTORE Operation".to_string());
                 item_styles.push(StorageItemStyle::StoreHeader);
                 display_items.push(String::new());
                 item_styles.push(StorageItemStyle::Normal);
 
                 // Target slot
-                display_items.push(format!("  Slot: {:#066x}", target_slot));
+                display_items.push(format!("  Slot: {target_slot:#066x}"));
                 item_styles.push(StorageItemStyle::StoreInfo);
 
                 // Value being written
@@ -1244,7 +1244,7 @@ impl DisplayPanel {
 
             for (slot, value) in tstorage_items {
                 // Slot and value with clean formatting
-                display_items.push(format!("• Slot: {:#066x}", slot));
+                display_items.push(format!("• Slot: {slot:#066x}"));
                 item_styles.push(StorageItemStyle::SlotLine);
 
                 display_items.push(format!("  Val:  {}", utils::format_value_with_decode(value)));
@@ -1413,7 +1413,7 @@ impl DisplayPanel {
         let item_count = match self.mode {
             DisplayMode::Stack => self.stack_items.len(),
             DisplayMode::Memory => self.memory_chunks.len(),
-            DisplayMode::CallData => (self.calldata.len() + 31) / 32,
+            DisplayMode::CallData => self.calldata.len().div_ceil(32),
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
@@ -1423,7 +1423,7 @@ impl DisplayPanel {
         let status_bar = StatusBar::new()
             .current_panel("Display".to_string())
             .message(format!("Mode: {}", self.mode.name()))
-            .message(format!("Items: {}", item_count));
+            .message(format!("Items: {item_count}"));
 
         let status_text = status_bar.build();
         let status_paragraph =
@@ -1457,7 +1457,7 @@ impl PanelTr for DisplayPanel {
                 if self.calldata.is_empty() {
                     0
                 } else {
-                    (self.calldata.len() + 31) / 32
+                    self.calldata.len().div_ceil(32)
                 }
             }
             DisplayMode::Storage => self.storage_display_lines,
@@ -1566,7 +1566,7 @@ impl PanelTr for DisplayPanel {
                         if self.calldata.is_empty() {
                             0
                         } else {
-                            (self.calldata.len() + 31) / 32
+                            self.calldata.len().div_ceil(32)
                         }
                     }
                     DisplayMode::Storage => self.storage_display_lines,
@@ -1617,7 +1617,7 @@ fn format_bytes_with_decode<'a>(
 
     // Hex part
     for (i, byte) in bytes.iter().enumerate() {
-        let hex = format!("{:02x}", byte);
+        let hex = format!("{byte:02x}");
         if highlight_indices.contains(&i) {
             spans.push(Span::styled(
                 hex,
@@ -1660,7 +1660,7 @@ fn format_bytes_hex_only<'a>(
 
     // Hex part only
     for (i, byte) in bytes.iter().enumerate() {
-        let hex = format!("{:02x}", byte);
+        let hex = format!("{byte:02x}");
         if highlight_indices.contains(&i) {
             spans.push(Span::styled(
                 hex,

@@ -19,16 +19,10 @@
 //! This module handles responsive layout switching based on terminal size.
 
 /// Configuration for layout manager
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LayoutConfig {
     /// Enable mouse support
     pub enable_mouse: bool,
-}
-
-impl Default for LayoutConfig {
-    fn default() -> Self {
-        Self { enable_mouse: false }
-    }
 }
 
 /// Layout types for different terminal sizes

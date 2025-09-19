@@ -196,7 +196,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getContractABI",
                 rpc_params!(address, recompiled),
-                &format!("Fetching contract ABI for {}", address),
+                &format!("Fetching contract ABI for {address}"),
             )
             .await?;
 
@@ -210,7 +210,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getCallableABI",
                 rpc_params!(address),
-                &format!("Fetching callable ABI for {}", address),
+                &format!("Fetching callable ABI for {address}"),
             )
             .await?;
 
@@ -224,7 +224,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getConstructorArgs",
                 rpc_params!(address),
-                &format!("Fetching contract constructor arguments for {}", address),
+                &format!("Fetching contract constructor arguments for {address}"),
             )
             .await?;
 
@@ -252,7 +252,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getSnapshotInfo",
                 rpc_params!(snapshot_id),
-                &format!("Getting info for snapshot {}", snapshot_id),
+                &format!("Getting info for snapshot {snapshot_id}"),
             )
             .await?;
 
@@ -266,7 +266,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getCode",
                 rpc_params!(snapshot_id),
-                &format!("Getting code for snapshot {}", snapshot_id),
+                &format!("Getting code for snapshot {snapshot_id}"),
             )
             .await?;
 
@@ -279,7 +279,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getNextCall",
                 rpc_params!(snapshot_id),
-                &format!("Getting next call for snapshot {}", snapshot_id),
+                &format!("Getting next call for snapshot {snapshot_id}"),
             )
             .await?;
 
@@ -292,7 +292,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getPrevCall",
                 rpc_params!(snapshot_id),
-                &format!("Getting prev call for snapshot {}", snapshot_id),
+                &format!("Getting prev call for snapshot {snapshot_id}"),
             )
             .await?;
 
@@ -305,7 +305,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getStorage",
                 rpc_params!(snapshot_id, slot),
-                &format!("Getting storage for snapshot {} at slot {}", snapshot_id, slot),
+                &format!("Getting storage for snapshot {snapshot_id} at slot {slot}"),
             )
             .await?;
 
@@ -322,7 +322,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_getStorageDiff",
                 rpc_params!(snapshot_id),
-                &format!("Getting storage diff for snapshot {}", snapshot_id),
+                &format!("Getting storage diff for snapshot {snapshot_id}"),
             )
             .await?;
 
@@ -340,7 +340,7 @@ impl RpcClient {
             .request_with_spinner(
                 "edb_evalOnSnapshot",
                 rpc_params!(snapshot_id, expr),
-                &format!("Evaluating expression on snapshot {}", snapshot_id),
+                &format!("Evaluating expression on snapshot {snapshot_id}"),
             )
             .await?;
 

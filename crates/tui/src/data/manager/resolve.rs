@@ -59,7 +59,7 @@ impl ManagerStateTr for ResolverState {
         Ok(Self::default())
     }
 
-    fn update(&mut self, other: &ResolverState) {
+    fn update(&mut self, other: &Self) {
         if self.contract_abi.need_update(&other.contract_abi) {
             self.contract_abi.update(&other.contract_abi);
         }
@@ -96,28 +96,28 @@ pub enum ResolverRequest {
 impl ManagerRequestTr<ResolverState> for ResolverRequest {
     async fn fetch_data(self, rpc_client: Arc<RpcClient>, state: &mut ResolverState) -> Result<()> {
         match self {
-            ResolverRequest::ContractAbi(address, recompiled) => {
+            Self::ContractAbi(address, recompiled) => {
                 if state.contract_abi.has_cached(&(address, recompiled)) {
                     return Ok(());
                 }
                 let abi = rpc_client.get_contract_abi(address, recompiled).await?;
                 state.contract_abi.insert((address, recompiled), abi);
             }
-            ResolverRequest::CallableAbi(address) => {
+            Self::CallableAbi(address) => {
                 if state.callable_abi.has_cached(&address) {
                     return Ok(());
                 }
                 let abi_list = rpc_client.get_callable_abi(address).await?;
                 state.callable_abi.insert(address, Some(abi_list));
             }
-            ResolverRequest::ConstructorArgs(address) => {
+            Self::ConstructorArgs(address) => {
                 if state.constructor_args.has_cached(&address) {
                     return Ok(());
                 }
                 let args = rpc_client.get_constructor_args(address).await?;
                 state.constructor_args.insert(address, args);
             }
-            ResolverRequest::ExprOnSnapshot(snapshot_id, expr) => {
+            Self::ExprOnSnapshot(snapshot_id, expr) => {
                 if state.expr_value.has_cached(&(snapshot_id, expr.clone())) {
                     return Ok(());
                 }
@@ -249,10 +249,7 @@ impl Resolver {
 
         if !self.state.expr_value.contains_key(&(snapshot_id, expr_key.clone())) {
             debug!("Expression value not found in cache, fetching...");
-            self.new_fetching_request(ResolverRequest::ExprOnSnapshot(
-                snapshot_id,
-                expr_key.clone(),
-            ));
+            self.new_fetching_request(ResolverRequest::ExprOnSnapshot(snapshot_id, expr_key));
             return None;
         }
 
@@ -457,7 +454,7 @@ impl Resolver {
         if let Some(label) = self.resolve_address_label(address) {
             label
         } else {
-            format!("{}", address.to_checksum(None))
+            address.to_checksum(None)
         }
     }
 
@@ -467,7 +464,7 @@ impl Resolver {
         let eth_value = value.to_string();
         if eth_value.len() <= 18 {
             // Less than 1 ETH - show significant digits only
-            let padded = format!("{:0>18}", eth_value);
+            let padded = format!("{eth_value:0>18}");
             let trimmed = padded.trim_end_matches('0');
             if trimmed.is_empty() {
                 "0".to_string()
@@ -481,7 +478,7 @@ impl Resolver {
             if decimal_trimmed.is_empty() {
                 whole.to_string()
             } else {
-                format!("{}.{}", whole, decimal_trimmed)
+                format!("{whole}.{decimal_trimmed}")
             }
         }
     }

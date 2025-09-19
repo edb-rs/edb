@@ -99,10 +99,10 @@ impl EnhancedBorder {
             // Add special indicators for focused panels
             let title_with_indicator = if self.focused {
                 match self.style {
-                    EnhancedBorderStyle::Rounded => format!("╭─ {} ─╮", title),
-                    EnhancedBorderStyle::Double => format!("╔═ {} ═╗", title),
-                    EnhancedBorderStyle::Thick => format!("┏━ {} ━┓", title),
-                    EnhancedBorderStyle::Square => format!("┌─ {} ─┐", title),
+                    EnhancedBorderStyle::Rounded => format!("╭─ {title} ─╮"),
+                    EnhancedBorderStyle::Double => format!("╔═ {title} ═╗"),
+                    EnhancedBorderStyle::Thick => format!("┏━ {title} ━┓"),
+                    EnhancedBorderStyle::Square => format!("┌─ {title} ─┐"),
                 }
             } else {
                 title

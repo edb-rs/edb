@@ -297,7 +297,7 @@ impl TracePanelInner {
             };
 
             // Find the entry and only handle children collapse (details always shown)
-            if trace.iter().find(|e| e.id == entry_id).is_some() {
+            if trace.iter().any(|e| e.id == entry_id) {
                 // Check if this entry has children that can be collapsed
                 let has_children = trace.iter().any(|e| e.parent_id == Some(entry_id));
 
@@ -523,9 +523,9 @@ impl TracePanelInner {
 
             // For root level, check if this is the last root entry
             if self.is_last_child(entry, trace) {
-                format!("{}", collapse_char)
+                collapse_char.to_string()
             } else {
-                format!("{}", collapse_char)
+                collapse_char.to_string()
             }
         } else {
             // Child level: tree structure with proper spacing
@@ -535,9 +535,9 @@ impl TracePanelInner {
             // Add collapse indicator if has children, otherwise just a space
             if has_children {
                 let collapse_char = self.get_enhanced_collapse_indicator(entry.id, trace);
-                format!("  {}{}{}", tree_indent, connector, collapse_char)
+                format!("  {tree_indent}{connector}{collapse_char}")
             } else {
-                format!("  {}{}  ", tree_indent, connector)
+                format!("  {tree_indent}{connector}  ")
             }
         };
 
@@ -580,28 +580,26 @@ impl TracePanelInner {
                     Style::default().fg(dm.theme.error_color),
                 ));
             }
-        } else {
-            if let Some(call_str) =
-                dm.resolver.resolve_function_call(&entry.input, Some(entry.code_address))
-            {
-                spans.push(Span::raw(" "));
-                spans.extend(self.highlight_solidity_code(call_str, dm));
-            } else if !entry.input.is_empty() {
-                spans.push(Span::raw(" "));
-                if entry.input.len() >= 4 {
-                    let selector = hex::encode(&entry.input[..4]);
-                    let data_size = entry.input.len() - 4;
-                    if data_size > 0 {
-                        spans.push(Span::styled(
-                            format!("0x{}...({} bytes)", selector, data_size),
-                            Style::default().fg(dm.theme.syntax_string_color),
-                        ));
-                    } else {
-                        spans.push(Span::styled(
-                            format!("0x{}", selector),
-                            Style::default().fg(dm.theme.syntax_string_color),
-                        ));
-                    }
+        } else if let Some(call_str) =
+            dm.resolver.resolve_function_call(&entry.input, Some(entry.code_address))
+        {
+            spans.push(Span::raw(" "));
+            spans.extend(self.highlight_solidity_code(call_str, dm));
+        } else if !entry.input.is_empty() {
+            spans.push(Span::raw(" "));
+            if entry.input.len() >= 4 {
+                let selector = hex::encode(&entry.input[..4]);
+                let data_size = entry.input.len() - 4;
+                if data_size > 0 {
+                    spans.push(Span::styled(
+                        format!("0x{selector}...({data_size} bytes)"),
+                        Style::default().fg(dm.theme.syntax_string_color),
+                    ));
+                } else {
+                    spans.push(Span::styled(
+                        format!("0x{selector}"),
+                        Style::default().fg(dm.theme.syntax_string_color),
+                    ));
                 }
             }
         }
@@ -670,23 +668,23 @@ impl TracePanelInner {
             let full_indent = if entry.depth == 0 {
                 // Root level details - check if this root entry has more siblings
                 if self.is_last_child(entry, trace) {
-                    format!("      ")
+                    "      ".to_string()
                 } else {
-                    format!("  │   ")
+                    "  │   ".to_string()
                 }
             } else {
                 // Child level details - always start with 2 spaces, then tree indent, then connector
                 let tree_indent = self.build_tree_indent_clean(entry, trace);
                 if self.is_last_child(entry, trace) {
-                    format!("  {}  {}   ", tree_indent, child_line)
+                    format!("  {tree_indent}  {child_line}   ")
                 } else {
-                    format!("  {}│ {}   ", tree_indent, child_line)
+                    format!("  {tree_indent}│ {child_line}   ")
                 }
             };
 
             let event_text = match dm.resolver.resolve_event(event, Some(entry.code_address)) {
                 Some(text) => text,
-                None if event.topics().len() == 0 => {
+                None if event.topics().is_empty() => {
                     format!("Anonymous event ({} bytes data)", event.data.len())
                 }
                 None => format!(
@@ -716,17 +714,17 @@ impl TracePanelInner {
         let full_indent = if entry.depth == 0 {
             // Root level details - check if this root entry has more siblings
             if self.is_last_child(entry, trace) {
-                format!("      ")
+                "      ".to_string()
             } else {
-                format!("  │   ")
+                "  │   ".to_string()
             }
         } else {
             // Child level details - always start with 2 spaces, then tree indent, then connector
             let tree_indent = self.build_tree_indent_clean(entry, trace);
             if self.is_last_child(entry, trace) {
-                format!("  {}  {}   ", tree_indent, child_line)
+                format!("  {tree_indent}  {child_line}   ")
             } else {
-                format!("  {}│ {}   ", tree_indent, child_line)
+                format!("  {tree_indent}│ {child_line}   ")
             }
         };
 
@@ -796,7 +794,7 @@ impl TracePanelInner {
             // Try to decode the string from Error(string) signature
             if let Ok(decoded) = alloy_dyn_abi::DynSolType::String.abi_decode(&output[4..]) {
                 if let DynSolValue::String(reason) = decoded {
-                    return format!("\"{}\"", reason);
+                    return format!("\"{reason}\"");
                 }
             }
         }
@@ -817,7 +815,7 @@ impl TracePanelInner {
                         "81" => "zero initialization of invalid type",
                         _ => "unknown panic",
                     };
-                    return format!("Panic({}: {})", panic_code, panic_reason);
+                    return format!("Panic({panic_code}: {panic_reason})");
                 }
             }
         }
@@ -863,7 +861,7 @@ impl TracePanelInner {
             InstructionResult::OutOfOffset => "out of offset".to_string(),
             InstructionResult::CreateCollision => "create collision".to_string(),
             InstructionResult::FatalExternalError => "fatal external error".to_string(),
-            _ => format!("unknown error ({:?})", result),
+            _ => format!("unknown error ({result:?})"),
         }
     }
 
@@ -974,18 +972,18 @@ impl TracePanelInner {
         if let Some(depth) = self.calculate_execution_depth(entry_id, trace) {
             if depth == 0 {
                 // This entry is currently executing
-                format!("{} ", base_indicator)
+                format!("{base_indicator} ")
             } else if depth > 0 {
                 // Entry with execution inside - show subtle superscript numeric indicator
                 let superscript = self.number_to_superscript(depth);
-                format!("{}{} ", base_indicator, superscript)
+                format!("{base_indicator}{superscript} ")
             } else {
                 // Standard indicator
-                format!("{} ", base_indicator)
+                format!("{base_indicator} ")
             }
         } else {
             // No execution involvement - standard indicator
-            format!("{} ", base_indicator)
+            format!("{base_indicator} ")
         }
     }
 
@@ -1060,10 +1058,10 @@ impl PanelTr for TracePanel {
         }
 
         // Generate display lines with expansion/collapse support
-        let display_lines = self.generate_display_lines(&trace);
+        let display_lines = self.generate_display_lines(trace);
 
         // Calculate max line width for horizontal scrolling
-        self.inner.calculate_max_line_width(&trace, dm);
+        self.inner.calculate_max_line_width(trace, dm);
 
         let items: Vec<ListItem<'_>> = display_lines
             .iter()
@@ -1077,11 +1075,10 @@ impl PanelTr for TracePanel {
                     | TraceLineType::Return(id)
                     | TraceLineType::Event(id, _) => *id,
                 };
-                let is_execution =
-                    self.inner.current_execution_entry.map_or(false, |exec_id| exec_id == entry_id);
+                let is_execution = self.inner.current_execution_entry == Some(entry_id);
                 let is_selected = global_index == self.inner.selected_index;
 
-                let mut formatted_line = self.inner.format_display_line(line_type, &trace, dm);
+                let mut formatted_line = self.inner.format_display_line(line_type, trace, dm);
 
                 // Apply horizontal scrolling offset
                 formatted_line = self.inner.apply_horizontal_offset(formatted_line);
@@ -1171,7 +1168,7 @@ impl PanelTr for TracePanel {
                 }
                 indicator.push(']');
 
-                format!("{}{}", status_text, indicator)
+                format!("{status_text}{indicator}")
             } else {
                 status_text
             };

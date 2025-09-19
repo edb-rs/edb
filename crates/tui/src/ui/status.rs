@@ -38,30 +38,30 @@ impl ConnectionStatus {
     /// Get the appropriate icon for this connection status
     pub fn icon(&self) -> &'static str {
         match self {
-            ConnectionStatus::Connected => "🟢",
-            ConnectionStatus::Connecting => "🟡",
-            ConnectionStatus::Disconnected => "🔴",
-            ConnectionStatus::Error => "❌",
+            Self::Connected => "🟢",
+            Self::Connecting => "🟡",
+            Self::Disconnected => "🔴",
+            Self::Error => "❌",
         }
     }
 
     /// Get the appropriate color for this connection status
     pub fn color(&self) -> Color {
         match self {
-            ConnectionStatus::Connected => Color::Green,
-            ConnectionStatus::Connecting => Color::Yellow,
-            ConnectionStatus::Disconnected => Color::Red,
-            ConnectionStatus::Error => Color::Red,
+            Self::Connected => Color::Green,
+            Self::Connecting => Color::Yellow,
+            Self::Disconnected => Color::Red,
+            Self::Error => Color::Red,
         }
     }
 
     /// Get a descriptive text for this connection status
     pub fn text(&self) -> &'static str {
         match self {
-            ConnectionStatus::Connected => "Connected",
-            ConnectionStatus::Connecting => "Connecting",
-            ConnectionStatus::Disconnected => "Disconnected",
-            ConnectionStatus::Error => "Connection Error",
+            Self::Connected => "Connected",
+            Self::Connecting => "Connecting",
+            Self::Disconnected => "Disconnected",
+            Self::Error => "Connection Error",
         }
     }
 
@@ -90,33 +90,33 @@ impl RpcStatus {
     /// Get the appropriate icon for this RPC status
     pub fn icon(&self) -> &'static str {
         match self {
-            RpcStatus::Success => Icons::SUCCESS,
-            RpcStatus::Error => Icons::ERROR,
-            RpcStatus::Loading => Icons::PROCESSING,
-            RpcStatus::Timeout => Icons::WARNING,
-            RpcStatus::Idle => "⏸️",
+            Self::Success => Icons::SUCCESS,
+            Self::Error => Icons::ERROR,
+            Self::Loading => Icons::PROCESSING,
+            Self::Timeout => Icons::WARNING,
+            Self::Idle => "⏸️",
         }
     }
 
     /// Get the appropriate color for this RPC status
     pub fn color(&self) -> Color {
         match self {
-            RpcStatus::Success => Color::Green,
-            RpcStatus::Error => Color::Red,
-            RpcStatus::Loading => Color::Blue,
-            RpcStatus::Timeout => Color::Yellow,
-            RpcStatus::Idle => Color::Gray,
+            Self::Success => Color::Green,
+            Self::Error => Color::Red,
+            Self::Loading => Color::Blue,
+            Self::Timeout => Color::Yellow,
+            Self::Idle => Color::Gray,
         }
     }
 
     /// Get formatted display with icon
     pub fn display(&self, operation: &str) -> String {
         match self {
-            RpcStatus::Success => format!("{} {}", self.icon(), operation),
-            RpcStatus::Error => format!("{} {} Failed", self.icon(), operation),
-            RpcStatus::Loading => format!("{} {}...", self.icon(), operation),
-            RpcStatus::Timeout => format!("{} {} Timeout", self.icon(), operation),
-            RpcStatus::Idle => "Ready".to_string(),
+            Self::Success => format!("{} {}", self.icon(), operation),
+            Self::Error => format!("{} {} Failed", self.icon(), operation),
+            Self::Loading => format!("{} {}...", self.icon(), operation),
+            Self::Timeout => format!("{} {} Timeout", self.icon(), operation),
+            Self::Idle => "Ready".to_string(),
         }
     }
 }
@@ -142,36 +142,36 @@ impl ExecutionStatus {
     /// Get the appropriate icon for this execution status
     pub fn icon(&self) -> &'static str {
         match self {
-            ExecutionStatus::Running => "▶️",
-            ExecutionStatus::Paused => "⏸️",
-            ExecutionStatus::Finished => Icons::SUCCESS,
-            ExecutionStatus::Failed => Icons::ERROR,
-            ExecutionStatus::Start => "🏁",
-            ExecutionStatus::End => "🏁",
+            Self::Running => "▶️",
+            Self::Paused => "⏸️",
+            Self::Finished => Icons::SUCCESS,
+            Self::Failed => Icons::ERROR,
+            Self::Start => "🏁",
+            Self::End => "🏁",
         }
     }
 
     /// Get the appropriate color for this execution status
     pub fn color(&self) -> Color {
         match self {
-            ExecutionStatus::Running => Color::Green,
-            ExecutionStatus::Paused => Color::Yellow,
-            ExecutionStatus::Finished => Color::Green,
-            ExecutionStatus::Failed => Color::Red,
-            ExecutionStatus::Start => Color::Blue,
-            ExecutionStatus::End => Color::Blue,
+            Self::Running => Color::Green,
+            Self::Paused => Color::Yellow,
+            Self::Finished => Color::Green,
+            Self::Failed => Color::Red,
+            Self::Start => Color::Blue,
+            Self::End => Color::Blue,
         }
     }
 
     /// Get formatted display text
     pub fn display(&self) -> String {
         match self {
-            ExecutionStatus::Running => format!("{} Running", self.icon()),
-            ExecutionStatus::Paused => format!("{} Paused", self.icon()),
-            ExecutionStatus::Finished => format!("{} Finished", self.icon()),
-            ExecutionStatus::Failed => format!("{} Failed", self.icon()),
-            ExecutionStatus::Start => format!("{} At Start", self.icon()),
-            ExecutionStatus::End => format!("{} At End", self.icon()),
+            Self::Running => format!("{} Running", self.icon()),
+            Self::Paused => format!("{} Paused", self.icon()),
+            Self::Finished => format!("{} Finished", self.icon()),
+            Self::Failed => format!("{} Failed", self.icon()),
+            Self::Start => format!("{} At Start", self.icon()),
+            Self::End => format!("{} At End", self.icon()),
         }
     }
 }
@@ -193,20 +193,20 @@ impl PanelStatus {
     /// Get the appropriate indicator for this panel status
     pub fn indicator(&self) -> &'static str {
         match self {
-            PanelStatus::Focused => "●",
-            PanelStatus::Unfocused => "○",
-            PanelStatus::HasUpdates => "◉",
-            PanelStatus::Error => "⚠",
+            Self::Focused => "●",
+            Self::Unfocused => "○",
+            Self::HasUpdates => "◉",
+            Self::Error => "⚠",
         }
     }
 
     /// Get the appropriate color for this panel status
     pub fn color(&self) -> Color {
         match self {
-            PanelStatus::Focused => Color::Cyan,
-            PanelStatus::Unfocused => Color::Gray,
-            PanelStatus::HasUpdates => Color::Yellow,
-            PanelStatus::Error => Color::Red,
+            Self::Focused => Color::Cyan,
+            Self::Unfocused => Color::Gray,
+            Self::HasUpdates => Color::Yellow,
+            Self::Error => Color::Red,
         }
     }
 }
@@ -232,24 +232,24 @@ impl FileStatus {
     /// Get the appropriate icon for this file status
     pub fn icon(&self) -> &'static str {
         match self {
-            FileStatus::SourceAvailable => Icons::FILE,
-            FileStatus::OpcodesOnly => "🔧",
-            FileStatus::HasExecution => "►",
-            FileStatus::Modified => "📝",
-            FileStatus::ReadOnly => "🔒",
-            FileStatus::NotFound => "❓",
+            Self::SourceAvailable => Icons::FILE,
+            Self::OpcodesOnly => "🔧",
+            Self::HasExecution => "►",
+            Self::Modified => "📝",
+            Self::ReadOnly => "🔒",
+            Self::NotFound => "❓",
         }
     }
 
     /// Get the appropriate color for this file status
     pub fn color(&self) -> Color {
         match self {
-            FileStatus::SourceAvailable => Color::Green,
-            FileStatus::OpcodesOnly => Color::Yellow,
-            FileStatus::HasExecution => Color::Cyan,
-            FileStatus::Modified => Color::Blue,
-            FileStatus::ReadOnly => Color::Gray,
-            FileStatus::NotFound => Color::Red,
+            Self::SourceAvailable => Color::Green,
+            Self::OpcodesOnly => Color::Yellow,
+            Self::HasExecution => Color::Cyan,
+            Self::Modified => Color::Blue,
+            Self::ReadOnly => Color::Gray,
+            Self::NotFound => Color::Red,
         }
     }
 
@@ -276,20 +276,20 @@ impl BreakpointStatus {
     /// Get the appropriate icon for this breakpoint status
     pub fn icon(&self) -> &'static str {
         match self {
-            BreakpointStatus::Active => "●",
-            BreakpointStatus::Disabled => "○",
-            BreakpointStatus::Hit => "◉",
-            BreakpointStatus::Invalid => "⚠",
+            Self::Active => "●",
+            Self::Disabled => "○",
+            Self::Hit => "◉",
+            Self::Invalid => "⚠",
         }
     }
 
     /// Get the appropriate color for this breakpoint status
     pub fn color(&self) -> Color {
         match self {
-            BreakpointStatus::Active => Color::Red,
-            BreakpointStatus::Disabled => Color::Gray,
-            BreakpointStatus::Hit => Color::Yellow,
-            BreakpointStatus::Invalid => Color::Red,
+            Self::Active => Color::Red,
+            Self::Disabled => Color::Gray,
+            Self::Hit => Color::Yellow,
+            Self::Invalid => Color::Red,
         }
     }
 
@@ -376,7 +376,7 @@ impl StatusBar {
 
         // Current panel
         if let Some(panel) = &self.current_panel {
-            parts.push(format!("Panel: {}", panel));
+            parts.push(format!("Panel: {panel}"));
         }
 
         // Additional messages

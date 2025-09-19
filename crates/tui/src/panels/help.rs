@@ -398,7 +398,7 @@ impl HelpOverlay {
         }
 
         indicator_parts.push(Span::styled(
-            format!("{}%", scroll_percentage),
+            format!("{scroll_percentage}%"),
             Style::default().fg(dm.theme.accent_color),
         ));
 
