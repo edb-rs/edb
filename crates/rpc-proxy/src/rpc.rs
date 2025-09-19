@@ -698,6 +698,7 @@ impl RpcHandler {
         false
     }
 
+    /// Generate a unique cache key for the given RPC request based on method and parameters
     pub fn generate_cache_key(&self, request: &Value) -> String {
         let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = request.get("params").unwrap_or(&Value::Null);

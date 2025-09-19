@@ -112,17 +112,25 @@ impl RemoteProxyClient {
 
 /// Data structures for remote monitoring (converted from JSON responses)
 
+/// Cache statistics from a remote proxy server for TUI display
 #[derive(Debug, Clone)]
 pub struct RemoteCacheStats {
+    /// Current number of entries in the cache
     pub total_entries: u64,
+    /// Maximum allowed cache entries before eviction
     pub max_entries: u64,
+    /// Cache utilization percentage as a formatted string
     pub utilization: String,
+    /// Filesystem path to the cache file
     pub cache_file_path: String,
+    /// Age in seconds of the oldest cache entry, if any
     pub oldest_entry_age_seconds: Option<u64>,
+    /// Age in seconds of the newest cache entry, if any
     pub newest_entry_age_seconds: Option<u64>,
 }
 
 impl RemoteCacheStats {
+    /// Convert JSON response from proxy server to structured cache statistics
     pub fn from_json(value: &Value) -> Result<Self> {
         Ok(Self {
             total_entries: value.get("total_entries").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -147,16 +155,23 @@ impl RemoteCacheStats {
     }
 }
 
+/// Health status and metrics for a remote RPC provider endpoint
 #[derive(Debug, Clone)]
 pub struct RemoteProviderStatus {
+    /// The RPC endpoint URL of this provider
     pub url: String,
+    /// Whether this provider is currently healthy and responsive
     pub is_healthy: bool,
+    /// Number of consecutive health check failures
     pub consecutive_failures: u32,
+    /// Average response time in milliseconds for recent requests
     pub response_time_ms: Option<u64>,
+    /// Seconds since the last health check was performed
     pub last_health_check_seconds_ago: Option<u64>,
 }
 
 impl RemoteProviderStatus {
+    /// Convert JSON response from proxy server to structured provider status
     pub fn from_json(value: &Value) -> Result<Self> {
         Ok(Self {
             url: value.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
@@ -173,21 +188,33 @@ impl RemoteProviderStatus {
     }
 }
 
+/// Historical metrics data point from remote proxy server for trend analysis
 #[derive(Debug, Clone)]
 pub struct RemoteMetricData {
+    /// Unix timestamp when this metric data point was recorded
     pub timestamp: u64,
+    /// Number of cache hits at this time point (internal use)
     pub _cache_hits: u64,
+    /// Number of cache misses at this time point (internal use)
     pub _cache_misses: u64,
+    /// Total size of the cache in number of entries
     pub cache_size: u64,
+    /// Cache hit rate as a percentage (0.0 to 1.0)
     pub hit_rate: f64, // Store hit rate directly from backend
+    /// Number of healthy RPC providers at this time (internal use)
     pub _healthy_providers: u64,
+    /// Total number of configured RPC providers (internal use)
     pub _total_providers: u64,
+    /// Number of RPC requests processed per minute
     pub requests_per_minute: u64,
+    /// Average response time in milliseconds for RPC requests
     pub avg_response_time_ms: f64,
+    /// Number of active EDB instances connected to the proxy (internal use)
     pub _active_instances: usize,
 }
 
 impl RemoteMetricData {
+    /// Convert historical JSON data from cache and provider metrics into structured metric data points
     pub fn from_history_json(cache_history: &[Value], provider_history: &[Value]) -> Vec<Self> {
         let mut metrics = Vec::new();
 
@@ -233,12 +260,14 @@ impl RemoteMetricData {
     }
 }
 
-/// Remote data fetcher that collects all necessary data for TUI
+/// Remote data fetcher that collects all necessary data for TUI monitoring display
 pub struct RemoteDataFetcher {
+    /// Client for communicating with the remote proxy server
     client: RemoteProxyClient,
 }
 
 impl RemoteDataFetcher {
+    /// Create a new data fetcher with the given proxy client
     pub fn new(client: RemoteProxyClient) -> Self {
         Self { client }
     }
@@ -320,15 +349,23 @@ impl RemoteDataFetcher {
     }
 }
 
-/// Combined data structure for remote proxy monitoring
+/// Combined data structure containing all proxy monitoring information for TUI display
 #[derive(Debug, Clone)]
 pub struct RemoteProxyData {
+    /// Current cache statistics and configuration, if available
     pub cache_stats: Option<RemoteCacheStats>,
+    /// Status and health information for all configured RPC providers
     pub providers: Vec<RemoteProviderStatus>,
+    /// List of process IDs for active EDB instances connected to the proxy
     pub active_instances: Vec<u32>,
+    /// Historical metrics data for trend visualization and analysis
     pub metrics_history: Vec<RemoteMetricData>,
+    /// Raw cache metrics data for detailed analysis
     pub cache_metrics: Option<Value>,
+    /// Raw provider metrics data for detailed analysis
     pub provider_metrics: Option<Value>,
+    /// Raw request metrics data for detailed analysis
     pub request_metrics: Option<Value>,
+    /// System information about the proxy server
     pub system_info: Option<Value>,
 }

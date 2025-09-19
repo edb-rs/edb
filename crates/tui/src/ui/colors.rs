@@ -22,71 +22,115 @@
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
-/// Semantic color mapping for consistent theming
+/// Semantic color mapping for consistent theming across the entire TUI interface
 #[derive(Debug, Clone)]
 pub struct ColorScheme {
     // Panel states
+    /// Border color for the currently focused panel
     pub focused_border: Color,
+    /// Border color for unfocused panels
     pub unfocused_border: Color,
+    /// Background color for all panels
     pub panel_bg: Color,
 
     // Code highlighting
+    /// Color for programming language keywords
     pub keyword_color: Color,
+    /// Color for string literals in code
     pub string_color: Color,
+    /// Color for code comments
     pub comment_color: Color,
+    /// Color for numeric literals
     pub number_color: Color,
+    /// Color for variable and function identifiers
     pub identifier_color: Color,
+    /// Color for operators and symbols
     pub operator_color: Color,
 
     // Line numbers
+    /// Color for line numbers in code editor
     pub line_number: Color,
+    /// Background color for line number area
     pub line_number_bg: Color,
 
     // Syntax highlighting (detailed)
+    /// Color for language keywords in detailed syntax highlighting
     pub syntax_keyword_color: Color,
+    /// Color for type definitions and type names
     pub syntax_type_color: Color,
+    /// Color for string literals in detailed highlighting
     pub syntax_string_color: Color,
+    /// Color for numbers in detailed highlighting
     pub syntax_number_color: Color,
+    /// Color for comments in detailed highlighting
     pub syntax_comment_color: Color,
+    /// Color for identifiers in detailed highlighting
     pub syntax_identifier_color: Color,
+    /// Color for operators in detailed highlighting
     pub syntax_operator_color: Color,
+    /// Color for punctuation marks and delimiters
     pub syntax_punctuation_color: Color,
+    /// Color for Ethereum addresses
     pub syntax_address_color: Color,
+    /// Color for Solidity pragma statements
     pub syntax_pragma_color: Color,
+    /// Color for EVM opcodes
     pub syntax_opcode_color: Color,
 
     // General highlighting
+    /// Background color for highlighted text areas
     pub highlight_bg: Color,
+    /// Foreground color for highlighted text
     pub highlight_fg: Color,
 
     // Help and UI text
+    /// Color for help text and documentation
     pub help_text_color: Color,
 
     // Debugging states
+    /// Background color for the currently executing line
     pub current_line_bg: Color,
+    /// Foreground color for the currently executing line
     pub current_line_fg: Color,
+    /// Color for breakpoint indicators
     pub breakpoint_color: Color,
+    /// Color for error messages and indicators
     pub error_color: Color,
+    /// Color for success messages and indicators
     pub success_color: Color,
+    /// Color for warning messages and indicators
     pub warning_color: Color,
+    /// Color for informational messages and indicators
     pub info_color: Color,
 
     // Trace visualization
+    /// Color for function call entries in trace view
     pub call_color: Color,
+    /// Color for function return entries in trace view
     pub return_color: Color,
+    /// Color for transaction revert entries in trace view
     pub revert_color: Color,
+    /// Color for contract creation entries in trace view
     pub create_color: Color,
 
     // Terminal
+    /// Color for command prompt in terminal
     pub prompt_color: Color,
+    /// Color for user input commands in terminal
     pub command_color: Color,
+    /// Color for command output in terminal
     pub output_color: Color,
+    /// Color for the terminal cursor
     pub cursor_color: Color,
 
     // Interactive elements
+    /// Background color for selected items
     pub selection_bg: Color,
+    /// Foreground color for selected items
     pub selection_fg: Color,
+    /// Color for hovered elements
     pub hover_color: Color,
+    /// Primary accent color for the theme
     pub accent_color: Color,
 }
 

@@ -18,8 +18,8 @@ EDB bridges the gap between high-level Solidity code and low-level EVM execution
 
 ```bash
 # Clone the repository
-git clone https://github.com/MedGa-eth/EDB
-cd EDB
+git clone https://github.com/edb-rs/edb
+cd edb
 
 # Build all components
 cargo build --release
@@ -52,10 +52,12 @@ Type `?` in the TUI to view the help page.
 ## Why EDB?
 
 Traditional Ethereum debugging tools operate at the bytecode level, making it nearly impossible to understand what's happening in your Solidity code.
+
 Tools like [Remix IDE's debugger](https://remix-ide.readthedocs.io/en/latest/debugger.html), [Foundry's `forge debug`](https://book.getfoundry.sh/forge/debugger), and [Hardhat's console debugger](https://hardhat.org/hardhat-network/docs/guides/forking-other-networks) show you opcode-by-opcode execution, stack traces, and raw memory dumps.
-While powerful, these tools require developers to mentally map between high-level Solidity constructs and low-level EVM operations - a complex and error-prone process.
+While powerful, these tools require developers to mentally map between high-level Solidity constructs and low-level EVM operations, which is, however, a complex and error-prone process.
 
 **The fundamental challenge:** While Solidity compilers generate source maps to link bytecode back to source code, this mapping is fragile and often imprecise, especially for optimized contracts.
+
 Existing debuggers rely on these source maps to display which source line corresponds to each opcode, but they still can't reliably reconstruct high-level variable values, function call contexts, or complex data structures from raw EVM state.
 The source maps frequently point to wrong lines or become completely unreliable when compiler optimizations are enabled.
 

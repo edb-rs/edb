@@ -75,10 +75,13 @@ impl Default for TuiConfig {
     }
 }
 
-/// Main TUI runner
+/// Main TUI runner that manages the terminal interface and event loop
 pub struct Tui {
+    /// The main application state and panel management
     app: App,
+    /// Terminal backend for rendering and input handling
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    /// Configuration settings for the TUI behavior
     config: TuiConfig,
 }
 
