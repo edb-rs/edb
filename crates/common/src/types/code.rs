@@ -33,16 +33,16 @@ impl Code {
     /// Returns the contract address associated with this code information
     pub fn address(&self) -> Address {
         match self {
-            Code::Opcode(info) => info.address,
-            Code::Source(info) => info.address,
+            Self::Opcode(info) => info.address,
+            Self::Source(info) => info.address,
         }
     }
 
     /// Returns the bytecode address, which may differ from the contract address in proxy patterns
     pub fn bytecode_address(&self) -> Address {
         match self {
-            Code::Opcode(info) => info.bytecode_address,
-            Code::Source(info) => info.bytecode_address,
+            Self::Opcode(info) => info.bytecode_address,
+            Self::Source(info) => info.bytecode_address,
         }
     }
 }

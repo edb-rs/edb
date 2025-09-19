@@ -84,32 +84,22 @@ enum SerializedDynSolValue {
 impl From<&DynSolValue> for SerializedDynSolValue {
     fn from(value: &DynSolValue) -> Self {
         match value {
-            DynSolValue::Bool(b) => SerializedDynSolValue::Bool(*b),
-            DynSolValue::Int(i, bits) => SerializedDynSolValue::Int { value: *i, bits: *bits },
-            DynSolValue::Uint(u, bits) => SerializedDynSolValue::Uint { value: *u, bits: *bits },
-            DynSolValue::FixedBytes(bytes, size) => {
-                SerializedDynSolValue::FixedBytes { value: *bytes, size: *size }
-            }
-            DynSolValue::Address(addr) => SerializedDynSolValue::Address(*addr),
-            DynSolValue::Function(func) => SerializedDynSolValue::Function(func.0),
-            DynSolValue::Bytes(bytes) => SerializedDynSolValue::Bytes(bytes.clone()),
-            DynSolValue::String(s) => SerializedDynSolValue::String(s.clone()),
-            DynSolValue::Array(arr) => {
-                SerializedDynSolValue::Array(arr.iter().map(Into::into).collect())
-            }
-            DynSolValue::FixedArray(arr) => {
-                SerializedDynSolValue::FixedArray(arr.iter().map(Into::into).collect())
-            }
-            DynSolValue::Tuple(tuple) => {
-                SerializedDynSolValue::Tuple(tuple.iter().map(Into::into).collect())
-            }
-            DynSolValue::CustomStruct { name, prop_names, tuple } => {
-                SerializedDynSolValue::CustomStruct {
-                    name: name.clone(),
-                    prop_names: prop_names.clone(),
-                    tuple: tuple.iter().map(Into::into).collect(),
-                }
-            }
+            DynSolValue::Bool(b) => Self::Bool(*b),
+            DynSolValue::Int(i, bits) => Self::Int { value: *i, bits: *bits },
+            DynSolValue::Uint(u, bits) => Self::Uint { value: *u, bits: *bits },
+            DynSolValue::FixedBytes(bytes, size) => Self::FixedBytes { value: *bytes, size: *size },
+            DynSolValue::Address(addr) => Self::Address(*addr),
+            DynSolValue::Function(func) => Self::Function(func.0),
+            DynSolValue::Bytes(bytes) => Self::Bytes(bytes.clone()),
+            DynSolValue::String(s) => Self::String(s.clone()),
+            DynSolValue::Array(arr) => Self::Array(arr.iter().map(Into::into).collect()),
+            DynSolValue::FixedArray(arr) => Self::FixedArray(arr.iter().map(Into::into).collect()),
+            DynSolValue::Tuple(tuple) => Self::Tuple(tuple.iter().map(Into::into).collect()),
+            DynSolValue::CustomStruct { name, prop_names, tuple } => Self::CustomStruct {
+                name: name.clone(),
+                prop_names: prop_names.clone(),
+                tuple: tuple.iter().map(Into::into).collect(),
+            },
         }
     }
 }
@@ -117,34 +107,30 @@ impl From<&DynSolValue> for SerializedDynSolValue {
 impl From<SerializedDynSolValue> for DynSolValue {
     fn from(value: SerializedDynSolValue) -> Self {
         match value {
-            SerializedDynSolValue::Bool(b) => DynSolValue::Bool(b),
-            SerializedDynSolValue::Int { value, bits } => DynSolValue::Int(value, bits),
-            SerializedDynSolValue::Uint { value, bits } => DynSolValue::Uint(value, bits),
-            SerializedDynSolValue::FixedBytes { value, size } => {
-                DynSolValue::FixedBytes(value, size)
-            }
-            SerializedDynSolValue::Address(addr) => DynSolValue::Address(addr),
+            SerializedDynSolValue::Bool(b) => Self::Bool(b),
+            SerializedDynSolValue::Int { value, bits } => Self::Int(value, bits),
+            SerializedDynSolValue::Uint { value, bits } => Self::Uint(value, bits),
+            SerializedDynSolValue::FixedBytes { value, size } => Self::FixedBytes(value, size),
+            SerializedDynSolValue::Address(addr) => Self::Address(addr),
             SerializedDynSolValue::Function(func) => {
-                DynSolValue::Function(alloy_primitives::Function::from(func))
+                Self::Function(alloy_primitives::Function::from(func))
             }
-            SerializedDynSolValue::Bytes(bytes) => DynSolValue::Bytes(bytes),
-            SerializedDynSolValue::String(s) => DynSolValue::String(s),
+            SerializedDynSolValue::Bytes(bytes) => Self::Bytes(bytes),
+            SerializedDynSolValue::String(s) => Self::String(s),
             SerializedDynSolValue::Array(arr) => {
-                DynSolValue::Array(arr.into_iter().map(Into::into).collect())
+                Self::Array(arr.into_iter().map(Into::into).collect())
             }
             SerializedDynSolValue::FixedArray(arr) => {
-                DynSolValue::FixedArray(arr.into_iter().map(Into::into).collect())
+                Self::FixedArray(arr.into_iter().map(Into::into).collect())
             }
             SerializedDynSolValue::Tuple(tuple) => {
-                DynSolValue::Tuple(tuple.into_iter().map(Into::into).collect())
+                Self::Tuple(tuple.into_iter().map(Into::into).collect())
             }
-            SerializedDynSolValue::CustomStruct { name, prop_names, tuple } => {
-                DynSolValue::CustomStruct {
-                    name,
-                    prop_names,
-                    tuple: tuple.into_iter().map(Into::into).collect(),
-                }
-            }
+            SerializedDynSolValue::CustomStruct { name, prop_names, tuple } => Self::CustomStruct {
+                name,
+                prop_names,
+                tuple: tuple.into_iter().map(Into::into).collect(),
+            },
         }
     }
 }
@@ -165,7 +151,7 @@ impl<'de> Deserialize<'de> for EdbSolValue {
         D: Deserializer<'de>,
     {
         let serialized = SerializedDynSolValue::deserialize(deserializer)?;
-        Ok(EdbSolValue(serialized.into()))
+        Ok(Self(serialized.into()))
     }
 }
 
@@ -244,25 +230,25 @@ impl SolValueFormatter for DynSolValue {
         indent_level: usize,
     ) -> String {
         let value_str = match self {
-            DynSolValue::Bool(b) => b.to_string(),
+            Self::Bool(b) => b.to_string(),
 
-            DynSolValue::Int(n, bits) => {
+            Self::Int(n, bits) => {
                 if ctx.with_ty {
-                    format!("int{}({})", bits, n)
+                    format!("int{bits}({n})")
                 } else {
                     n.to_string()
                 }
             }
 
-            DynSolValue::Uint(n, bits) => {
+            Self::Uint(n, bits) => {
                 if ctx.with_ty {
-                    format!("uint{}({})", bits, n)
+                    format!("uint{bits}({n})")
                 } else {
                     n.to_string()
                 }
             }
 
-            DynSolValue::Address(addr) => {
+            Self::Address(addr) => {
                 if let Some(label) = ctx.resolve_address.as_ref().and_then(|f| f(*addr)) {
                     label
                 } else {
@@ -277,18 +263,18 @@ impl SolValueFormatter for DynSolValue {
                     };
 
                     if ctx.with_ty {
-                        format!("address({})", addr_str)
+                        format!("address({addr_str})")
                     } else {
                         addr_str
                     }
                 }
             }
 
-            DynSolValue::Function(func) => {
+            Self::Function(func) => {
                 format!("0x{}", hex::encode(func.as_slice()))
             }
 
-            DynSolValue::FixedBytes(bytes, size) => {
+            Self::FixedBytes(bytes, size) => {
                 if ctx.with_ty {
                     format!("bytes{}(0x{})", size, hex::encode(bytes))
                 } else {
@@ -296,7 +282,7 @@ impl SolValueFormatter for DynSolValue {
                 }
             }
 
-            DynSolValue::Bytes(bytes) => {
+            Self::Bytes(bytes) => {
                 if bytes.len() <= 32 || !ctx.shorten_long {
                     format!("0x{}", hex::encode(bytes))
                 } else {
@@ -304,7 +290,7 @@ impl SolValueFormatter for DynSolValue {
                 }
             }
 
-            DynSolValue::String(s) => {
+            Self::String(s) => {
                 if s.len() <= 64 || !ctx.shorten_long {
                     format!("\"{}\"", s.replace('\"', "\\\""))
                 } else {
@@ -312,13 +298,13 @@ impl SolValueFormatter for DynSolValue {
                 }
             }
 
-            DynSolValue::Array(arr) => format_array(arr, false, ctx, indent_level),
+            Self::Array(arr) => format_array(arr, false, ctx, indent_level),
 
-            DynSolValue::FixedArray(arr) => format_array(arr, true, ctx, indent_level),
+            Self::FixedArray(arr) => format_array(arr, true, ctx, indent_level),
 
-            DynSolValue::Tuple(tuple) => format_tuple(tuple, ctx, indent_level),
+            Self::Tuple(tuple) => format_tuple(tuple, ctx, indent_level),
 
-            DynSolValue::CustomStruct { name, prop_names, tuple } => {
+            Self::CustomStruct { name, prop_names, tuple } => {
                 if prop_names.is_empty() {
                     format!("{}{}", name, format_tuple(tuple, ctx, indent_level))
                 } else {
@@ -332,33 +318,33 @@ impl SolValueFormatter for DynSolValue {
 
     fn format_type(&self) -> String {
         match self {
-            DynSolValue::Bool(_) => "bool".to_string(),
-            DynSolValue::Int(_, bits) => format!("int{}", bits),
-            DynSolValue::Uint(_, bits) => format!("uint{}", bits),
-            DynSolValue::Address(_) => "address".to_string(),
-            DynSolValue::Function(_) => "function".to_string(),
-            DynSolValue::FixedBytes(_, size) => format!("bytes{}", size),
-            DynSolValue::Bytes(_) => "bytes".to_string(),
-            DynSolValue::String(_) => "string".to_string(),
-            DynSolValue::Array(arr) => {
+            Self::Bool(_) => "bool".to_string(),
+            Self::Int(_, bits) => format!("int{bits}"),
+            Self::Uint(_, bits) => format!("uint{bits}"),
+            Self::Address(_) => "address".to_string(),
+            Self::Function(_) => "function".to_string(),
+            Self::FixedBytes(_, size) => format!("bytes{size}"),
+            Self::Bytes(_) => "bytes".to_string(),
+            Self::String(_) => "string".to_string(),
+            Self::Array(arr) => {
                 if let Some(first) = arr.first() {
                     format!("{}[]", first.format_type())
                 } else {
                     "unknown[]".to_string()
                 }
             }
-            DynSolValue::FixedArray(arr) => {
+            Self::FixedArray(arr) => {
                 if let Some(first) = arr.first() {
                     format!("{}[{}]", first.format_type(), arr.len())
                 } else {
                     format!("unknown[{}]", arr.len())
                 }
             }
-            DynSolValue::Tuple(tuple) => {
+            Self::Tuple(tuple) => {
                 let types: Vec<String> = tuple.iter().map(|v| v.format_type()).collect();
                 format!("({})", types.join(","))
             }
-            DynSolValue::CustomStruct { name, .. } => name.clone(),
+            Self::CustomStruct { name, .. } => name.clone(),
         }
     }
 }

@@ -123,8 +123,8 @@ impl CallableAbiEntry {
 impl fmt::Display for AbiEntryTy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AbiEntryTy::Function => write!(f, "Function"),
-            AbiEntryTy::StateVariable(_) => write!(f, "State Variable"),
+            Self::Function => write!(f, "Function"),
+            Self::StateVariable(_) => write!(f, "State Variable"),
         }
     }
 }
@@ -146,9 +146,9 @@ impl fmt::Display for CallableAbiEntry {
 impl fmt::Display for ContractTy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContractTy::Normal => write!(f, "Normal"),
-            ContractTy::Proxy => write!(f, "Proxy"),
-            ContractTy::Implementation => write!(f, "Implementation"),
+            Self::Normal => write!(f, "Normal"),
+            Self::Proxy => write!(f, "Proxy"),
+            Self::Implementation => write!(f, "Implementation"),
         }
     }
 }
@@ -158,7 +158,7 @@ impl fmt::Display for CallableAbiInfo {
         writeln!(f, "Contract: {} ({})", self.address, self.contract_ty)?;
         writeln!(f, "Callable ABI Entries ({} entries):", self.entries.len())?;
         for entry in &self.entries {
-            writeln!(f, "  {}", entry)?;
+            writeln!(f, "  {entry}")?;
         }
         Ok(())
     }
@@ -185,9 +185,7 @@ where
         .borrow()
         .abi
         .as_ref()
-        .and_then(|json_abi| {
-            Some(json_abi.functions().map(|f| CallableAbiEntry::from(f)).collect())
-        })
+        .map(|json_abi| json_abi.functions().map(CallableAbiEntry::from).collect())
         .unwrap_or_default();
 
     // Sort the entries by type (state variables first), then by name

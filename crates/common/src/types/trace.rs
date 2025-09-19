@@ -39,17 +39,17 @@ pub enum CallType {
 #[auto_impl(&, &mut, Box, Rc, Arc)]
 trait IntoCallType {
     /// Convert this input type to its corresponding CallType variant
-    fn into_call_type(&self) -> CallType;
+    fn convert_to_call_type(&self) -> CallType;
 }
 
 impl IntoCallType for CallInputs {
-    fn into_call_type(&self) -> CallType {
+    fn convert_to_call_type(&self) -> CallType {
         CallType::Call(self.scheme)
     }
 }
 
 impl IntoCallType for CreateInputs {
-    fn into_call_type(&self) -> CallType {
+    fn convert_to_call_type(&self) -> CallType {
         CallType::Create(self.scheme)
     }
 }
@@ -59,7 +59,7 @@ where
     T: IntoCallType,
 {
     fn from(value: T) -> Self {
-        value.into_call_type()
+        value.convert_to_call_type()
     }
 }
 
@@ -93,8 +93,8 @@ impl PartialEq for CallResult {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (
-                CallResult::Success { output: out1, result: res1 },
-                CallResult::Success { output: out2, result: res2 },
+                Self::Success { output: out1, result: res1 },
+                Self::Success { output: out2, result: res2 },
             ) => {
                 if out1.is_empty() && out2.is_empty() {
                     // When the return data is empty, we allow STOP equals to RETURN
@@ -108,12 +108,12 @@ impl PartialEq for CallResult {
                 }
             }
             (
-                CallResult::Revert { output: out1, result: res1 },
-                CallResult::Revert { output: out2, result: res2 },
+                Self::Revert { output: out1, result: res1 },
+                Self::Revert { output: out2, result: res2 },
             ) => out1 == out2 && res1 == res2,
             (
-                CallResult::Error { output: out1, result: res1 },
-                CallResult::Error { output: out2, result: res2 },
+                Self::Error { output: out1, result: res1 },
+                Self::Error { output: out2, result: res2 },
             ) => out1 == out2 && res1 == res2,
             _ => false,
         }
@@ -126,18 +126,18 @@ impl CallResult {
     /// Get the instruction result code from this call result
     pub fn result(&self) -> InstructionResult {
         match self {
-            CallResult::Success { result, .. } => *result,
-            CallResult::Revert { result, .. } => *result,
-            CallResult::Error { result, .. } => *result,
+            Self::Success { result, .. } => *result,
+            Self::Revert { result, .. } => *result,
+            Self::Error { result, .. } => *result,
         }
     }
 
     /// Get the output bytes from this call result (return data or revert reason)
     pub fn output(&self) -> &Bytes {
         match self {
-            CallResult::Success { output, .. } => output,
-            CallResult::Revert { output, .. } => output,
-            CallResult::Error { output, .. } => output,
+            Self::Success { output, .. } => output,
+            Self::Revert { output, .. } => output,
+            Self::Error { output, .. } => output,
         }
     }
 }
@@ -146,59 +146,35 @@ impl CallResult {
 #[auto_impl(&, &mut, Box, Rc, Arc)]
 trait IntoCallResult {
     /// Convert this outcome type to its corresponding CallResult variant
-    fn into_call_result(&self) -> CallResult;
+    fn convert_to_call_result(&self) -> CallResult;
 }
 
 impl IntoCallResult for CallOutcome {
-    fn into_call_result(&self) -> CallResult {
+    fn convert_to_call_result(&self) -> CallResult {
         if self.result.is_ok() {
-            CallResult::Success {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Success { output: self.result.output.clone(), result: self.result.result }
         } else if self.result.is_revert() {
-            CallResult::Revert {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Revert { output: self.result.output.clone(), result: self.result.result }
         } else if self.result.is_error() {
-            CallResult::Error {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Error { output: self.result.output.clone(), result: self.result.result }
         } else {
             error!("Unexpected call outcome, we use CallResult::Error");
-            CallResult::Error {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Error { output: self.result.output.clone(), result: self.result.result }
         }
     }
 }
 
 impl IntoCallResult for CreateOutcome {
-    fn into_call_result(&self) -> CallResult {
+    fn convert_to_call_result(&self) -> CallResult {
         if self.result.is_ok() {
-            CallResult::Success {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Success { output: self.result.output.clone(), result: self.result.result }
         } else if self.result.is_revert() {
-            CallResult::Revert {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Revert { output: self.result.output.clone(), result: self.result.result }
         } else if self.result.is_error() {
-            CallResult::Error {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Error { output: self.result.output.clone(), result: self.result.result }
         } else {
             error!("Unexpected create outcome, we use CallResult::Error");
-            CallResult::Error {
-                output: self.result.output.clone(),
-                result: self.result.result.clone(),
-            }
+            CallResult::Error { output: self.result.output.clone(), result: self.result.result }
         }
     }
 }
@@ -208,7 +184,7 @@ where
     T: IntoCallResult,
 {
     fn from(value: T) -> Self {
-        value.into_call_result()
+        value.convert_to_call_result()
     }
 }
 
@@ -407,13 +383,7 @@ impl Trace {
 
         // Format the result indicator
         let (result_indicator, result_color) = match &entry.result {
-            Some(CallResult::Success { output, .. }) => {
-                if output.is_empty() {
-                    ("✓", "\x1b[32m")
-                } else {
-                    ("✓", "\x1b[32m")
-                }
-            }
+            Some(CallResult::Success { .. }) => ("✓", "\x1b[32m"),
             Some(CallResult::Revert { .. }) => ("✗", "\x1b[31m"),
             Some(CallResult::Error { .. }) => {
                 ("☠", "\x1b[31m") // TODO (change icon)
@@ -451,19 +421,16 @@ impl Trace {
         };
 
         // Print the formatted entry with cleaner layout
-        print!(
-            "{}{}{:12}\x1b[0m {} {} {}",
-            tree_str, type_color, call_type_str, caller_str, arrow, target_str
-        );
+        print!("{tree_str}{type_color}{call_type_str:12}\x1b[0m {caller_str} {arrow} {target_str}");
 
         // Add result indicator at the end
         if !result_indicator.is_empty() {
-            print!(" {}{} \x1b[0m", result_color, result_indicator);
+            print!(" {result_color}{result_indicator} \x1b[0m");
         }
 
         // Add value if present
         if !value_str.is_empty() {
-            print!("{}", value_str);
+            print!("{value_str}");
         }
 
         // Add self-destruct indicator if present
@@ -481,7 +448,7 @@ impl Trace {
         if entry.input.len() > 4 {
             let data_preview = format_data_preview(&entry.input);
             let padding = "    ".repeat(indent_level + 1);
-            println!("{}\x1b[90m└ Calldata: {}\x1b[0m", padding, data_preview);
+            println!("{padding}\x1b[90m└ Calldata: {data_preview}\x1b[0m");
         }
 
         // Print events if any
@@ -490,9 +457,9 @@ impl Trace {
             for (i, event) in entry.events.iter().enumerate() {
                 let event_str = format_event(event);
                 if i == 0 {
-                    println!("{}\x1b[96m└ Events:\x1b[0m", padding);
+                    println!("{padding}\x1b[96m└ Events:\x1b[0m");
                 }
-                println!("{}    \x1b[96m• {}\x1b[0m", padding, event_str);
+                println!("{padding}    \x1b[96m• {event_str}\x1b[0m");
             }
         }
 
@@ -507,7 +474,7 @@ impl Trace {
             } else {
                 format!("Error output: 0x{}", hex::encode(output))
             };
-            println!("{}\x1b[91m└ ⚠️  {}\x1b[0m", padding, error_msg);
+            println!("{padding}\x1b[91m└ ⚠️  {error_msg}\x1b[0m");
         }
 
         // Get children and recursively print them
@@ -551,15 +518,14 @@ impl Trace {
         let max_depth = self.inner.iter().map(|e| e.depth).max().unwrap_or(0);
 
         println!("\x1b[36mSummary:\x1b[0m");
-        println!("  Total: {} | \x1b[32mSuccess: {}\x1b[0m | \x1b[31mReverts: {}\x1b[0m | \x1b[91mErrors: {}\x1b[0m | \x1b[94mCalls: {}\x1b[0m | \x1b[93mCreates: {}\x1b[0m | Depth: {}",
-                 total, successful, reverted, errors, calls, creates, max_depth);
+        println!("  Total: {total} | \x1b[32mSuccess: {successful}\x1b[0m | \x1b[31mReverts: {reverted}\x1b[0m | \x1b[91mErrors: {errors}\x1b[0m | \x1b[94mCalls: {calls}\x1b[0m | \x1b[93mCreates: {creates}\x1b[0m | Depth: {max_depth}");
 
         if self_destructs > 0 {
-            println!("  \x1b[91m💀 Self-destructs: {}\x1b[0m", self_destructs);
+            println!("  \x1b[91m💀 Self-destructs: {self_destructs}\x1b[0m");
         }
 
         if total_events > 0 {
-            println!("  \x1b[96m📝 Events: {} (in {} calls)\x1b[0m", total_events, with_events);
+            println!("  \x1b[96m📝 Events: {total_events} (in {with_events} calls)\x1b[0m");
         }
     }
 
@@ -583,7 +549,7 @@ fn format_address_short(addr: Address) -> String {
     if addr == Address::ZERO {
         "0x0".to_string()
     } else {
-        format!("{:?}", addr)
+        addr.to_checksum(None)
     }
 }
 
@@ -605,7 +571,7 @@ fn format_ether(value: U256) -> String {
     let eth_value = value.to_string();
     if eth_value.len() <= 18 {
         // Less than 1 ETH - show significant digits only
-        let padded = format!("{:0>18}", eth_value);
+        let padded = format!("{eth_value:0>18}");
         let trimmed = padded.trim_end_matches('0');
         if trimmed.is_empty() {
             "0".to_string()
@@ -619,7 +585,7 @@ fn format_ether(value: U256) -> String {
         if decimal_trimmed.is_empty() {
             whole.to_string()
         } else {
-            format!("{}.{}", whole, decimal_trimmed)
+            format!("{whole}.{decimal_trimmed}")
         }
     }
 }
@@ -639,11 +605,11 @@ fn format_event(event: &LogData) -> String {
         let sig_preview = format!("0x{}...", hex::encode(&sig_hash.as_slice()[..4]));
 
         if additional_topics > 0 && data_len > 0 {
-            format!("{} ({} indexed, {} bytes data)", sig_preview, additional_topics, data_len)
+            format!("{sig_preview} ({additional_topics} indexed, {data_len} bytes data)")
         } else if additional_topics > 0 {
-            format!("{} ({} indexed params)", sig_preview, additional_topics)
+            format!("{sig_preview} ({additional_topics} indexed params)")
         } else if data_len > 0 {
-            format!("{} ({} bytes data)", sig_preview, data_len)
+            format!("{sig_preview} ({data_len} bytes data)")
         } else {
             sig_preview
         }

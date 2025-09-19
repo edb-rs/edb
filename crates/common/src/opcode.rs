@@ -77,38 +77,38 @@ impl OpcodeTr for OpCode {
         matches!(
             *self,
             // Storage modifications - writes to persistent contract storage
-            OpCode::SSTORE |
+            Self::SSTORE |
 
             // Account state changes - create/destroy accounts
-            OpCode::CREATE |     // Create new contract account
-            OpCode::CREATE2 |    // Create new contract with deterministic address
-            OpCode::SELFDESTRUCT | // Destroy current contract and transfer balance
+            Self::CREATE |     // Create new contract account
+            Self::CREATE2 |    // Create new contract with deterministic address
+            Self::SELFDESTRUCT | // Destroy current contract and transfer balance
 
             // Balance transfers - modify account balances
-            OpCode::CALL |       // External call that can transfer ETH
-            OpCode::CALLCODE |   // Call with current account context (deprecated)
+            Self::CALL |       // External call that can transfer ETH
+            Self::CALLCODE |   // Call with current account context (deprecated)
 
             // Log emissions - add entries to transaction receipt logs
-            OpCode::LOG0 | OpCode::LOG1 | OpCode::LOG2 | OpCode::LOG3 | OpCode::LOG4
+            Self::LOG0 | Self::LOG1 | Self::LOG2 | Self::LOG3 | Self::LOG4
         )
     }
 
     fn modifies_transient_storage(&self) -> bool {
         matches!(
             *self,
-            OpCode::TSTORE // Write to transient storage (EIP-1153)
+            Self::TSTORE // Write to transient storage (EIP-1153)
         )
     }
 
     fn is_call(&self) -> bool {
         matches!(
             *self,
-            OpCode::CREATE
-                | OpCode::CREATE2
-                | OpCode::CALL
-                | OpCode::CALLCODE
-                | OpCode::DELEGATECALL
-                | OpCode::STATICCALL
+            Self::CREATE
+                | Self::CREATE2
+                | Self::CALL
+                | Self::CALLCODE
+                | Self::DELEGATECALL
+                | Self::STATICCALL
         )
     }
 }

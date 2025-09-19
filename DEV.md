@@ -2,6 +2,8 @@
 
 This comprehensive guide provides everything you need to develop, test, and contribute to the Ethereum Debugger (EDB) project.
 
+*This development guide was crafted with Claude with Love ❤️*
+
 ## 🛠️ Prerequisites
 
 ### System Requirements
@@ -35,70 +37,84 @@ EDB/
 │   │   │       ├── replay.rs  # Transaction replay command
 │   │   │       ├── debug.rs   # Foundry test debugging
 │   │   │       └── proxy_status.rs
+│   │   ├── tests/
 │   │   └── Cargo.toml
 │   │
-│   ├── common/                # Shared utilities
+│   ├── common/                # Shared utilities and types
 │   │   ├── src/
-│   │   │   ├── lib.rs         # Public API
+│   │   │   ├── lib.rs         # Public API and re-exports
 │   │   │   ├── cache.rs       # Caching infrastructure
 │   │   │   ├── context.rs     # EVM context wrappers
 │   │   │   ├── forking.rs     # Chain forking with REVM
-│   │   │   ├── logging.rs     # Fancy logging setup
+│   │   │   ├── logging.rs     # Structured logging setup
 │   │   │   ├── opcode.rs      # Opcode analysis utilities
-│   │   │   ├── spec_id.rs     # Hardfork mapping
-│   │   │   └── types/         # Common types
+│   │   │   ├── spec_id.rs     # Hardfork specification mapping
+│   │   │   └── types/         # Shared data structures
 │   │   │       ├── mod.rs
-│   │   │       ├── trace.rs   # Trace structures
-│   │   │       └── execution_frame.rs
+│   │   │       ├── abi.rs     # ABI type definitions
+│   │   │       ├── code.rs    # Code representation (opcode/source)
+│   │   │       ├── execution_frame.rs # Execution frame types
+│   │   │       ├── snapshot.rs # Snapshot information
+│   │   │       ├── sol_value.rs # Solidity value handling
+│   │   │       └── trace.rs   # Execution trace structures
 │   │   ├── tests/
-│   │   │   └── forking_tests.rs
 │   │   └── Cargo.toml
 │   │
 │   ├── engine/                # Core debugging engine
 │   │   ├── src/
-│   │   │   ├── lib.rs         # Public API
+│   │   │   ├── lib.rs         # Public API and configuration
 │   │   │   ├── core.rs        # Main engine orchestration
-│   │   │   ├── context.rs     # Engine context and state
-│   │   │   ├── snapshot.rs    # Dual-layer snapshots
-│   │   │   ├── source.rs      # Source code download
-│   │   │   ├── tweak.rs       # Bytecode replacement
-│   │   │   ├── analysis/      # AST analysis
+│   │   │   ├── analysis/      # AST analysis and processing
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── analyzer.rs # Main analyzer
-│   │   │   │   ├── annotation.rs
-│   │   │   │   ├── common.rs
-│   │   │   │   ├── hook.rs    # Hook placement
-│   │   │   │   ├── step.rs    # Execution steps
+│   │   │   │   ├── analyzer.rs # Source code analysis
+│   │   │   │   ├── annotation.rs # Code annotations
+│   │   │   │   ├── common.rs  # Shared analysis utilities
+│   │   │   │   ├── contract.rs # Contract-level analysis
+│   │   │   │   ├── function.rs # Function-level analysis
+│   │   │   │   ├── hook.rs    # Hook placement logic
+│   │   │   │   ├── step.rs    # Execution step analysis
+│   │   │   │   ├── types.rs   # Analysis type definitions
 │   │   │   │   ├── variable.rs # Variable tracking
-│   │   │   │   └── visitor.rs # AST visitor
-│   │   │   ├── inspector/     # REVM inspectors
+│   │   │   │   └── visitor.rs # AST visitor pattern
+│   │   │   ├── eval/          # Expression evaluation system
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── call_tracer.rs
-│   │   │   │   ├── hook_snapshot_inspector.rs
-│   │   │   │   ├── opcode_snapshot_inspector.rs
-│   │   │   │   └── tweak_inspector.rs
+│   │   │   │   ├── evaluator.rs # Expression evaluator
+│   │   │   │   └── handlers/  # Evaluation handlers
+│   │   │   │       ├── mod.rs
+│   │   │   │       └── edb.rs # EDB-specific evaluation
+│   │   │   ├── inspector/     # REVM execution inspectors
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── call_tracer.rs # Call trace collection
+│   │   │   │   ├── hook_snapshot_inspector.rs # Source-level snapshots
+│   │   │   │   ├── opcode_snapshot_inspector.rs # Opcode-level snapshots
+│   │   │   │   └── tweak_inspector.rs # Bytecode modification
 │   │   │   ├── instrumentation/ # Code instrumentation
 │   │   │   │   ├── mod.rs
-│   │   │   │   └── common.rs
-│   │   │   ├── rpc/           # JSON-RPC server
+│   │   │   │   ├── codegen.rs # Code generation
+│   │   │   │   └── modification.rs # Source modification
+│   │   │   ├── rpc/           # JSON-RPC debugging server
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── server.rs
-│   │   │   │   ├── types.rs
-│   │   │   │   ├── utils.rs
-│   │   │   │   └── methods/
+│   │   │   │   ├── server.rs  # RPC server implementation
+│   │   │   │   ├── types.rs   # RPC type definitions
+│   │   │   │   └── methods/   # RPC method handlers
 │   │   │   │       ├── mod.rs
-│   │   │   │       ├── navigation.rs
-│   │   │   │       └── trace.rs
+│   │   │   │       ├── navigation.rs # Navigation commands
+│   │   │   │       └── trace.rs # Trace access
+│   │   │   ├── snapshot/      # Snapshot management
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── analysis.rs # Snapshot analysis
+│   │   │   │   └── pretty_print.rs # Snapshot formatting
 │   │   │   └── utils/         # Engine utilities
 │   │   │       ├── mod.rs
-│   │   │       ├── artifact.rs
-│   │   │       ├── ast_prune.rs
-│   │   │       ├── disasm.rs
-│   │   │       ├── etherscan.rs
-│   │   │       └── onchain_compiler.rs
+│   │   │       ├── abi.rs     # ABI utilities
+│   │   │       ├── artifact.rs # Contract artifact handling
+│   │   │       ├── ast_prune.rs # AST optimization
+│   │   │       ├── compilation.rs # Compilation utilities
+│   │   │       ├── disasm.rs  # Disassembly utilities
+│   │   │       ├── etherscan.rs # Etherscan integration
+│   │   │       └── source.rs  # Source code processing
 │   │   ├── tests/
-│   │   │   ├── config_tests.rs
-│   │   │   └── source_tests.rs
+│   │   │   └── config_tests.rs # Configuration tests
 │   │   └── Cargo.toml
 │   │
 │   ├── rpc-proxy/             # Caching RPC proxy
@@ -122,47 +138,52 @@ EDB/
 │   │   │   └── integration_tests.rs
 │   │   └── Cargo.toml
 │   │
-│   ├── tui/                   # Terminal UI
+│   ├── tui/                   # Terminal user interface
 │   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── app.rs         # Main TUI application
-│   │   │   ├── config.rs      # Configuration
-│   │   │   ├── layout.rs      # Panel layout
-│   │   │   ├── rpc.rs         # RPC client
+│   │   │   ├── lib.rs         # TUI library and main runner
+│   │   │   ├── app.rs         # Main TUI application logic
+│   │   │   ├── config.rs      # TUI configuration
+│   │   │   ├── layout.rs      # Panel layout management
+│   │   │   ├── rpc.rs         # RPC client for engine communication
 │   │   │   ├── bin/
-│   │   │   │   └── main.rs    # TUI binary
-│   │   │   ├── managers/      # Resource management
+│   │   │   │   └── main.rs    # TUI standalone binary
+│   │   │   ├── data/          # Data management
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── execution.rs
-│   │   │   │   ├── resource.rs
-│   │   │   │   └── theme.rs
+│   │   │   │   └── manager/   # Data core managers
+│   │   │   │       ├── mod.rs
+│   │   │   │       ├── execution.rs # Execution state management
+│   │   │   │       └── resolver.rs # Variable resolution
 │   │   │   ├── panels/        # UI panels
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── code.rs    # Source code display
-│   │   │   │   ├── display.rs # Variable display
-│   │   │   │   ├── terminal.rs # Command input
-│   │   │   │   └── trace.rs   # Execution trace
-│   │   │   └── ui/            # UI components
+│   │   │   │   ├── code.rs    # Source code display panel
+│   │   │   │   ├── display.rs # Variable display panel
+│   │   │   │   ├── help.rs    # Help and documentation panel
+│   │   │   │   ├── terminal.rs # Command input panel
+│   │   │   │   ├── trace.rs   # Execution trace panel
+│   │   │   │   └── utils.rs   # Panel utilities
+│   │   │   └── ui/            # UI components and styling
 │   │   │       ├── mod.rs
-│   │   │       ├── borders.rs
-│   │   │       ├── colors.rs
-│   │   │       ├── icons.rs
-│   │   │       ├── spinner.rs
-│   │   │       ├── status.rs
+│   │   │       ├── borders.rs # Border styling
+│   │   │       ├── colors.rs  # Color schemes and themes
+│   │   │       ├── icons.rs   # Unicode icons and symbols
+│   │   │       ├── spinner.rs # Loading animations
+│   │   │       ├── status.rs  # Status indicators
 │   │   │       └── syntax/    # Syntax highlighting
 │   │   │           ├── mod.rs
-│   │   │           ├── opcodes.rs
-│   │   │           └── solidity.rs
+│   │   │           ├── opcodes.rs # EVM opcode highlighting
+│   │   │           └── solidity.rs # Solidity syntax highlighting
+│   │   ├── tests/
 │   │   └── Cargo.toml
 │   │
-│   ├── webui/                 # Web UI (planned)
+│   ├── webui/                 # Web UI (experimental)
 │   │   ├── src/
 │   │   │   └── lib.rs         # Axum server skeleton
+│   │   ├── tests/
 │   │   └── Cargo.toml
 │   │
-│   └── integration-tests/     # End-to-end tests
+│   └── integration-tests/     # End-to-end integration tests
 │       ├── tests/
-│       │   └── forking_with_proxy_tests.rs
+│       │   └── forking_with_proxy_tests.rs # Proxy integration tests
 │       └── Cargo.toml
 │
 ├── testdata/                  # Test data and cache
@@ -193,10 +214,15 @@ cargo build --workspace
 # Run tests to verify setup
 cargo test --workspace
 
-# Install binaries locally
-cargo install --path crates/edb
-cargo install --path crates/rpc-proxy
-cargo install --path crates/tui
+# Install binaries locally (optional)
+cargo install --path crates/edb        # Main EDB CLI
+cargo install --path crates/rpc-proxy  # RPC caching proxy
+cargo install --path crates/tui        # Terminal UI
+
+# Or run directly during development
+cargo run -p edb -- --help
+cargo run -p edb-rpc-proxy -- --help
+cargo run -p edb-tui -- --help
 ```
 
 ### Environment Configuration
@@ -242,22 +268,31 @@ ETH_RPC_URL=https://eth.llamarpc.com cargo test -- --ignored
 
 ### Test Coverage Areas
 
-#### Common Crate Tests
-- **Forking Tests**: Real transaction replay with REVM
-- **SpecId Tests**: Hardfork mapping verification
-- **Cache Tests**: TTL and persistence testing
-- **Context Tests**: EVM wrapper functionality
+#### Common Crate Tests (`crates/common/tests/`)
+- **Forking Tests**: Real transaction replay with REVM integration
+- **Cache Tests**: TTL and persistence functionality
+- **Context Tests**: EVM wrapper and database functionality
+- **Logging Tests**: Structured logging configuration
 
-#### Engine Crate Tests
-- **Analysis Tests**: AST parsing and step identification
-- **Source Tests**: Etherscan download and caching
-- **Instrumentation Tests**: Hook insertion verification
-- **Snapshot Tests**: State capture accuracy
+#### Engine Crate Tests (`crates/engine/tests/`)
+- **Configuration Tests**: Engine setup and configuration validation
+- **Analysis Tests**: AST parsing and execution step identification
+- **Evaluation Tests**: Expression evaluation and type casting
+- **Instrumentation Tests**: Code modification and hook insertion
+- **Snapshot Tests**: State capture and navigation accuracy
 
-#### RPC Proxy Tests
-- **Cache Tests**: Response caching behavior
-- **Provider Tests**: Load balancing and failover
-- **Health Tests**: Provider health monitoring
+#### RPC Proxy Tests (`crates/rpc-proxy/tests/`)
+- **Integration Tests**: End-to-end proxy functionality
+- **Cache Tests**: Response caching and invalidation behavior
+- **Provider Tests**: Load balancing, failover, and health monitoring
+- **Metrics Tests**: Performance metrics collection and reporting
+
+#### CLI Tests (`crates/edb/tests/`)
+- **CLI Tests**: Command-line interface and argument parsing
+- **Command Tests**: Transaction replay and debugging commands
+
+#### Integration Tests (`crates/integration-tests/tests/`)
+- **Forking with Proxy Tests**: Complete workflow testing with caching proxy
 
 ### Writing Tests
 
@@ -336,20 +371,35 @@ perf report
 
 ### Module Responsibilities
 
-#### Common Crate
-- **Purpose**: Shared utilities with no domain logic
-- **Dependencies**: Minimal, only essential libraries
-- **Exports**: Types, traits, and utility functions
+#### Common Crate (`edb-common`)
+- **Purpose**: Shared utilities and types across all EDB components
+- **Dependencies**: Minimal core libraries (REVM, Alloy, serde)
+- **Exports**: Common types, caching, logging, forking utilities
+- **Key Features**: Chain forking, execution context, trace types
 
-#### Engine Crate
-- **Purpose**: Core debugging logic and analysis
-- **Dependencies**: Common crate, Foundry libraries
-- **State**: Immutable after preparation
+#### Engine Crate (`edb-engine`)
+- **Purpose**: Core debugging engine with analysis and execution
+- **Dependencies**: Common crate, Foundry/Alloy ecosystem
+- **Key Features**: AST analysis, code instrumentation, snapshot management, expression evaluation
+- **State**: Immutable after preparation, thread-safe execution
 
-#### UI Crates (TUI/WebUI)
-- **Purpose**: User interaction and visualization
-- **Dependencies**: Engine RPC client
-- **State**: Manages UI state, not debugging state
+#### RPC Proxy Crate (`edb-rpc-proxy`)
+- **Purpose**: Intelligent caching proxy for Ethereum RPC endpoints
+- **Dependencies**: Common crate, HTTP client libraries
+- **Key Features**: Response caching, provider load balancing, health monitoring
+- **State**: Persistent cache with TTL, provider health tracking
+
+#### TUI Crate (`edb-tui`)
+- **Purpose**: Terminal-based debugging interface
+- **Dependencies**: Engine RPC client, terminal UI libraries (ratatui)
+- **Key Features**: Multi-panel interface, syntax highlighting, real-time updates
+- **State**: UI state management, no debugging logic
+
+#### CLI Crate (`edb`)
+- **Purpose**: Command-line interface and workflow orchestration
+- **Dependencies**: Engine and proxy crates
+- **Key Features**: Transaction replay, proxy management, CLI argument parsing
+- **State**: Stateless command execution
 
 ### Code Patterns
 
@@ -466,6 +516,27 @@ let result = ctx.build_mainnet_with_inspector(&mut inspector)
     .transact_commit(tx_env)?;
 ```
 
+### Adding Expression Evaluation Features
+
+The engine includes a powerful expression evaluation system for debugging:
+
+```rust
+// Add a new evaluation handler in engine/src/eval/handlers/
+pub async fn handle_new_expression(
+    params: &[String],
+    context: &EdbExecutionContext,
+) -> Result<String> {
+    // Custom evaluation logic
+    Ok(result)
+}
+
+// Register in the evaluation dispatcher
+match function_name {
+    "myFunction" => handle_new_expression(params, context).await,
+    // ...
+}
+```
+
 ### Adding UI Components
 
 #### TUI Panel
@@ -477,11 +548,11 @@ pub struct MyPanel {
 
 impl Panel for MyPanel {
     fn render(&mut self, f: &mut Frame, area: Rect) {
-        // Render logic
+        // Render logic using ratatui
     }
 
-    fn handle_input(&mut self, key: KeyEvent) -> Result<()> {
-        // Input handling
+    fn handle_input(&mut self, key: KeyEvent) -> Result<EventResponse> {
+        // Input handling with proper event responses
     }
 }
 ```
@@ -491,29 +562,46 @@ impl Panel for MyPanel {
 ### Common Issues
 
 #### "No transport enabled" Error
-**Solution**: Enable `reqwest` feature in Cargo.toml:
+**Solution**: Enable the correct features for Alloy provider:
 ```toml
-alloy-provider = { version = "...", features = ["reqwest"] }
+alloy-provider = { version = "0.8", features = ["reqwest"] }
+alloy-transport-http = { version = "0.8" }
 ```
 
-#### REVM API Changes
-**Solution**: Use new Context-based API:
+#### REVM v28+ API Changes
+**Solution**: Use the new Context-based API pattern:
 ```rust
-// Old: evm.into_context()
-// New: evm.ctx
+// Current pattern for REVM v28+
+let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
+let result = evm.transact_commit()?;
 ```
 
-#### Transaction Field Access
-**Solution**: Use accessor methods:
+#### Expression Evaluation Syntax Errors
+**Solution**: Follow Solidity-like syntax for debugging expressions:
 ```rust
-// Old: tx.gas_limit
-// New: tx.gas_limit()
+// Examples of valid expressions
+"block.number"           // Access block information
+"msg.sender"            // Access transaction context
+"balanceOf(0x123...)"   // Call contract functions
+"myVar"                 // Access local variables
 ```
 
-#### Compilation Errors with Dependencies
-**Solution**: Ensure all Foundry dependencies use same versions:
+#### Compilation Errors with Foundry Dependencies
+**Solution**: Ensure consistent versions across the Alloy ecosystem:
 ```bash
 cargo tree -d  # Check for duplicate dependencies
+cargo update   # Update to compatible versions
+```
+
+#### TUI Rendering Issues
+**Solution**: Ensure terminal compatibility and proper sizing:
+```bash
+# Test terminal capabilities
+echo $TERM
+resize      # Check terminal size
+
+# Run with debug output
+RUST_LOG=debug cargo run -p edb-tui
 ```
 
 ### Performance Issues
@@ -597,21 +685,22 @@ cargo publish -p edb
 ## 📚 Resources
 
 ### Documentation
-- [REVM Documentation](https://github.com/bluealloy/revm)
-- [Alloy Documentation](https://github.com/alloy-rs/alloy)
-- [Foundry Book](https://book.getfoundry.sh/)
-- [Ethereum Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf)
+- [REVM Documentation](https://github.com/bluealloy/revm) - EVM implementation in Rust
+- [Alloy Documentation](https://alloy.rs/) - Ethereum library ecosystem
+- [Foundry Book](https://book.getfoundry.sh/) - Smart contract development toolkit
+- [Ratatui Documentation](https://ratatui.rs/) - Terminal UI library
+- [Ethereum Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf) - EVM specification
 
-### Tools
-- [Etherscan API](https://docs.etherscan.io/)
-- [Cast (Foundry CLI)](https://book.getfoundry.sh/cast/)
-- [Tenderly Debugger](https://tenderly.co/) (for comparison)
+### Development Tools
+- [Etherscan API](https://docs.etherscan.io/) - Blockchain data and verified contracts
+- [Cast (Foundry CLI)](https://book.getfoundry.sh/cast/) - Command-line Ethereum toolkit
+- [Tenderly Debugger](https://tenderly.co/) - Web-based transaction debugger (comparison)
+- [EVM Opcodes](https://www.evm.codes/) - Complete opcode reference
+- [Solidity Documentation](https://docs.soliditylang.org/) - Smart contract language
 
-### Community
-- [EDB GitHub Issues](https://github.com/MedGa-eth/EDB/issues)
-- [Foundry Discord](https://discord.gg/foundry)
-- [Ethereum StackExchange](https://ethereum.stackexchange.com/)
+### Community & Support
+- [EDB GitHub Repository](https://github.com/MedGa-eth/EDB) - Source code and issues
+- [Foundry Discord](https://discord.gg/foundry) - Development community
+- [Ethereum StackExchange](https://ethereum.stackexchange.com/) - Technical Q&A
+- [Rust Programming Language](https://www.rust-lang.org/) - Core language resources
 
----
-
-*This development guide was crafted with Claude with Love ❤️*

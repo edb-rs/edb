@@ -85,7 +85,7 @@ pub fn init_logging(component_name: &str, enable_file_logging: bool) -> Result<(
         let log_dir = create_log_directory(component_name)?;
 
         // Create file appender with daily rotation
-        let file_appender = rolling::daily(&log_dir, format!("{}.log", component_name));
+        let file_appender = rolling::daily(&log_dir, format!("{component_name}.log"));
         let (non_blocking_appender, guard) = non_blocking(file_appender);
 
         // Store guard to prevent it from being dropped
@@ -210,10 +210,10 @@ pub fn init_file_only_logging(component_name: &str) -> Result<PathBuf> {
 
     // Create log directory in temp folder
     let log_dir = create_log_directory(component_name)?;
-    let log_file_path = log_dir.join(format!("{}.log", component_name));
+    let log_file_path = log_dir.join(format!("{component_name}.log"));
 
     // Create file appender with daily rotation
-    let file_appender = rolling::daily(&log_dir, format!("{}.log", component_name));
+    let file_appender = rolling::daily(&log_dir, format!("{component_name}.log"));
     let (non_blocking_appender, guard) = non_blocking(file_appender);
 
     // Store guard to prevent it from being dropped
@@ -288,7 +288,7 @@ static TEST_LOGGING_INIT: Once = Once::new();
 /// - Idempotent - multiple calls are safe and efficient
 ///
 /// # Usage
-/// ```rust
+/// ```rust,ignore
 /// use edb_common::logging;
 /// use tracing::info;
 ///
