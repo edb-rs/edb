@@ -66,7 +66,8 @@ impl ExpressionEvaluator {
     /// Evaluate an expression against a specific snapshot
     pub fn eval(&self, expr: &str, snapshot_id: usize) -> Result<DynSolValue> {
         // Parse the expression
-        let parsed_expr = parse_input(expr)?;
+        let parsed_expr =
+            parse_input(expr).map_err(|_| eyre::eyre!("Invalid expression \"{expr}\""))?;
 
         // Evaluate the parsed expression
         let value = self.evaluate_expression(&parsed_expr, snapshot_id)?;
@@ -83,8 +84,20 @@ impl ExpressionEvaluator {
     fn evaluate_expression(&self, expr: &Expression, snapshot_id: usize) -> Result<DynSolValue> {
         match expr {
             // Literals
-            Expression::NumberLiteral(_, value, _, _) => self.evaluate_number_literal(value),
-            Expression::HexNumberLiteral(_, value, _) => self.evaluate_number_literal(value),
+            Expression::NumberLiteral(_, value, _, ident) => {
+                if ident.is_none() {
+                    self.evaluate_number_literal(value)
+                } else {
+                    bail!("Invalid number literal")
+                }
+            }
+            Expression::HexNumberLiteral(_, value, ident) => {
+                if ident.is_none() {
+                    self.evaluate_number_literal(value)
+                } else {
+                    bail!("Invalid hex number literal")
+                }
+            }
             Expression::StringLiteral(literals) => self.evaluate_string_literal(literals),
             Expression::BoolLiteral(_, value) => Ok(DynSolValue::Bool(*value)),
             Expression::AddressLiteral(_, addr) => self.evaluate_address_literal(addr),

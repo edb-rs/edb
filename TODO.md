@@ -19,7 +19,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Support state-dependent breakpoints
   - Add breakpoint management UI
 
-- [ ] **Custom Expression Evaluation**
+- [x] **Custom Expression Evaluation**
   - Enable custom watcher expressions
   - Support runtime expression evaluation
   - Add expression history and favorites
@@ -61,6 +61,12 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Support debugging of constructor execution
   - Track contract deployment context and initialization
   - Handle CREATE and CREATE2 opcodes properly during replay
+
+- [ ] **EngineContext Caching**
+  - Cache analyzed EngineContext to disk for reuse
+  - Implement cache invalidation strategy
+  - Support incremental analysis updates
+  - Reduce re-analysis time for repeated debugging sessions
 
 ### 🔧 Milestone 4: Tool Integration
 **Goal**: Seamless integration with popular Ethereum development tools
@@ -135,7 +141,18 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Collaborative debugging with session sharing
 
 
-### ✅ Milestone 10: Comprehensive Testing
+### 📊 Milestone 10: Scripting & Analysis Tools
+**Goal**: Enable programmatic debugging and custom analysis workflows
+
+- [ ] **Python Scripting Support**
+  - Python API for programmatic transaction analysis
+  - Scriptable debugging sessions
+  - Custom analysis script library
+  - Export debugging data to Python-friendly formats (JSON, CSV, Parquet)
+  - Integration with popular data science libraries (pandas, numpy)
+  - Automated report generation
+
+### ✅ Milestone 11: Comprehensive Testing
 **Goal**: Ensure reliability through extensive testing
 
 - [ ] **Test Coverage Expansion**

@@ -24,6 +24,7 @@ use crate::panels::utils;
 use crate::ui::borders::BorderPresets;
 use crate::ui::icons::Icons;
 use crate::ui::status::{ConnectionStatus, ExecutionStatus, StatusBar};
+use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use crate::{Spinner, SpinnerStyles};
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{Address, U256};
@@ -432,6 +433,8 @@ pub struct TerminalPanel {
     pending_command: Option<PendingCommand>,
     /// Spinner for command execution
     spinner: Spinner,
+    /// Syntax highlighter for commands and output
+    syntax_highlighter: SyntaxHighlighter,
 }
 
 impl TerminalPanel {
@@ -457,6 +460,7 @@ impl TerminalPanel {
             vim_cursor_line: 1, // Start at first line (1-based like code panel)
             pending_command: None,
             spinner: Spinner::new(Some(SpinnerStyles::SQUARE), None),
+            syntax_highlighter: SyntaxHighlighter::new(),
         };
 
         // Add welcome message with fancy styling
@@ -757,6 +761,8 @@ impl TerminalPanel {
         self.add_output("  Esc                - Switch to VIM mode for navigation");
         self.add_output("  (VIM mode) j/k/↑/↓ - Navigate lines (with auto-scroll)");
         self.add_output("  (VIM mode) 5j/3↓   - Move multiple lines with number prefix");
+        self.add_output("  (VIM mode) {/}     - Jump to previous/next blank line");
+        self.add_output("  (VIM mode) 3{/2}   - Jump multiple blank lines with number prefix");
         self.add_output("  (VIM mode) gg/G    - Go to top/bottom");
         self.add_output("  (VIM mode) i       - Return to INSERT mode");
         self.add_output("");
@@ -974,7 +980,7 @@ impl TerminalPanel {
                 self.input_buffer.clear();
                 self.cursor_position = 0;
                 self.history_position = None;
-                let response = self.execute_command(&command, dm)?;
+                let response = self.execute_command(command.trim_start(), dm)?;
                 Ok(response)
             }
             KeyCode::Backspace => {
@@ -1096,6 +1102,30 @@ impl TerminalPanel {
                 Ok(EventResponse::Handled)
             }
 
+            // Jump to previous blank line
+            KeyCode::Char('{') => {
+                let count = if self.vim_number_prefix.is_empty() {
+                    1
+                } else {
+                    self.vim_number_prefix.parse::<usize>().unwrap_or(1)
+                };
+                self.vim_prev_block(count);
+                self.vim_number_prefix.clear();
+                Ok(EventResponse::Handled)
+            }
+
+            // Jump to next blank line
+            KeyCode::Char('}') => {
+                let count = if self.vim_number_prefix.is_empty() {
+                    1
+                } else {
+                    self.vim_number_prefix.parse::<usize>().unwrap_or(1)
+                };
+                self.vim_next_block(count);
+                self.vim_number_prefix.clear();
+                Ok(EventResponse::Handled)
+            }
+
             _ => {
                 // Clear number prefix on unrecognized key
                 self.vim_number_prefix.clear();
@@ -1173,6 +1203,202 @@ impl TerminalPanel {
                 // Scroll to show last line at bottom
                 // This is like code panel logic where we show the last lines
                 self.scroll_offset = max_lines.saturating_sub(self.content_height);
+            }
+        }
+    }
+
+    /// Find previous block (VIM { command)
+    fn vim_prev_block(&mut self, count: usize) {
+        if self.lines.is_empty() {
+            return;
+        }
+
+        let mut blank_lines_found = 0;
+        let mut target_line = 1; // Default to first line
+
+        // Search backwards from current position
+        for line_num in (1..self.vim_cursor_line).rev() {
+            if line_num <= self.lines.len() {
+                let line_idx = line_num.saturating_sub(1); // Convert to 0-based index
+                if self.lines[line_idx].content.trim().is_empty()
+                    || self.lines[line_idx].line_type == LineType::Command
+                {
+                    blank_lines_found += 1;
+                    if blank_lines_found == count {
+                        target_line = line_num.max(1);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Move to the target line
+        self.vim_cursor_line = target_line;
+
+        // Auto-scroll if necessary
+        if self.vim_cursor_line < self.scroll_offset + 1 {
+            self.scroll_offset = self.vim_cursor_line.saturating_sub(1);
+        }
+    }
+
+    /// Find next block (VIM } command)
+    fn vim_next_block(&mut self, count: usize) {
+        if self.lines.is_empty() {
+            return;
+        }
+
+        let mut blank_lines_found = 0;
+        let max_lines = self.lines.len() + 1; // Include prompt line
+        let mut target_line = max_lines; // Default to last line
+
+        // Search forward from current position
+        for line_num in (self.vim_cursor_line + 1)..=self.lines.len() {
+            let line_idx = line_num - 1; // Convert to 0-based index
+            if self.lines[line_idx].content.trim().is_empty()
+                || self.lines[line_idx].line_type == LineType::Command
+            {
+                blank_lines_found += 1;
+                if blank_lines_found == count {
+                    target_line = line_num.min(max_lines);
+                    break;
+                }
+            }
+        }
+
+        // Move to the target line
+        self.vim_cursor_line = target_line;
+
+        // Auto-scroll if necessary
+        let viewport_height = self.content_height;
+        if self.vim_cursor_line > self.scroll_offset + viewport_height {
+            self.scroll_offset = self.vim_cursor_line.saturating_sub(viewport_height);
+        }
+    }
+
+    /// Apply syntax highlighting to a terminal line based on its content
+    fn highlight_terminal_line<'a>(
+        &self,
+        content: &'a str,
+        line_type: &LineType,
+        dm: &DataManager,
+    ) -> Line<'a> {
+        use ratatui::text::{Line, Span};
+
+        match line_type {
+            LineType::Command => {
+                // Only highlight commands that start with $ (expression evaluation)
+                if content.starts_with("> $") {
+                    // Extract the expression part after "> $"
+                    let expr_start = content.find('$').unwrap_or(0) + 1;
+                    let expression = &content[expr_start..];
+
+                    // Tokenize the expression as Solidity
+                    let tokens = self.syntax_highlighter.tokenize(expression, SyntaxType::Solidity);
+
+                    let mut spans = Vec::new();
+                    // Add the prompt prefix without highlighting
+                    spans.push(Span::styled(
+                        &content[..expr_start],
+                        Style::default().fg(dm.theme.info_color),
+                    ));
+
+                    let mut last_end = 0;
+
+                    // Apply syntax highlighting to the expression tokens
+                    for token in tokens {
+                        // Add any unhighlighted text before this token
+                        if token.start > last_end {
+                            let unhighlighted = &expression[last_end..token.start];
+                            if !unhighlighted.is_empty() {
+                                spans.push(Span::raw(unhighlighted));
+                            }
+                        }
+
+                        // Add the highlighted token
+                        let token_text = &expression[token.start..token.end];
+                        let token_style =
+                            self.syntax_highlighter.get_token_style(token.token_type, &dm.theme);
+                        spans.push(Span::styled(token_text, token_style));
+
+                        last_end = token.end;
+                    }
+
+                    // Add any remaining unhighlighted text
+                    if last_end < expression.len() {
+                        let remaining = &expression[last_end..];
+                        if !remaining.is_empty() {
+                            spans.push(Span::raw(remaining));
+                        }
+                    }
+
+                    Line::from(spans)
+                } else {
+                    // Regular commands without highlighting
+                    Line::from(Span::styled(content, Style::default().fg(dm.theme.info_color)))
+                }
+            }
+            LineType::Output => {
+                // Determine syntax type for output based on content patterns
+                let syntax_type = if content.contains("0x")
+                    && (content.contains("PUSH")
+                        || content.contains("POP")
+                        || content.contains("ADD")
+                        || content.contains("SUB"))
+                {
+                    // Likely opcodes
+                    SyntaxType::Opcodes
+                } else {
+                    // Default to Solidity for general output
+                    SyntaxType::Solidity
+                };
+
+                // Tokenize the line
+                let tokens = self.syntax_highlighter.tokenize(content, syntax_type);
+
+                let mut spans = Vec::new();
+                let mut last_end = 0;
+
+                // Apply syntax highlighting to tokens
+                for token in tokens {
+                    // Add any unhighlighted text before this token
+                    if token.start > last_end {
+                        let unhighlighted = &content[last_end..token.start];
+                        if !unhighlighted.is_empty() {
+                            spans.push(Span::raw(unhighlighted));
+                        }
+                    }
+
+                    // Add the highlighted token
+                    let token_text = &content[token.start..token.end];
+                    let token_style =
+                        self.syntax_highlighter.get_token_style(token.token_type, &dm.theme);
+                    spans.push(Span::styled(token_text, token_style));
+
+                    last_end = token.end;
+                }
+
+                // Add any remaining unhighlighted text
+                if last_end < content.len() {
+                    let remaining = &content[last_end..];
+                    if !remaining.is_empty() {
+                        spans.push(Span::raw(remaining));
+                    }
+                }
+
+                // If no tokens were found, return the original content
+                if spans.is_empty() {
+                    Line::from(content)
+                } else {
+                    Line::from(spans)
+                }
+            }
+            LineType::Error => {
+                // Error lines use error color without syntax highlighting
+                Line::from(Span::styled(content, Style::default().fg(dm.theme.error_color)))
+            }
+            LineType::System => {
+                // System lines use success color without syntax highlighting
+                Line::from(Span::styled(content, Style::default().fg(dm.theme.success_color)))
             }
         }
     }
@@ -1262,7 +1488,7 @@ impl TerminalPanel {
                     LineType::System => Style::default().fg(dm.theme.success_color),
                 };
 
-                // Create the line content with base style, handling block cursor highlighting
+                // Create the line content with syntax highlighting
                 let styled_line = if terminal_line.line_type == LineType::Command
                     && display_row == all_content.len().saturating_sub(1) - start_idx  // Last line (input line)
                     && self.focused
@@ -1309,7 +1535,12 @@ impl TerminalPanel {
 
                     Line::from(spans)
                 } else {
-                    Line::from(Span::styled(&terminal_line.content, base_style))
+                    // Use syntax highlighting for non-input lines
+                    self.highlight_terminal_line(
+                        &terminal_line.content,
+                        &terminal_line.line_type,
+                        dm,
+                    )
                 };
 
                 // Apply horizontal scrolling in vim mode
@@ -1453,7 +1684,7 @@ impl TerminalPanel {
                     if self.max_line_width > self.content_width {
                         help.push_str(" • h/l/←/→: Scroll");
                     }
-                    help.push_str(" • gg/G: Top/Bottom • i/Enter: INSERT");
+                    help.push_str(" • {/}: Prev/Next blank • gg/G: Top/Bottom • i/Enter: INSERT");
                     help
                 }
             };

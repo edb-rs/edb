@@ -17,7 +17,7 @@
 use eyre::{bail, Result};
 use solang_parser::{
     parse,
-    pt::{Expression, Identifier, SourceUnit, SourceUnitPart, Statement},
+    pt::{Expression, SourceUnit, SourceUnitPart, Statement},
 };
 
 pub fn parse_input(input: &str) -> Result<Expression> {
@@ -28,8 +28,9 @@ pub fn parse_input(input: &str) -> Result<Expression> {
         format!("function __edb_sol_repl_() public {{ {}; }}", trimmed)
     };
 
-    let (SourceUnit(parts), _comments) =
-        parse(&wrapped_input, 0).map_err(|e| eyre::eyre!("Parse error: {:?}", e))?;
+    let (SourceUnit(parts), _comments) = parse(&wrapped_input, 0).map_err(|e| {
+        eyre::eyre!("{}", e.last().map(|d| d.message.as_str()).unwrap_or("parsing error"))
+    })?;
 
     if parts.len() != 1 {
         bail!("Expected a single function definition");
@@ -57,6 +58,8 @@ pub fn parse_input(input: &str) -> Result<Expression> {
 
 #[cfg(test)]
 mod tests {
+    use solang_parser::pt::Identifier;
+
     use super::*;
 
     #[test]
