@@ -19,8 +19,5 @@ pub use common::*;
 
 mod codegen;
 
-mod instrument;
-pub use instrument::*;
-
 mod modification;
 pub use modification::*;

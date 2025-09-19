@@ -34,7 +34,7 @@ use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
         visitor::VisitorAction, Contract, ContractRef, Function, FunctionRef, FunctionTypeNameRef,
-        ScopeNode, Step, StepHook, StepRef, StepVariant, UserDefinedType, UserDefinedTypeRef,
+        ScopeNode, Step, StepRef, StepVariant, UserDefinedType, UserDefinedTypeRef,
         UserDefinedTypeVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk, UCID,
         UFID, UTID,
     },
@@ -42,7 +42,6 @@ use crate::{
     contains_user_defined_type,
     sloc_ldiff,
     sloc_rdiff,
-    source_string_at_location,
     VariableRef,
     USID,
     UVID,
@@ -132,6 +131,7 @@ impl SourceAnalysis {
         table
     }
 
+    /// Returns a mapping of all functions in this source file by their UFID.
     pub fn function_table(&self) -> HashMap<UFID, FunctionRef> {
         let mut table = HashMap::default();
         for function in &self.functions {
@@ -140,6 +140,7 @@ impl SourceAnalysis {
         table
     }
 
+    /// Returns a mapping of all contracts in this source file by their UCID.
     pub fn contract_table(&self) -> HashMap<UCID, ContractRef> {
         let mut table = HashMap::default();
         for contract in &self.contracts {
@@ -332,21 +333,6 @@ impl SourceAnalysis {
             Statement::VariableDeclarationStatement(_) => "Variable Declaration".to_string(),
             Statement::WhileStatement(_) => "While".to_string(),
         }
-    }
-    /// Formats a list of hooks with detailed UVID/USID information.
-    fn format_hooks_detailed(&self, hooks: &[StepHook]) -> String {
-        hooks
-            .iter()
-            .map(|hook| match hook {
-                StepHook::BeforeStep(usid) => format!("BeforeStep(USID: {usid})"),
-                StepHook::VariableInScope(uvid) => format!("VariableInScope(UVID: {uvid:?})"),
-                StepHook::VariableOutOfScope(uvid) => {
-                    format!("VariableOutOfScope(UVID: {uvid:?})")
-                }
-                StepHook::VariableUpdate(uvid) => format!("VariableUpdate(UVID: {uvid:?})"),
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
     }
 
     /// Formats a list of function calls with detailed information.
@@ -647,9 +633,6 @@ impl Analyzer {
         if let Some(step) = self.current_step.as_mut() {
             // add the variable to the current step
             step.write().declared_variables.push(variable.clone());
-
-            // after the step is executed, the variable becomes in scope
-            step.write().post_hooks.push(StepHook::VariableInScope(uvid));
         }
         Ok(())
     }
@@ -662,16 +645,8 @@ impl Analyzer {
         );
         // close the scope
         let closed_scope = self.scope_stack.pop().expect("scope stack is empty");
-        let uvids = closed_scope.read().variables.iter().map(|v| v.read().id()).collect::<Vec<_>>();
         if let Some(parent) = self.scope_stack.last_mut() {
             parent.write().children.push(closed_scope);
-        }
-
-        // when the scope is exited, all variables become out of scope
-        if let Some(current_or_last_step) =
-            self.current_step.as_mut().or_else(|| self.finished_steps.last_mut())
-        {
-            current_or_last_step.write().add_variable_out_of_scope_hook(uvids);
         }
         Ok(())
     }
@@ -750,7 +725,7 @@ impl Analyzer {
     fn enter_new_contract(&mut self, contract: &ContractDefinition) -> eyre::Result<VisitorAction> {
         assert!(self.current_contract.is_none(), "Contract cannot be nested");
         let new_contract: ContractRef = Contract::new(contract.clone()).into();
-        self.current_contract = Some(new_contract.clone());
+        self.current_contract = Some(new_contract);
         Ok(VisitorAction::Continue)
     }
 
@@ -1020,7 +995,7 @@ impl Analyzer {
             current_function.ufid(),
             StepVariant::ModifierEntry(modifier.clone()),
             loc,
-            current_scope.clone(),
+            current_scope,
             accessible_variables,
         )
         .into();
@@ -1828,7 +1803,6 @@ contract TestContract {
             .unwrap();
         let source_unit = ASTPruner::convert(&mut ast, false).unwrap();
 
-        let sources = BTreeMap::from([(TEST_CONTRACT_SOURCE_ID, Source::new(source1))]);
         let analyzer = Analyzer::new(TEST_CONTRACT_SOURCE_ID);
         let analysis = analyzer
             .analyze(
@@ -1864,7 +1838,7 @@ contract TestContract {
         let source = _sources.get(&TEST_CONTRACT_SOURCE_ID).unwrap().content.as_str();
         for step in &analysis.steps {
             let s = source_string_at_location_unchecked(source, &step.read().src);
-            println!("step: {}", s);
+            println!("step: {s}");
         }
     }
 

@@ -67,6 +67,6 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    let evaluator = ExpressionEvaluator::new_edb(context.clone());
+    let evaluator = ExpressionEvaluator::new_edb(context);
     evaluator.eval(expr, snapshot_id)
 }

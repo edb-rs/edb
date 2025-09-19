@@ -18,19 +18,15 @@ use std::{collections::BTreeMap, fmt::Display, sync::Arc};
 
 use crate::{
     analysis::{stmt_src, SourceAnalysis, VariableRef},
-    contains_function_type, contains_mapping_type, contains_user_defined_type,
     find_index_of_first_statement_in_block, find_index_of_first_statement_in_block_or_statement,
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
-    mutability_to_str, slice_source_location, source_string_at_location, visibility_to_str, USID,
-    UVID,
+    USID, UVID,
 };
 
 use eyre::Result;
-use foundry_compilers::artifacts::{
-    ast::SourceLocation, BlockOrStatement, StateMutability, Statement, StorageLocation, Visibility,
-};
+use foundry_compilers::artifacts::{ast::SourceLocation, BlockOrStatement, Statement};
 use semver::Version;
 
 const LEFT_BRACKET_PRIORITY: u8 = 255; // used for the left bracket of the block
@@ -40,6 +36,7 @@ const VARIABLE_UPDATE_PRIORITY: u8 = 127; // used for the variable update hook
 const BEFORE_STEP_PRIORITY: u8 = 63; // used for the before step hook of statements other than function and modifier entry.
 const RIGHT_BRACKET_PRIORITY: u8 = 0; // used for the right bracket of the block
 
+/// A reference to a version.
 pub type VersionRef = Arc<Version>;
 
 /// The collections of modifications on a source file.
@@ -108,6 +105,7 @@ impl SourceModifications {
         self.modifications.insert(loc, modification);
     }
 
+    /// Extends the modifications with the given modifications.
     pub fn extend_modifications(&mut self, modifications: Vec<Modification>) {
         for modification in modifications {
             self.add_modification(modification);
@@ -135,9 +133,13 @@ impl SourceModifications {
     }
 }
 
+/// The modifications on a source file.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, derive_more::From)]
 pub enum Modification {
+    /// An action to instrument a code in the source file.
     Instrument(#[from] InstrumentAction),
+    /// An action to remove a code in the source file.
     Remove(#[from] RemoveAction),
 }
 
@@ -217,6 +219,7 @@ impl Modification {
     }
 }
 
+/// An action to instrument a code in the source file.
 #[derive(Debug, Clone)]
 pub struct InstrumentAction {
     /// The source ID of the source file to instrument
@@ -229,6 +232,7 @@ pub struct InstrumentAction {
     pub priority: u8,
 }
 
+/// An action to remove a code in the source file.
 #[derive(Debug, Clone)]
 pub struct RemoveAction {
     /// The source location of the code to remove
@@ -247,6 +251,7 @@ impl RemoveAction {
     }
 }
 
+/// The content to instrument.
 #[derive(Debug, Clone)]
 pub enum InstrumentContent {
     /// The code to instrument. The plain code can be directly inserted into the source code as a string.
@@ -312,11 +317,7 @@ impl SourceModifications {
         self.collect_before_step_hook_modifications(compiler_version.clone(), source, analysis)?;
 
         // Collect the variable update hook modifications for each step.
-        self.collect_variable_update_hook_modifications(
-            compiler_version.clone(),
-            source,
-            analysis,
-        )?;
+        self.collect_variable_update_hook_modifications(compiler_version, source, analysis)?;
 
         Ok(())
     }
@@ -335,127 +336,6 @@ impl SourceModifications {
             };
             self.add_modification(instrument_action.into());
         }
-    }
-
-    /// Collects the modifications on the visibility of state variables and functions given the source analysis result.
-    #[deprecated(
-        note = "This function is deprecated, since our new instrumentation does not need to change visibility and mutability."
-    )]
-    #[allow(dead_code)]
-    fn collect_visibility_and_mutability_modifications(
-        &mut self,
-        source: &str,
-        analysis: &SourceAnalysis,
-    ) -> Result<()> {
-        let source_id = self.source_id;
-        let remove_visibility =
-            |content: &str, src: SourceLocation, remove: &str| -> Option<RemoveAction> {
-                if let Some(visibility_str_index) = content.find(remove) {
-                    let visibility_loc =
-                        slice_source_location(&src, visibility_str_index, remove.len());
-                    let remove_action = RemoveAction { src: visibility_loc };
-                    Some(remove_action)
-                } else {
-                    None
-                }
-            };
-
-        let add_visibility =
-            |src: SourceLocation, add: &str, at_index: usize| -> InstrumentAction {
-                let new_visibility_str = format!(" {add} ");
-
-                InstrumentAction {
-                    source_id,
-                    loc: src.start.unwrap_or(0) + at_index,
-                    content: InstrumentContent::Plain(new_visibility_str),
-                    priority: VISIBILITY_PRIORITY,
-                }
-            };
-
-        for private_state_variable in &analysis.private_state_variables {
-            let declaration_str = source_string_at_location(
-                source_id,
-                source,
-                &private_state_variable.declaration().src,
-            );
-            // Remove the existing visibility of the state variable
-            if let Some(remove_action) = remove_visibility(
-                declaration_str,
-                private_state_variable.declaration().src,
-                visibility_to_str(&private_state_variable.declaration().visibility),
-            ) {
-                self.add_modification(remove_action.into());
-            }
-
-            // Add the new visibility of the state variable just before the variable name
-            let at_index = declaration_str
-                .rfind(&private_state_variable.declaration().name)
-                .expect("variable name not found");
-            let instrument_action = add_visibility(
-                private_state_variable.declaration().src,
-                visibility_to_str(&Visibility::Public),
-                at_index,
-            );
-            self.add_modification(instrument_action.into());
-        }
-
-        for private_function in &analysis.private_functions {
-            let definition_str =
-                source_string_at_location(source_id, source, &private_function.src());
-            // Remove the existing visibility of the function
-            if let Some(remove_action) = remove_visibility(
-                definition_str,
-                private_function.src(),
-                visibility_to_str(&private_function.visibility()),
-            ) {
-                self.add_modification(remove_action.into());
-            }
-
-            // Add the new visibility of the function after the argument list
-            let at_index = definition_str.find(")").expect("function parament list not found") + 1;
-            let instrument_action = add_visibility(
-                private_function.src(),
-                visibility_to_str(&Visibility::Public),
-                at_index,
-            );
-            self.add_modification(instrument_action.into());
-        }
-
-        for immutable_function in &analysis.immutable_functions {
-            let definition_str =
-                source_string_at_location(source_id, source, &immutable_function.src());
-            if let Some(mutability) = &immutable_function.state_mutability() {
-                // Remove the existing pure or view mutability of the function
-                if matches!(mutability, StateMutability::Pure | StateMutability::View) {
-                    if let Some(remove_action) = remove_visibility(
-                        definition_str,
-                        immutable_function.src(),
-                        mutability_to_str(&mutability),
-                    ) {
-                        self.add_modification(remove_action.into());
-                    }
-                }
-            }
-        }
-
-        for function_type in &analysis.function_types {
-            let function_type_str =
-                source_string_at_location(source_id, source, &function_type.src());
-
-            let mutability = function_type.state_mutability();
-            if matches!(mutability, StateMutability::Pure | StateMutability::View) {
-                // Remove the existing visibility of the function type
-                if let Some(remove_action) = remove_visibility(
-                    function_type_str,
-                    function_type.src(),
-                    mutability_to_str(&mutability),
-                ) {
-                    self.add_modification(remove_action.into());
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Collects the modifications to convert a statement to a block. Some control flow structures, such as if/for/while/try/catch/etc., may have their body as a single statement. We need to convert them to a block.
@@ -799,7 +679,7 @@ impl<T> ExpectWithContext<T> for Option<T> {
             None => {
                 // Simple source dump to temp file
                 let temp_dir = std::env::temp_dir();
-                let dump_path = temp_dir.join(format!("edb_fail_source_{}.sol", source_id));
+                let dump_path = temp_dir.join(format!("edb_fail_source_{source_id}.sol"));
                 let _ = std::fs::write(&dump_path, source);
 
                 // Extract context around the error location with line numbers
@@ -842,8 +722,7 @@ impl<T> ExpectWithContext<T> for Option<T> {
 
                         let line_num = start_line_num + idx;
                         let marker = if idx == error_line_idx { " --> " } else { "     " };
-                        formatted_context
-                            .push_str(&format!("\n{}{:4} | {}", marker, line_num, line));
+                        formatted_context.push_str(&format!("\n{marker}{line_num:4} | {line}"));
 
                         // Add error pointer for the error line
                         if idx == error_line_idx {
@@ -880,70 +759,6 @@ mod tests {
     use crate::analysis::{self, tests::compile_and_analyze};
 
     use super::*;
-
-    #[test]
-    fn test_collect_state_variable_visibility_modifications() {
-        let source = r#"
-        contract C {
-            uint256 public _x;
-            uint256 internal _y;
-            uint256 private _z;
-        }
-        "#;
-        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 4);
-        let modified_source = modifications.modify_source(source);
-
-        // Check there should be no private state variables after modification
-        let (_, analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-        assert_eq!(analysis2.private_state_variables.len(), 0);
-    }
-
-    #[test]
-    fn test_collect_function_visibility_modifications() {
-        let source = r#"
-        contract C {
-            function a() public returns (uint256) {}
-            function b() external {}
-            function c() internal virtual returns (uint256) {}
-        }
-        "#;
-        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 2);
-        let modified_source = modifications.modify_source(source);
-
-        // Check there should be no private functions after modification
-        let (_, analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-        assert_eq!(analysis2.private_functions.len(), 0);
-    }
-
-    #[test]
-    fn test_collect_function_mutability_modifications() {
-        let source = r#"
-        contract C {
-            function a() public pure returns (uint256) {}
-            function b() public view returns (uint256) {}
-            function c() public payable returns (uint256) {}
-        }
-        "#;
-
-        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 2);
-        let modified_source = modifications.modify_source(source);
-
-        // Check there should be no immutable functions after modification
-        let (_, analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-        assert_eq!(analysis2.immutable_functions.len(), 0);
-    }
 
     #[test]
     fn test_collect_statement_to_block_modifications() {
@@ -1022,7 +837,6 @@ mod tests {
         modifications.collect_before_step_hook_modifications(version, source, &analysis).unwrap();
         // assert_eq!(modifications.modifications.len(), 1);
         let modified_source = modifications.modify_source(source);
-        println!("{}", modified_source);
 
         // The modified source should be able to be compiled and analyzed.
         let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
@@ -1133,49 +947,6 @@ contract TestContract {
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
         modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
         assert_eq!(modifications.modifications.len(), 6);
-        let modified_source = modifications.modify_source(source);
-
-        // The modified source should be able to be compiled and analyzed.
-        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-    }
-
-    #[test]
-    // possible fix: add `pragma abicoder v2;` to the contract
-    fn test_struct_variable_with_array_field() {
-        let source = r#"
-        contract C {
-            struct A {
-                uint[] a;
-            }
-            A internal a;
-        }
-        "#;
-        let (_sources, analysis) = compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 0);
-        let modified_source = modifications.modify_source(source);
-
-        // The modified source should be able to be compiled and analyzed.
-        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-    }
-
-    #[test]
-    fn test_struct_variable_with_mapping_field() {
-        let source = r#"
-        contract C {
-            struct A {
-                mapping(uint => address) a;
-            }
-            A internal a;
-        }
-        "#;
-        let (_sources, analysis) = compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_visibility_and_mutability_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 0);
         let modified_source = modifications.modify_source(source);
 
         // The modified source should be able to be compiled and analyzed.

@@ -16,11 +16,9 @@
 
 use std::{
     // collections::BTreeMap,
-    fmt::Display,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
-use alloy_primitives::ruint::FromUintError;
 // use derive_more::{Deref, DerefMut};
 use delegate::delegate;
 use foundry_compilers::artifacts::{
@@ -28,8 +26,6 @@ use foundry_compilers::artifacts::{
     BlockOrStatement,
     DoWhileStatement,
     Expression,
-    ExpressionOrVariableDeclarationStatement,
-    ExpressionStatement,
     ForStatement,
     FunctionCall,
     FunctionDefinition,
@@ -37,17 +33,13 @@ use foundry_compilers::artifacts::{
     ModifierDefinition,
     Statement,
     TryStatement,
-    VariableDeclaration,
     WhileStatement, // SourceUnit,
 };
-use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{
-    macros::universal_id, StepHook, VariableRef, VariableScope, VariableScopeRef, UFID, UVID,
-};
+use crate::analysis::{macros::universal_id, VariableRef, VariableScopeRef, UFID};
 
 universal_id! {
     /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
@@ -97,6 +89,7 @@ impl<'de> Deserialize<'de> for StepRef {
 }
 
 impl StepRef {
+    /// Creates a new StepRef from a Step.
     pub fn new(inner: Step) -> Self {
         Self {
             inner: Arc::new(RwLock::new(inner)),
@@ -243,12 +236,6 @@ pub struct Step {
     pub updated_variables: Vec<VariableRef>,
     /// The scope of this step
     pub scope: VariableScopeRef,
-    /// Hooks to execute before this step
-    #[deprecated]
-    pub pre_hooks: Vec<StepHook>,
-    /// Hooks to execute after this step
-    #[deprecated]
-    pub post_hooks: Vec<StepHook>,
 }
 
 impl Step {
@@ -270,7 +257,7 @@ impl Step {
         accessible_variables: Vec<VariableRef>,
     ) -> Self {
         let usid = USID::next();
-        let mut this = Self {
+        Self {
             usid,
             ufid,
             variant,
@@ -280,46 +267,6 @@ impl Step {
             declared_variables: vec![],
             updated_variables: vec![],
             scope,
-            pre_hooks: vec![],
-            post_hooks: vec![],
-        };
-        match &this.variant {
-            StepVariant::FunctionEntry(_) => {}
-            _ => {
-                this.pre_hooks.push(StepHook::BeforeStep(usid));
-            }
-        }
-        this
-    }
-
-    /// Adds a variable out-of-scope hook to this step.
-    ///
-    /// This method adds hooks for variables that go out of scope when this step
-    /// is executed. For control flow statements like `break`, `continue`, `return`,
-    /// or `revert`, the hook is added as a pre-hook. For other statements, it's
-    /// added as a post-hook.
-    ///
-    /// # Arguments
-    ///
-    /// * `uvids` - List of variable identifiers that go out of scope
-    #[deprecated]
-    pub fn add_variable_out_of_scope_hook(&mut self, uvids: Vec<UVID>) {
-        // for steps that result in a "jump" in the control flow (e.g., `break`, `continue`, `return`, `revert`, `throw`, etc.), the variable out of scope should be added as pre-hooks.
-        let add_as_pre_hook = match &self.variant {
-            StepVariant::Statement(statement) => matches!(
-                statement,
-                Statement::Break(_)
-                    | Statement::Continue(_)
-                    | Statement::Return(_)
-                    | Statement::RevertStatement(_)
-            ),
-            _ => false,
-        };
-        let hooks = uvids.into_iter().map(StepHook::VariableOutOfScope).collect::<Vec<_>>();
-        if add_as_pre_hook {
-            self.pre_hooks.extend(hooks);
-        } else {
-            self.post_hooks.extend(hooks);
         }
     }
 }

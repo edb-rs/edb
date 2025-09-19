@@ -326,11 +326,5 @@ contract SimpleContract {
         // Since we can't directly access source content from SourceStep, we'll check the number of steps
         let step_count = source_result.steps.len();
         assert!(step_count > 0, "Should have found steps in the contract");
-
-        // Verify that the steps have hooks
-        for step in &source_result.steps {
-            assert!(!step.read().pre_hooks.is_empty(), "Each step should have pre-hooks");
-            // println!("{}\n", step.pretty_display(&source_result.source));
-        }
     }
 }

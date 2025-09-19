@@ -66,6 +66,7 @@ impl ContractRef {
     }
 }
 
+#[allow(unused)]
 impl ContractRef {
     pub(crate) fn read(&self) -> RwLockReadGuard<'_, Contract> {
         self.inner.read()
@@ -105,6 +106,7 @@ pub struct Contract {
 }
 
 impl Contract {
+    /// Creates a new Contract with the given definition.
     pub fn new(definition: ContractDefinition) -> Self {
         Self { ucid: UCID::next(), definition }
     }

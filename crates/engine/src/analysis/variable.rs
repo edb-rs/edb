@@ -28,16 +28,14 @@
 //! The module is designed to work with the broader analysis framework to provide
 //! comprehensive variable tracking and type information during contract analysis.
 
-use alloy_primitives::{map::foldhash::HashMap, U256};
 use delegate::delegate;
 use derive_more::From;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, Expression, ForStatement, FunctionDefinition,
     ModifierDefinition, SourceUnit, TypeName, UncheckedBlock, VariableDeclaration,
 };
-use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
-use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -81,6 +79,7 @@ universal_id! {
 /// multiple parts of the analysis system to reference the same variable
 /// without copying the data.
 #[derive(Clone, derive_more::Debug)]
+#[allow(unused)]
 pub struct VariableRef {
     inner: Arc<RwLock<Variable>>,
     /* cached readonly fields*/
@@ -98,6 +97,7 @@ impl From<Variable> for VariableRef {
 
 #[allow(unused)]
 impl VariableRef {
+    /// Creates a new VariableRef from a Variable.
     pub fn new(inner: Variable) -> Self {
         Self {
             inner: Arc::new(RwLock::new(inner)),
@@ -114,19 +114,23 @@ impl VariableRef {
         self.inner.write()
     }
 
+    /// Returns the unique identifier of this variable.
     pub fn id(&self) -> UVID {
         self.inner.read().id()
     }
 
+    /// Returns the declaration of this variable.
     pub fn declaration(&self) -> &VariableDeclaration {
         self.declaration.get_or_init(|| self.inner.read().declaration())
     }
 
+    /// Returns the type name of this variable.
     pub fn type_name(&self) -> Option<&TypeName> {
         self.declaration().type_name.as_ref()
     }
 
-    pub fn base(&self) -> VariableRef {
+    /// Returns the base variable of this variable.
+    pub fn base(&self) -> Self {
         let inner = self.inner.read();
         if let Some(base) = inner.base() {
             base
@@ -135,10 +139,12 @@ impl VariableRef {
         }
     }
 
+    /// Returns the function of this variable.
     pub fn function(&self) -> Option<FunctionRef> {
         self.inner.read().function()
     }
 
+    /// Returns the contract of this variable.
     pub fn contract(&self) -> Option<ContractRef> {
         self.inner.read().contract()
     }
@@ -161,7 +167,7 @@ impl<'de> Deserialize<'de> for VariableRef {
     {
         // Deserialize as Variable and wrap it in VariableRef
         let variable = Variable::deserialize(deserializer)?;
-        Ok(VariableRef::new(variable))
+        Ok(Self::new(variable))
     }
 }
 
@@ -230,6 +236,7 @@ pub enum Variable {
 }
 
 impl Variable {
+    /// Returns the unique identifier of this variable.
     pub fn id(&self) -> UVID {
         match self {
             Self::Plain { uvid, .. } => *uvid,
@@ -239,6 +246,7 @@ impl Variable {
         }
     }
 
+    /// Returns the declaration of this variable.
     pub fn declaration(&self) -> VariableDeclaration {
         match self {
             Self::Plain { declaration, .. } => declaration.clone(),
@@ -248,6 +256,7 @@ impl Variable {
         }
     }
 
+    /// Returns the function of this variable.
     pub fn function(&self) -> Option<FunctionRef> {
         match self {
             Self::Plain { function, .. } => function.clone(),
@@ -257,6 +266,7 @@ impl Variable {
         }
     }
 
+    /// Returns the contract of this variable.
     pub fn contract(&self) -> Option<ContractRef> {
         match self {
             Self::Plain { contract, .. } => contract.clone(),
@@ -266,6 +276,7 @@ impl Variable {
         }
     }
 
+    /// Returns the base variable of this variable.
     pub fn base(&self) -> Option<VariableRef> {
         match self {
             Self::Plain { .. } => None,
@@ -320,6 +331,7 @@ impl From<VariableScope> for VariableScopeRef {
 }
 
 impl VariableScopeRef {
+    /// Creates a new VariableScopeRef from a VariableScope.
     pub fn new(inner: VariableScope) -> Self {
         Self {
             inner: Arc::new(RwLock::new(inner)),
@@ -342,8 +354,11 @@ impl VariableScopeRef {
 impl VariableScopeRef {
     delegate! {
         to self.inner.read() {
+            /// Returns the node ID of the AST node that corresponds to this scope.
             pub fn ast_id(&self) -> usize;
+            /// Returns the source location of this scope's AST node.
             pub fn src(&self) -> SourceLocation;
+            /// Returns a human-readable string representation of the scope hierarchy.
             pub fn pretty_display(&self) -> String;
         }
     }
@@ -351,16 +366,19 @@ impl VariableScopeRef {
 
 /* Cached read methods */
 impl VariableScopeRef {
+    /// Clears the cached variables and children.
     pub fn clear_cache(&mut self) {
         self.variables_recursive.take();
         self.variables.take();
         self.children.take();
     }
 
-    pub fn children(&self) -> &Vec<VariableScopeRef> {
+    /// Returns the children of this scope.
+    pub fn children(&self) -> &Vec<Self> {
         self.children.get_or_init(|| self.inner.read().children.clone())
     }
 
+    /// Returns the variables of this scope.
     pub fn variables(&self) -> &Vec<VariableRef> {
         self.variables.get_or_init(|| self.inner.read().variables.clone())
     }

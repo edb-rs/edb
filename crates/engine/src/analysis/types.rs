@@ -131,13 +131,18 @@ impl UserDefinedType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum UserDefinedTypeVariant {
+    /// A struct type.
     Struct(StructDefinition),
+    /// An enum type.
     Enum(EnumDefinition),
+    /// A user defined value type.
     UserDefinedValueType(UserDefinedValueTypeDefinition),
+    /// A contract type.
     Contract(ContractDefinition),
 }
 
 impl UserDefinedTypeVariant {
+    /// Returns the AST node ID of the type definition.
     pub fn ast_id(&self) -> usize {
         match self {
             Self::Struct(definition) => definition.id,

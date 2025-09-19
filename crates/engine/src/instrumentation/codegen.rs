@@ -130,8 +130,7 @@ pub fn generate_view_method(state_variable: &VariableRef) -> Option<String> {
 
     // Construct the complete function with EDB prefix
     Some(format!(
-        "    function {}{}{}({}) public view returns ({}) {{\n        return {};\n    }}",
-        var_name, EDB_STATE_VAR_FLAG, uvid, params_str, return_type, body
+        "    function {var_name}{EDB_STATE_VAR_FLAG}{uvid}({params_str}) public view returns ({return_type}) {{\n        return {body};\n    }}"
     ))
 }
 
@@ -165,8 +164,8 @@ fn analyze_type_recursive(type_name: &TypeName, depth: usize) -> Option<(Vec<Str
             let (mut sub_params, return_type) = analyze_type_recursive(value_type, depth + 1)?;
 
             // Add key parameter at the beginning
-            let param_name = if depth == 0 { "key".to_string() } else { format!("key{}", depth) };
-            let key_param = format!("{} {}", key_type_str, param_name);
+            let param_name = if depth == 0 { "key".to_string() } else { format!("key{depth}") };
+            let key_param = format!("{key_type_str} {param_name}");
 
             let mut params = vec![key_param];
             params.append(&mut sub_params);
@@ -181,9 +180,8 @@ fn analyze_type_recursive(type_name: &TypeName, depth: usize) -> Option<(Vec<Str
             let (mut sub_params, return_type) = analyze_type_recursive(base_type, depth + 1)?;
 
             // Add index parameter at the beginning
-            let param_name =
-                if depth == 0 { "index".to_string() } else { format!("index{}", depth) };
-            let index_param = format!("uint256 {}", param_name);
+            let param_name = if depth == 0 { "index".to_string() } else { format!("index{depth}") };
+            let index_param = format!("uint256 {param_name}");
 
             let mut params = vec![index_param];
             params.append(&mut sub_params);
@@ -218,7 +216,7 @@ fn generate_view_body(var_name: &str, params: &[String]) -> String {
         // Build the access expression (e.g., "myVar[key][index]")
         let mut body = var_name.to_string();
         for param_name in param_names {
-            body = format!("{}[{}]", body, param_name);
+            body = format!("{body}[{param_name}]");
         }
         body
     }
@@ -230,11 +228,11 @@ fn generate_view_body(var_name: &str, params: &[String]) -> String {
 fn format_return_type(type_name: &str) -> String {
     match type_name {
         // Reference types that need memory data location
-        t if t.starts_with("string") => format!("{} memory", t),
+        t if t.starts_with("string") => format!("{t} memory"),
         // Dynamic arrays (ends with [])
-        t if t.ends_with("[]") => format!("{} memory", t),
+        t if t.ends_with("[]") => format!("{t} memory"),
         // Fixed-size arrays (contains [n] where n is a number)
-        t if t.contains('[') && t.contains(']') => format!("{} memory", t),
+        t if t.contains('[') && t.contains(']') => format!("{t} memory"),
         // Value types don't need data location
         _ => type_name.to_string(),
     }
@@ -271,11 +269,11 @@ mod tests {
             let var_name = &private_var.declaration().name;
 
             // Check function signature contains the variable name with EDB suffix
-            assert!(code.contains(&format!("function {}_edb_state_var_", var_name)));
+            assert!(code.contains(&format!("function {var_name}_edb_state_var_")));
             assert!(code.contains("public view returns"));
 
             // Check function body returns the variable
-            assert!(code.contains(&format!("return {};", var_name)));
+            assert!(code.contains(&format!("return {var_name};")));
         }
     }
 
@@ -304,11 +302,11 @@ mod tests {
             let var_name = &private_var.declaration().name;
 
             // Check function signature has a key parameter with EDB suffix
-            assert!(code.contains(&format!("function {}_edb_state_var_", var_name)));
+            assert!(code.contains(&format!("function {var_name}_edb_state_var_")));
             assert!(code.contains("key) public view returns"));
 
             // Check function body accesses the mapping with key
-            assert!(code.contains(&format!("return {}[key];", var_name)));
+            assert!(code.contains(&format!("return {var_name}[key];")));
         }
     }
 
@@ -337,12 +335,12 @@ mod tests {
             let var_name = &private_var.declaration().name;
 
             // Check function signature has an index parameter with EDB suffix
-            assert!(code.contains(&format!("function {}_edb_state_var_", var_name)));
+            assert!(code.contains(&format!("function {var_name}_edb_state_var_")));
             assert!(code.contains("(uint256 index)"));
             assert!(code.contains("public view returns"));
 
             // Check function body accesses the array with index
-            assert!(code.contains(&format!("return {}[index];", var_name)));
+            assert!(code.contains(&format!("return {var_name}[index];")));
         }
     }
 
@@ -455,7 +453,7 @@ mod tests {
                     assert!(code.contains("(uint256 index) public view returns (string memory)"));
                     assert!(code.contains("return messages[index];"));
                 }
-                _ => panic!("Unexpected variable name: {}", var_name),
+                _ => panic!("Unexpected variable name: {var_name}"),
             }
         }
     }

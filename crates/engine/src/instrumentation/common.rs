@@ -23,6 +23,7 @@ use eyre::Result;
 use foundry_compilers::artifacts::{SolcInput, Source};
 use semver::Version;
 
+/// Instruments the source code based on the analysis result.
 pub fn instrument(
     compiler_version: &Version,
     input: &SolcInput,

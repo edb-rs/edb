@@ -72,28 +72,34 @@ impl FunctionRef {
 }
 
 impl FunctionRef {
+    /// Returns the UFID of this function.
     pub fn ufid(&self) -> UFID {
         *self.ufid.get_or_init(|| self.inner.read().ufid)
     }
 
+    /// Returns the contract that this function belongs to.
     pub fn contract(&self) -> Option<ContractRef> {
         self.contract.get_or_init(|| self.inner.read().contract.clone()).clone()
     }
 
+    /// Returns the name of this function.
     pub fn name(&self) -> String {
         self.read().definition.name().to_string()
     }
 
+    /// Returns the visibility of this function.
     pub fn visibility(&self) -> Visibility {
         self.read().definition.visibility().clone()
     }
 
+    /// Returns the state mutability of this function.
     pub fn state_mutability(&self) -> Option<StateMutability> {
         self.read().definition.state_mutability().cloned()
     }
 
+    /// Returns the source location of this function.
     pub fn src(&self) -> SourceLocation {
-        self.read().definition.src().clone()
+        *self.read().definition.src()
     }
 }
 
@@ -139,6 +145,7 @@ impl FunctionTypeNameRef {
     }
 }
 
+#[allow(unused)]
 impl FunctionTypeNameRef {
     pub(crate) fn read(&self) -> RwLockReadGuard<'_, FunctionTypeName> {
         self.inner.read()
@@ -150,16 +157,19 @@ impl FunctionTypeNameRef {
 }
 
 impl FunctionTypeNameRef {
+    /// Returns the visibility of this function type.
     pub fn visibility(&self) -> Visibility {
         self.read().visibility.clone()
     }
 
+    /// Returns the state mutability of this function type.
     pub fn state_mutability(&self) -> StateMutability {
         self.read().state_mutability.clone()
     }
 
+    /// Returns the source location of this function type.
     pub fn src(&self) -> SourceLocation {
-        self.read().src.clone()
+        self.read().src
     }
 }
 
@@ -195,43 +205,51 @@ pub struct Function {
     pub steps: Vec<StepRef>,
 }
 
+/// The variant types for function definitions.
 #[derive(Debug, Clone, Serialize, Deserialize, derive_more::From)]
 pub enum FunctionVariant {
+    /// A function definition.
     Function(#[from] FunctionDefinition),
+    /// A modifier definition.
     Modifier(#[from] ModifierDefinition),
 }
 
 impl FunctionVariant {
+    /// Returns the name of this function.
     pub fn name(&self) -> &str {
         match self {
-            FunctionVariant::Function(definition) => &definition.name,
-            FunctionVariant::Modifier(definition) => &definition.name,
+            Self::Function(definition) => &definition.name,
+            Self::Modifier(definition) => &definition.name,
         }
     }
 
+    /// Returns the visibility of this function.
     pub fn visibility(&self) -> &Visibility {
         match self {
-            FunctionVariant::Function(definition) => &definition.visibility,
-            FunctionVariant::Modifier(definition) => &definition.visibility,
+            Self::Function(definition) => &definition.visibility,
+            Self::Modifier(definition) => &definition.visibility,
         }
     }
 
+    /// Returns the source location of this function.
     pub fn src(&self) -> &SourceLocation {
         match self {
-            FunctionVariant::Function(definition) => &definition.src,
-            FunctionVariant::Modifier(definition) => &definition.src,
+            Self::Function(definition) => &definition.src,
+            Self::Modifier(definition) => &definition.src,
         }
     }
 
+    /// Returns the state mutability of this function.
     pub fn state_mutability(&self) -> Option<&StateMutability> {
         match self {
-            FunctionVariant::Function(definition) => definition.state_mutability.as_ref(),
-            FunctionVariant::Modifier(_) => None,
+            Self::Function(definition) => definition.state_mutability.as_ref(),
+            Self::Modifier(_) => None,
         }
     }
 }
 
 impl Function {
+    /// Creates a new Function with the given contract and definition.
     pub fn new_function(contract: Option<ContractRef>, definition: FunctionDefinition) -> Self {
         Self {
             ufid: UFID::next(),
@@ -241,6 +259,7 @@ impl Function {
         }
     }
 
+    /// Creates a new Function with the given contract and definition.
     pub fn new_modifier(contract: ContractRef, definition: ModifierDefinition) -> Self {
         Self {
             ufid: UFID::next(),
