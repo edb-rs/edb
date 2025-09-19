@@ -448,7 +448,7 @@ impl Resolver {
     }
 
     /// Resolve and format address with label if available
-    pub fn resolve_address_label(&mut self, address: Address) -> Option<String> {
+    pub fn resolve_address_label(&mut self, _address: Address) -> Option<String> {
         None
     }
 

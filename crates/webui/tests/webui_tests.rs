@@ -14,8 +14,10 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Web UI tests for EDB
+
 use edb_webui::WebUiConfig;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 #[test]
 fn test_default_webui_config() {

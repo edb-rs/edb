@@ -14,15 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
-// SPDX-License-Identifier: AGPL-3.0
-//! Extended opcode analysis utilities for EVM state modification detection
-//!
-//! This module provides additional methods for analyzing EVM opcodes beyond
-//! what's available in the base revm library, particularly focused on
-//! detecting various types of state modifications that are important for
-//! debugging and analysis tools.
-
 use revm::bytecode::OpCode;
 
 /// Extended trait for EVM opcode analysis

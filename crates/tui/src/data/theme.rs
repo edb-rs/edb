@@ -38,7 +38,7 @@ pub struct Theme {
     /// Active theme name
     pub active_theme: String,
     /// Available themes
-    available_themes: Vec<String>,
+    _available_themes: Vec<String>,
     /// Configuration storage
     config: Config,
 }
@@ -64,7 +64,7 @@ impl Default for Theme {
             color_scheme,
             panel_configs: config.panels.clone(),
             active_theme: config.theme.active.clone(),
-            available_themes: config
+            _available_themes: config
                 .list_themes()
                 .into_iter()
                 .map(|(name, _)| name.clone())

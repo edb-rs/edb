@@ -20,13 +20,17 @@ use alloy_primitives::Address;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 
+/// Represents code information in either opcode or source format for debugging analysis
 #[derive(Debug, Clone, Serialize, Deserialize, From)]
 pub enum Code {
+    /// Opcode-level code representation with disassembled bytecode
     Opcode(#[from] OpcodeInfo),
+    /// Source-level code representation with original Solidity source files
     Source(#[from] SourceInfo),
 }
 
 impl Code {
+    /// Returns the contract address associated with this code information
     pub fn address(&self) -> Address {
         match self {
             Code::Opcode(info) => info.address,
@@ -34,6 +38,7 @@ impl Code {
         }
     }
 
+    /// Returns the bytecode address, which may differ from the contract address in proxy patterns
     pub fn bytecode_address(&self) -> Address {
         match self {
             Code::Opcode(info) => info.bytecode_address,
@@ -42,16 +47,24 @@ impl Code {
     }
 }
 
+/// Information about disassembled bytecode with opcode mappings for debugging at the EVM level
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpcodeInfo {
+    /// The contract address where this bytecode is deployed
     pub address: Address,
+    /// The address where the actual bytecode is stored (may differ from address in proxy patterns)
     pub bytecode_address: Address,
+    /// Mapping from program counter to disassembled opcode strings for step-by-step debugging
     pub codes: HashMap<u64, String>, // pc -> opcode
 }
 
+/// Information about original Solidity source code for high-level debugging with source mappings
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourceInfo {
+    /// The contract address where this source code is deployed
     pub address: Address,
+    /// The address where the actual bytecode is stored (may differ from address in proxy patterns)
     pub bytecode_address: Address,
+    /// Mapping from source file paths to their content for source-level debugging
     pub sources: HashMap<PathBuf, String>, // file -> source
 }

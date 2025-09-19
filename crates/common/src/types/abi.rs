@@ -14,11 +14,10 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{borrow::Borrow, ffi::os_str::Display, fmt};
+use std::{borrow::Borrow, fmt};
 
 use alloy_json_abi::Function;
 use alloy_primitives::Address;
-use foundry_block_explorers::contract;
 use foundry_compilers::artifacts::Contract;
 use serde::{Deserialize, Serialize};
 use tracing::error;

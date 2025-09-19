@@ -61,17 +61,17 @@ pub struct FileInfo {
 
 /// Server-controlled display preferences
 #[derive(Debug, Clone)]
-pub struct CodeDisplayInfo {
+struct CodeDisplayInfo {
     /// Current location
-    pub location: DisplayLocation,
+    location: DisplayLocation,
     /// Whether source code is available from server
-    pub has_source_code: bool,
+    has_source_code: bool,
     /// Server's preferred display mode
-    pub mode: CodeMode,
+    mode: CodeMode,
     /// List of available source files for this address
-    pub available_files: Vec<String>,
+    available_files: Vec<String>,
     /// Enhanced file information with metadata
-    pub file_info: Vec<FileInfo>,
+    file_info: Vec<FileInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

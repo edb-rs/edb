@@ -21,15 +21,21 @@
 //! This crate provides shared utilities used by both the edb binary
 //! and the engine crate, including chain forking and transaction replay.
 
-#![allow(unused_imports)]
-
-pub mod cache;
-pub mod context;
-pub mod forking;
-pub mod logging;
-pub mod opcode;
-pub mod spec_id;
+/// Common types used throughout the EDB ecosystem including execution traces, snapshots, and code representations
 pub mod types;
+
+/// Caching utilities for storing and retrieving RPC responses to optimize performance
+pub mod cache;
+/// Execution context management for EDB, including environment setup and configuration
+pub mod context;
+/// Chain forking utilities for creating and managing forked blockchain states
+pub mod forking;
+/// Logging setup and utilities for consistent logging across EDB components
+pub mod logging;
+/// Extended opcode analysis utilities for EVM state modification detection and debugging
+pub mod opcode;
+/// Specification ID utilities for handling different Ethereum hardforks and protocol versions
+pub mod spec_id;
 
 pub use cache::*;
 pub use context::*;

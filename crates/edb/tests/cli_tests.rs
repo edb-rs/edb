@@ -14,13 +14,15 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! CLI tests for EDB
+
 use assert_cmd::Command;
 use predicates::prelude::*;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 #[test]
 fn test_help_command() {
-    edb_common::logging::ensure_test_logging(None);
+    edb_common::ensure_test_logging(None);
     info!("Testing CLI help command");
 
     let mut cmd = Command::cargo_bin("edb").unwrap();

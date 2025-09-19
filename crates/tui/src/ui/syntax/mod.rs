@@ -57,7 +57,7 @@ pub enum TokenType {
     OpcodeData,    // Hex data
 
     // Common
-    Default, // Default text
+    _Default, // Default text
 }
 
 /// Syntax token with position and type
@@ -109,7 +109,7 @@ impl SyntaxHighlighter {
             | TokenType::OpcodeNumber
             | TokenType::OpcodeAddress
             | TokenType::OpcodeData => color_scheme.syntax_opcode_color,
-            TokenType::Default => color_scheme.comment_color,
+            TokenType::_Default => color_scheme.comment_color,
         };
         Style::default().fg(color)
     }

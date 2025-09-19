@@ -16,23 +16,15 @@
 
 //! Forking tests.
 
-use alloy_primitives::{address, b256, TxHash, U256};
+use alloy_primitives::{address, b256, U256};
 use alloy_rpc_types::Transaction;
-use edb_common::{fork_and_prepare, get_tx_env_from_tx, ForkInfo};
+use edb_common::{get_tx_env_from_tx, ForkInfo};
 use revm::primitives::hardfork::SpecId;
 use tracing::{debug, info};
 
-/// Test transaction hash from a known mainnet transaction
-/// This is a random tx at Aug 7, 2025: https://etherscan.io/tx/0xc403cced1cf53cbeb72475be7271b731f846e91fcbd7b43f120b8bbd60d5473e
-const TEST_TX_HASH: &str = "0xc403cced1cf53cbeb72475be7271b731f846e91fcbd7b43f120b8bbd60d5473e";
-
-/// Another test transaction for testing multiple transactions in a block
-/// Random USDT transfer: https://etherscan.io/tx/0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060
-const TEST_TX_HASH_2: &str = "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060";
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_info_creation() {
-    edb_common::logging::ensure_test_logging(None);
+    edb_common::ensure_test_logging(None);
     debug!("Testing ForkInfo struct creation and properties");
 
     let fork_info = ForkInfo {
@@ -50,7 +42,7 @@ async fn test_fork_info_creation() {
 
 #[test]
 fn test_get_tx_env_from_tx() {
-    edb_common::logging::ensure_test_logging(None);
+    edb_common::ensure_test_logging(None);
     info!("Testing transaction environment extraction");
 
     // Create a mock transaction for testing

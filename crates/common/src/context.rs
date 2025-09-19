@@ -25,12 +25,7 @@ use revm::{
     state::{Account, AccountInfo, Bytecode},
     Context, Database, DatabaseCommit, DatabaseRef,
 };
-use std::{
-    fmt,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-    usize,
-};
+use std::{fmt, sync::Arc, usize};
 
 /// Type alias for the EDB context in terms of revm's Context
 pub type EdbContext<DB> = Context<BlockEnv, TxEnv, CfgEnv, CacheDB<DB>>;

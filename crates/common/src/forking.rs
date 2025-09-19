@@ -19,26 +19,21 @@
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
 
 use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EdbContext, EdbDB};
-use alloy_network::Network;
 use alloy_primitives::{address, Address, TxHash, TxKind, B256, U256};
-use alloy_provider::{
-    fillers::{FillProvider, TxFiller},
-    layers::{CacheProvider, SharedCache},
-    Provider, ProviderBuilder,
-};
-use alloy_rpc_types::{BlockId, BlockNumberOrTag, Transaction, TransactionTrait};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types::{BlockNumberOrTag, Transaction, TransactionTrait};
 use eyre::Result;
 use indicatif::ProgressBar;
 use revm::{
-    context::{ContextTr, JournalTr, TxEnv},
+    context::{ContextTr, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
-    database::{AlloyDB, CacheDB, StateBuilder},
+    database::{AlloyDB, CacheDB},
     Context, Database, DatabaseCommit, DatabaseRef, ExecuteCommitEvm, ExecuteEvm, MainBuilder,
     MainContext,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, error, field::debug, info, warn, Instrument};
+use tracing::{debug, error, info, warn};
 
 use revm::{
     // Use re-exported primitives from revm

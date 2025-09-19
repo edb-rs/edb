@@ -40,7 +40,6 @@ use ratatui::{
     Frame,
 };
 use revm::state::TransientStorage;
-use std::cmp::Ordering;
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -63,7 +62,7 @@ pub enum DisplayMode {
     /// Show variables (both local and state, for hooked snapshots)
     Variables,
     /// Show breakpoints (for hooked snapshots)
-    Breakpoints,
+    _Breakpoints,
     /// Show current stack (for opcode snapshots)
     Stack,
     /// Show memory contents (for opcode snapshots)
@@ -90,7 +89,7 @@ impl DisplayMode {
     pub fn name(&self) -> &'static str {
         match self {
             DisplayMode::Variables => "Variables",
-            DisplayMode::Breakpoints => "Breakpoints",
+            DisplayMode::_Breakpoints => "Breakpoints",
             DisplayMode::Stack => "Stack",
             DisplayMode::Memory => "Memory",
             DisplayMode::CallData => "Call Data",
@@ -539,7 +538,9 @@ impl DisplayPanel {
                 // Return reasonable default for now
                 80
             }
-            DisplayMode::Breakpoints => self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0),
+            DisplayMode::_Breakpoints => {
+                self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0)
+            }
         };
     }
 
@@ -758,7 +759,7 @@ impl DisplayPanel {
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
-            DisplayMode::Breakpoints => self.breakpoints.len(),
+            DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
         if self.selected_index < max_items.saturating_sub(1) {
@@ -1416,7 +1417,7 @@ impl DisplayPanel {
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
-            DisplayMode::Breakpoints => self.breakpoints.len(),
+            DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
         let status_bar = StatusBar::new()
@@ -1462,7 +1463,7 @@ impl PanelTr for DisplayPanel {
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
-            DisplayMode::Breakpoints => self.breakpoints.len(),
+            DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
         let snapshot_type = if self.is_opcode_snapshot { "Opcode" } else { "Hook" };
@@ -1492,7 +1493,7 @@ impl PanelTr for DisplayPanel {
             DisplayMode::Storage => self.render_storage(frame, area, dm),
             DisplayMode::TransientStorage => self.render_transient_storage(frame, area, dm),
             DisplayMode::Variables => self.render_variables(frame, area, dm),
-            DisplayMode::Breakpoints => self.render_breakpoints(frame, area, dm),
+            DisplayMode::_Breakpoints => self.render_breakpoints(frame, area, dm),
         }
     }
 
@@ -1571,7 +1572,7 @@ impl PanelTr for DisplayPanel {
                     DisplayMode::Storage => self.storage_display_lines,
                     DisplayMode::TransientStorage => self.tstorage_display_lines,
                     DisplayMode::Variables => self.variables.len(),
-                    DisplayMode::Breakpoints => self.breakpoints.len(),
+                    DisplayMode::_Breakpoints => self.breakpoints.len(),
                 };
                 self.selected_index = max_items.saturating_sub(1);
                 Ok(EventResponse::Handled)

@@ -95,6 +95,6 @@ pub fn find_tui_binary() -> Result<PathBuf> {
 }
 
 /// Helper function to find the edb-webui binary
-pub fn find_webui_binary() -> Result<PathBuf> {
+pub fn _find_webui_binary() -> Result<PathBuf> {
     find_binary("edb-webui")
 }

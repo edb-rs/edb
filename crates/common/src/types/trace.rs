@@ -14,23 +14,17 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use alloy_json_abi::{Function, JsonAbi};
-use alloy_primitives::{hex, Address, Bytes, Log, LogData, U256};
+use alloy_primitives::{hex, Address, Bytes, LogData, U256};
 use auto_impl::auto_impl;
 use revm::{
-    context::{ContextTr, CreateScheme},
+    context::CreateScheme,
     interpreter::{
         CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, InstructionResult,
-        Interpreter,
     },
-    Inspector,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
-use tracing::{debug, error};
+use std::ops::{Deref, DerefMut};
+use tracing::error;
 
 /// Type of call/creation operation
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,8 +35,10 @@ pub enum CallType {
     Create(CreateScheme),
 }
 
+/// Trait for converting inputs to call type representation for trace analysis
 #[auto_impl(&, &mut, Box, Rc, Arc)]
 trait IntoCallType {
+    /// Convert this input type to its corresponding CallType variant
     fn into_call_type(&self) -> CallType;
 }
 
@@ -127,6 +123,7 @@ impl PartialEq for CallResult {
 impl Eq for CallResult {}
 
 impl CallResult {
+    /// Get the instruction result code from this call result
     pub fn result(&self) -> InstructionResult {
         match self {
             CallResult::Success { result, .. } => *result,
@@ -135,6 +132,7 @@ impl CallResult {
         }
     }
 
+    /// Get the output bytes from this call result (return data or revert reason)
     pub fn output(&self) -> &Bytes {
         match self {
             CallResult::Success { output, .. } => output,
@@ -144,8 +142,10 @@ impl CallResult {
     }
 }
 
+/// Trait for converting outcomes to call result representation for trace analysis
 #[auto_impl(&, &mut, Box, Rc, Arc)]
 trait IntoCallResult {
+    /// Convert this outcome type to its corresponding CallResult variant
     fn into_call_result(&self) -> CallResult;
 }
 
@@ -212,9 +212,10 @@ where
     }
 }
 
-/// Trace representation
+/// Complete execution trace containing all call/creation entries for transaction analysis and debugging
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Trace {
+    /// Internal vector storing all trace entries in chronological order
     inner: Vec<TraceEntry>,
 }
 

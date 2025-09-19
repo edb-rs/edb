@@ -14,6 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Integration tests for EDB engine configuration management.
+//!
+//! This test suite validates the configuration system of the EDB debugging engine,
+//! ensuring that default values are correctly set and custom configurations work as expected.
+//! The tests cover configuration creation, cloning behavior, and proper handling of various
+//! configuration parameters including RPC proxy URLs, Etherscan API keys, and execution modes.
+
 use edb_engine::EngineConfig;
 use tracing::info;
 

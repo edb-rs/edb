@@ -53,7 +53,7 @@ use std::collections::{HashMap, HashSet};
 
 use alloy_primitives::Address;
 use edb_common::types::{ExecutionFrameId, Trace};
-use eyre::{bail, Result};
+use eyre::Result;
 use itertools::Itertools;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use tracing::{debug, error, warn};
@@ -478,7 +478,7 @@ impl FunctionInfo {
         !matches!(self, FunctionInfo::INVALID)
     }
 
-    fn certainly_in_body(&self) -> bool {
+    fn _certainly_in_body(&self) -> bool {
         match self {
             FunctionInfo::FunctionOnly(..) | FunctionInfo::ModifiedFunction { .. } => true,
             _ => false,

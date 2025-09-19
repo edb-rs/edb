@@ -210,7 +210,7 @@ impl TracePanelInner {
     }
 
     /// Move selection up with repetition support
-    fn move_up(&mut self, trace: &Trace, count: usize) {
+    fn move_up(&mut self, _trace: &Trace, count: usize) {
         for _ in 0..count {
             if self.selected_index > 0 {
                 self.selected_index -= 1;
@@ -246,7 +246,6 @@ impl TracePanelInner {
     fn move_to(&mut self, line_num: usize, trace: &Trace) {
         let display_lines = self.generate_display_lines(trace);
         let max_lines = display_lines.len();
-        let line_number = line_num.clamp(1, max_lines);
         self.selected_index = line_num.saturating_sub(1);
         // Center the view on this line if possible
         let viewport_height = self.context_height;

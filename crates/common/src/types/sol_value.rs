@@ -21,6 +21,7 @@ use alloy_primitives::hex;
 use alloy_primitives::{Address, FixedBytes, I256, U256};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// Wrapper around DynSolValue with custom serialization for EDB debugging and analysis
 #[derive(Debug, Clone)]
 pub struct EdbSolValue(pub DynSolValue);
 
@@ -50,20 +51,33 @@ impl DerefMut for EdbSolValue {
     }
 }
 
+/// Serializable representation of DynSolValue for JSON and other formats with complete type information preservation
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 enum SerializedDynSolValue {
+    /// Boolean value
     Bool(bool),
+    /// Signed integer with bit size specification
     Int { value: I256, bits: usize },
+    /// Unsigned integer with bit size specification
     Uint { value: U256, bits: usize },
+    /// Fixed-size bytes with size specification
     FixedBytes { value: FixedBytes<32>, size: usize },
+    /// Ethereum address (20 bytes)
     Address(Address),
+    /// Function selector (24 bytes)
     Function(FixedBytes<24>),
+    /// Dynamic bytes array
     Bytes(Vec<u8>),
+    /// String value
     String(String),
+    /// Dynamic array of values
     Array(Vec<SerializedDynSolValue>),
+    /// Fixed-size array of values
     FixedArray(Vec<SerializedDynSolValue>),
+    /// Tuple of multiple values
     Tuple(Vec<SerializedDynSolValue>),
+    /// Custom struct with name, property names, and tuple data
     CustomStruct { name: String, prop_names: Vec<String>, tuple: Vec<SerializedDynSolValue> },
 }
 
@@ -185,29 +199,38 @@ pub trait SolValueFormatter {
     fn format_type(&self) -> String;
 }
 
+/// Configuration context for formatting Solidity values with various display options and address resolution
 #[derive(Default)]
 pub struct SolValueFormatterContext {
+    /// Optional function to resolve addresses to human-readable names or labels
     pub resolve_address: Option<Box<dyn Fn(Address) -> Option<String>>>,
+    /// Whether to include type information in the formatted output
     pub with_ty: bool,
+    /// Whether to shorten long arrays, strings, and other large data structures
     pub shorten_long: bool,
+    /// Whether to use multi-line formatting for better readability of complex structures
     pub multi_line: bool,
 }
 
 impl SolValueFormatterContext {
+    /// Create a new default formatter context
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Configure whether to include type information in formatted output
     pub fn with_ty(mut self, with_ty: bool) -> Self {
         self.with_ty = with_ty;
         self
     }
 
+    /// Configure whether to shorten long data structures for readability
     pub fn shorten_long(mut self, shorten_long: bool) -> Self {
         self.shorten_long = shorten_long;
         self
     }
 
+    /// Configure whether to use multi-line formatting for complex structures
     pub fn multi_line(mut self, multi_line: bool) -> Self {
         self.multi_line = multi_line;
         self
@@ -533,7 +556,7 @@ fn format_custom_struct(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, Address, FixedBytes, I256, U256};
+    use alloy_primitives::{address, FixedBytes, I256, U256};
     use serde_json;
 
     #[test]

@@ -23,7 +23,7 @@
 //! - Default INFO level with beautiful styling
 
 use eyre::Result;
-use std::{env, fs, io, path::PathBuf, sync::Once};
+use std::{env, fs, path::PathBuf, sync::Once};
 use tracing::Level;
 use tracing_appender::{non_blocking, rolling};
 use tracing_subscriber::{
@@ -313,7 +313,6 @@ pub fn ensure_test_logging(default_level: Option<Level>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
     use tracing::{debug, error, info, warn};
 
     // Use the public ensure_test_logging function
