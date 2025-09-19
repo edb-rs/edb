@@ -9,6 +9,18 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
 ### 🎯 Milestone 1: Enhanced Debugging Capabilities
 **Goal**: Expand core debugging features to support more complex scenarios
 
+- [ ] **Calldata Variable Extraction**
+  - Extract and decode function parameters from calldata
+  - Support complex calldata types (arrays, structs, dynamic types)
+  - Display calldata values in variable watcher
+  - Map calldata offsets to parameter names
+
+- [ ] **Solidity 0.4.x Value Extraction**
+  - Support variable extraction for legacy Solidity 0.4.x contracts
+  - Handle different ABI encoding format in 0.4.x
+  - Adapt storage layout differences for older compiler versions
+  - Ensure backward compatibility with legacy contracts
+
 - [ ] **Complex Type Variable Watcher**
   - Support user-defined types (structs, enums, mappings)
   - Implement alternative collection methods for non-ABI-encodable types
@@ -50,6 +62,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Implement trait objects for variable/state inheritance
   - Optimize accessible variables storage per step
   - Reduce redundant state snapshot storage
+  - Reduce memory usage for db snapshots in hooked version by sharing db when no SLOAD operations occur during execution
 
 - [x] **Improved Snapshot System**
   - Replace `call` opcode approach with bytecode pattern injection

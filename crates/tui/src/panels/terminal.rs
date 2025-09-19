@@ -788,6 +788,7 @@ impl TerminalPanel {
         self.add_output("");
         self.add_output("💻 Solidity expressions (prefix with $):");
         self.add_output("  $<expr>          - Evaluate expression");
+        self.add_output("  $edb_help()      - Show more help on expressions");
         self.add_output("");
         self.add_output("⚙️  Other:");
         self.add_output("  help, h          - Show this help");

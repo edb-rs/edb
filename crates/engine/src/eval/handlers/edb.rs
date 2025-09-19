@@ -18,7 +18,9 @@ use std::{collections::HashSet, sync::Arc};
 
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::U256;
-use edb_common::types::{parse_callable_abi_entries, CallableAbiEntry, SnapshotInfoDetail};
+use edb_common::types::{
+    parse_callable_abi_entries, CallableAbiEntry, SnapshotInfoDetail, TraceEntry,
+};
 use eyre::{bail, eyre, Result};
 use revm::{
     database::CacheDB, interpreter::instructions::system::address, Database, DatabaseCommit,
@@ -27,7 +29,7 @@ use revm::{
 use tracing::debug;
 
 use super::*;
-use crate::{EngineContext, SnapshotDetail};
+use crate::{EngineContext, Snapshot, SnapshotDetail};
 
 static EDB_EVAL_PLACEHOLDER_MAGIC: &str = "edb_eval_placeholder";
 
@@ -170,8 +172,12 @@ where
             })?
             .1;
 
+        if name == "this" {
+            return Ok(DynSolValue::Address(snapshot.target_address()));
+        }
+
         let SnapshotDetail::Hook(detail) = &snapshot.detail() else {
-            bail!("Cannot get variable value from opcode snapshot");
+            bail!("Cannot get variable value from opcode snapshot (except this)");
         };
 
         // Let's first check whether this could be a local or state variable
@@ -311,6 +317,245 @@ where
     }
 }
 
+fn edb_keccak256(bytes: DynSolValue) -> Result<DynSolValue> {
+    match bytes {
+        DynSolValue::Bytes(b) => {
+            let hash = alloy_primitives::keccak256(&b);
+            Ok(DynSolValue::Bytes(hash.to_vec()))
+        }
+        DynSolValue::FixedBytes(b, n_bytes) => {
+            // Change the bytes to a Vec<u8> of length n_bytes
+            if n_bytes > 32 {
+                bail!("FixedBytes length {} exceeds maximum of 32", n_bytes);
+            } else {
+                let mut v = vec![0u8; n_bytes];
+                v.copy_from_slice(&b[..n_bytes]);
+                let hash = alloy_primitives::keccak256(&v);
+                Ok(DynSolValue::Bytes(hash.to_vec()))
+            }
+        }
+        _ => {
+            bail!("Invalid argument to edb_keccak256: expected bytes, got {:?}", bytes);
+        }
+    }
+}
+
+fn edb_sload<DB>(
+    snapshot: &Snapshot<DB>,
+    address: &DynSolValue,
+    slot: &DynSolValue,
+) -> Result<DynSolValue>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    match (address, slot) {
+        (DynSolValue::Address(address), DynSolValue::Uint(slot, ..)) => {
+            let db = snapshot.db();
+            let cached_storage = db
+                .cache
+                .accounts
+                .get(address)
+                .map(|acc| &acc.storage)
+                .ok_or(eyre!("Account {:?} not found in edb_sload", address))?;
+            let value = cached_storage.get(slot).cloned().unwrap_or_default();
+
+            Ok(DynSolValue::Uint(value, 256))
+        }
+        _ => {
+            bail!(
+                "Invalid arguments to edb_sload: expected (address, u256), got ({:?}, {:?})",
+                address,
+                slot
+            );
+        }
+    }
+}
+
+fn edb_stack<DB>(snapshot: &Snapshot<DB>, index: &DynSolValue) -> Result<DynSolValue>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    let SnapshotDetail::Opcode(detail) = snapshot.detail() else {
+        bail!("edb_stack can only be called from an opcode snapshot");
+    };
+
+    match index {
+        DynSolValue::Uint(idx, ..) => {
+            let idx = idx.to::<usize>();
+            let stack = &detail.stack;
+            if idx >= stack.len() {
+                bail!("Index {} out of bounds for stack with {} elements", idx, stack.len());
+            }
+            Ok(stack[stack.len() - 1 - idx].clone().into())
+        }
+        _ => {
+            bail!("Invalid argument to edb_stack: expected u256, got {:?}", index);
+        }
+    }
+}
+
+fn edb_tsload<DB>(
+    snapshot: &Snapshot<DB>,
+    address: &DynSolValue,
+    slot: &DynSolValue,
+) -> Result<DynSolValue>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    let SnapshotDetail::Opcode(detail) = snapshot.detail() else {
+        bail!("edb_tsload can only be called from an opcode snapshot");
+    };
+
+    match (address, slot) {
+        (DynSolValue::Address(addr), DynSolValue::Uint(idx, ..)) => {
+            let value = detail.transient_storage.get(&(*addr, *idx)).cloned().unwrap_or_default();
+            Ok(DynSolValue::Uint(value, 256))
+        }
+        _ => {
+            bail!(
+                "Invalid arguments to edb_tsload: expected (address, u256), got ({:?}, {:?})",
+                address,
+                slot
+            );
+        }
+    }
+}
+
+fn edb_memory<DB>(
+    snapshot: &Snapshot<DB>,
+    offset: &DynSolValue,
+    size: &DynSolValue,
+) -> Result<DynSolValue>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    let SnapshotDetail::Opcode(detail) = snapshot.detail() else {
+        bail!("edb_memory can only be called from an opcode snapshot");
+    };
+
+    match (offset, size) {
+        (DynSolValue::Uint(off, ..), DynSolValue::Uint(sz, ..)) => {
+            let off = off.to::<usize>();
+            let sz = sz.to::<usize>();
+            let memory = &detail.memory;
+            if off + sz > memory.len() {
+                bail!(
+                    "edb_memory out of bounds: offset {} + size {} > memory length {}",
+                    off,
+                    sz,
+                    memory.len()
+                );
+            }
+            let slice = &memory[off..off + sz];
+            Ok(DynSolValue::Bytes(slice.to_vec()))
+        }
+        _ => {
+            bail!(
+                "Invalid arguments to edb_memory: expected (u256, u256), got ({:?}, {:?})",
+                offset,
+                size
+            );
+        }
+    }
+}
+
+fn edb_calldata(
+    entry: &TraceEntry,
+    offset: &DynSolValue,
+    size: &DynSolValue,
+) -> Result<DynSolValue> {
+    match (offset, size) {
+        (DynSolValue::Uint(off, ..), DynSolValue::Uint(sz, ..)) => {
+            let off = off.to::<usize>();
+            let sz = sz.to::<usize>();
+            let calldata = &entry.input;
+            if off + sz > calldata.len() {
+                bail!(
+                    "edb_calldata out of bounds: offset {} + size {} > calldata length {}",
+                    off,
+                    sz,
+                    calldata.len()
+                );
+            }
+            let slice = &calldata[off..off + sz];
+            Ok(DynSolValue::Bytes(slice.to_vec()))
+        }
+        _ => {
+            bail!(
+                "Invalid arguments to edb_calldata: expected (u256, u256), got ({:?}, {:?})",
+                offset,
+                size
+            );
+        }
+    }
+}
+
+fn edb_help() -> Result<DynSolValue> {
+    let help_text = r#"EDB Expression Evaluator Help
+
+OVERVIEW:
+Real-time expression evaluation over debug modes. Evaluate Solidity-like expressions
+against contract state, variables, and blockchain context at any execution point.
+
+VARIABLES:
+• this                    - Current contract address
+• Local variables         - Access by name (e.g., balance, owner)
+• State variables         - Access by name (e.g., totalSupply, users)
+• Mapping/array variables - Access with bracket notation (e.g., balances[addr])
+
+BLOCKCHAIN CONTEXT:
+• msg.sender     - Transaction sender address
+• msg.value      - Transaction value in wei
+• tx.origin      - Original transaction sender
+• block.number   - Current block number
+• block.timestamp - Current block timestamp
+
+PRE-COMPILED FUNCTIONS (EDB-VERSION):
+• edb_sload(address, slot)      - Read storage slot from address
+• edb_tsload(address, slot)     - Read transient storage (opcode mode only)
+• edb_stack(index)              - Read EVM stack value (opcode mode only)
+• edb_memory(offset, size)      - Read EVM memory (opcode mode only)
+• edb_calldata(offset, size)    - Read call data slice
+• keccak256(bytes)              - Compute keccak256 hash
+• edb_help()                    - Show this help
+
+CONTRACT FUNCTIONS:
+• Call any contract function by name with arguments
+• Access state variables and view functions
+• Member access on addresses (e.g., addr.balanceOf(user))
+• Cross-contract calls (e.g., token.transfer(to, amount))
+• State variable access on different addresses (e.g., addr.owner)
+
+OPERATORS:
+• Arithmetic: +, -, *, /, %, **
+• Comparison: ==, !=, <, <=, >, >=
+• Logical: &&, ||, !
+• Bitwise: &, |, ^, ~, <<, >>
+• Ternary: condition ? true_value : false_value
+
+EXAMPLES:
+• balances[msg.sender]
+• totalSupply() > 1000000
+• block.timestamp - lastUpdate > 3600
+• edb_sload(this, 0x123...)
+• owner == msg.sender && msg.value > 0
+• token.balanceOf(user) * price / 1e18
+• addr.owner == this
+• contractAddr.getUserBalance(msg.sender)
+
+Note: Use 'this' to reference the current contract address in expressions."#;
+
+    Ok(DynSolValue::String(help_text.to_string()))
+}
+
 impl<DB> FunctionCallHandler for EdbFunctionCallHandler<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
@@ -329,33 +574,29 @@ where
             name, args, callee, snapshot_id
         );
 
-        let (_frame_id, snapshot) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
+        let (frame_id, snapshot) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
             eyre::eyre!("Snapshot ID {} not found in EdbHandler::call_function", snapshot_id)
+        })?;
+
+        let entry = self.0.context.trace.get(frame_id.trace_entry_id()).ok_or_else(|| {
+            eyre::eyre!("Frame ID {} not found in EdbHandler::call_function", frame_id)
         })?;
 
         // Let's first handle our edb-specific pseudo-functions
         if name == "edb_sload" && args.len() == 2 {
-            match (&args[0], &args[1]) {
-                (DynSolValue::Address(address), DynSolValue::Uint(slot, ..)) => {
-                    let db = snapshot.db();
-                    let cached_storage = db
-                        .cache
-                        .accounts
-                        .get(address)
-                        .map(|acc| &acc.storage)
-                        .ok_or(eyre!("Account {:?} not found in edb_sload", address))?;
-                    let value = cached_storage.get(slot).cloned().unwrap_or_default();
-
-                    return Ok(DynSolValue::Uint(value, 256));
-                }
-                _ => {
-                    bail!(
-                        "Invalid arguments to edb_sload: expected (string, u256), got ({:?}, {:?})",
-                        args[0],
-                        args[1]
-                    );
-                }
-            }
+            return edb_sload(snapshot, &args[0], &args[1]);
+        } else if name == "edb_tsload" && args.len() == 2 {
+            return edb_tsload(snapshot, &args[0], &args[1]);
+        } else if name == "edb_stack" && args.len() == 1 {
+            return edb_stack(snapshot, &args[0]);
+        } else if name == "edb_calldata" && args.len() == 2 {
+            return edb_calldata(entry, &args[0], &args[1]);
+        } else if name == "edb_memory" && args.len() == 2 {
+            return edb_memory(snapshot, &args[0], &args[1]);
+        } else if name == "keccak256" && args.len() == 1 {
+            return edb_keccak256(args[0].clone());
+        } else if name == "edb_help" && args.is_empty() {
+            return edb_help();
         }
 
         // Let's then handle calls to functions in the contract's ABI
@@ -391,11 +632,10 @@ where
                 .and_then(|art| art.contract())
             {
                 for entry in parse_callable_abi_entries(contract) {
-                    if entry.name == name && entry.is_function() && entry.inputs.len() == args.len()
-                    {
+                    if entry.name == name && entry.inputs.len() == args.len() {
                         match self.0.context.call_in_derived_evm(
                             snapshot_id,
-                            address_candidate,
+                            to,
                             &entry.abi,
                             args,
                             None,
@@ -454,6 +694,52 @@ where
         member: &str,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
+        if let DynSolValue::Address(addr) = value {
+            let mut address_candidates = self
+                .0
+                .context
+                .address_code_address_map()
+                .get(&addr)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .collect::<Vec<_>>();
+            address_candidates.insert(0, addr); // Prioritize the direct address
+
+            for address_candidate in address_candidates {
+                if let Some(contract) = self
+                    .0
+                    .context
+                    .recompiled_artifacts
+                    .get(&address_candidate)
+                    .and_then(|art| art.contract())
+                {
+                    for entry in parse_callable_abi_entries(contract) {
+                        if entry.name == member
+                            && entry.is_state_variable()
+                            && entry.inputs.is_empty()
+                        {
+                            match self.0.context.call_in_derived_evm(
+                                snapshot_id,
+                                addr,
+                                &entry.abi,
+                                &[],
+                                None,
+                            ) {
+                                Ok(result) => return Ok(result),
+                                Err(e) => {
+                                    debug!(
+                                    "Function '{}' found in contract at address {:?}, but call failed",
+                                    member, address_candidate
+                                );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         bail!(
             "Invalid member access for value={:?}, member='{}', snapshot_id={}",
             value,
@@ -470,13 +756,27 @@ where
     <DB as Database>::Error: Clone + Send + Sync,
 {
     fn get_msg_sender(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to get msg.sender from snapshot
-        bail!("EdbHandler::get_msg_sender not yet implemented for snapshot_id={}", snapshot_id)
+        let (frame_id, _) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
+            eyre::eyre!("Snapshot ID {} not found in EdbHandler::get_msg_sender", snapshot_id)
+        })?;
+
+        let entry = self.0.context.trace.get(frame_id.trace_entry_id()).ok_or_else(|| {
+            eyre::eyre!("Frame ID {} not found in EdbHandler::get_msg_sender", frame_id)
+        })?;
+
+        Ok(DynSolValue::Address(entry.caller))
     }
 
     fn get_msg_value(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to get msg.value from snapshot
-        bail!("EdbHandler::get_msg_value not yet implemented for snapshot_id={}", snapshot_id)
+        let (frame_id, _) = self.0.context.snapshots.get(snapshot_id).ok_or_else(|| {
+            eyre::eyre!("Snapshot ID {} not found in EdbHandler::get_msg_value", snapshot_id)
+        })?;
+
+        let entry = self.0.context.trace.get(frame_id.trace_entry_id()).ok_or_else(|| {
+            eyre::eyre!("Frame ID {} not found in EdbHandler::get_msg_value", frame_id)
+        })?;
+
+        Ok(DynSolValue::Uint(entry.value, 256))
     }
 }
 
@@ -486,9 +786,15 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    fn get_tx_origin(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        // TODO: Implement using self.0.context to get tx.origin from snapshot
-        bail!("EdbHandler::get_tx_origin not yet implemented for snapshot_id={}", snapshot_id)
+    fn get_tx_origin(&self, _snapshot_id: usize) -> Result<DynSolValue> {
+        let entry = self
+            .0
+            .context
+            .trace
+            .get(0)
+            .ok_or_else(|| eyre::eyre!("No trace entry found in EdbHandler::get_tx_origin"))?;
+
+        Ok(DynSolValue::Address(entry.caller))
     }
 }
 

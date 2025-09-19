@@ -34,6 +34,7 @@ pub struct ContractRef {
     inner: Arc<RwLock<Contract>>,
     /* cached readonly fields*/
     name: OnceCell<String>,
+    definition: OnceCell<ContractDefinition>,
 }
 
 impl From<Contract> for ContractRef {
@@ -45,7 +46,11 @@ impl From<Contract> for ContractRef {
 impl ContractRef {
     /// Creates a new ContractRef from a Contract.
     pub fn new(inner: Contract) -> Self {
-        Self { inner: Arc::new(RwLock::new(inner)), name: OnceCell::new() }
+        Self {
+            inner: Arc::new(RwLock::new(inner)),
+            name: OnceCell::new(),
+            definition: OnceCell::new(),
+        }
     }
 }
 
@@ -53,6 +58,11 @@ impl ContractRef {
     /// Returns the name of this contract.
     pub fn name(&self) -> &String {
         self.name.get_or_init(|| self.inner.read().definition.name.to_string())
+    }
+
+    /// Returns the definition of this contract.
+    pub fn definition(&self) -> &ContractDefinition {
+        self.definition.get_or_init(|| self.inner.read().definition.clone())
     }
 }
 

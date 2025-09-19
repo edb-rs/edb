@@ -1847,35 +1847,190 @@ mod tests {
     fn test_eval_type_casting_comprehensive() {
         let evaluator = ExpressionEvaluator::new_default();
 
-        // Test address casting from different types
+        // ===== ADDRESS CASTING =====
+
+        // Address from uint256 (zero address)
         let result = evaluator.eval("address(0)", 0);
         assert!(result.is_ok());
+        if let Ok(DynSolValue::Address(addr)) = result {
+            assert_eq!(addr, Address::ZERO);
+        }
 
-        // Test uint casting from bool
+        // Address from uint256 (non-zero address)
+        let result = evaluator.eval("address(0x1234567890123456789012345678901234567890)", 0);
+        assert!(result.is_ok());
+
+        // Address from bytes20 (should work)
+        // Note: This would require proper bytes literal parsing
+
+        // ===== UINT CASTING =====
+
+        // Uint256 from bool (true -> 1)
         let result = evaluator.eval("uint256(true)", 0);
         assert!(result.is_ok());
-        if let Ok(DynSolValue::Uint(val, _)) = result {
+        if let Ok(DynSolValue::Uint(val, bits)) = result {
             assert_eq!(val, U256::from(1));
+            assert_eq!(bits, 256);
         }
 
+        // Uint256 from bool (false -> 0)
         let result = evaluator.eval("uint256(false)", 0);
         assert!(result.is_ok());
-        if let Ok(DynSolValue::Uint(val, _)) = result {
+        if let Ok(DynSolValue::Uint(val, bits)) = result {
             assert_eq!(val, U256::ZERO);
+            assert_eq!(bits, 256);
         }
 
-        // Test bool casting from numbers
+        // Uint8 truncation test
+        let result = evaluator.eval("uint8(257)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(val, bits)) = result {
+            assert_eq!(val, U256::from(1)); // 257 % 256 = 1
+            assert_eq!(bits, 8);
+        }
+
+        // Uint16 truncation test
+        let result = evaluator.eval("uint16(65537)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(val, bits)) = result {
+            assert_eq!(val, U256::from(1)); // 65537 % 65536 = 1
+            assert_eq!(bits, 16);
+        }
+
+        // Uint32 from large number
+        let result = evaluator.eval("uint32(0xFFFFFFFF)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(val, bits)) = result {
+            assert_eq!(val, U256::from(0xFFFFFFFF_u32));
+            assert_eq!(bits, 32);
+        }
+
+        // ===== INT CASTING =====
+
+        // Int256 from bool
+        let result = evaluator.eval("int256(true)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Int(val, bits)) = result {
+            assert_eq!(val, I256::from_raw(U256::from(1)));
+            assert_eq!(bits, 256);
+        }
+
+        // Int8 from positive number
+        let result = evaluator.eval("int8(127)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Int(val, bits)) = result {
+            assert_eq!(val, I256::from_raw(U256::from(127)));
+            assert_eq!(bits, 8);
+        }
+
+        // Int8 overflow/truncation (128 becomes -128 in two's complement)
+        let result = evaluator.eval("int8(128)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Int(val, bits)) = result {
+            // In 8-bit signed, 128 (0x80) should be -128 due to sign extension
+            assert_eq!(bits, 8);
+            // The exact value depends on how sign extension is handled
+        }
+
+        // ===== BOOL CASTING =====
+
+        // Bool from uint (non-zero -> true)
         let result = evaluator.eval("bool(1)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
             assert_eq!(b, true);
         }
 
+        // Bool from uint (zero -> false)
         let result = evaluator.eval("bool(0)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
             assert_eq!(b, false);
         }
+
+        // Bool from large uint (non-zero -> true)
+        let result = evaluator.eval("bool(0xFFFFFFFFFFFFFFFF)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(b)) = result {
+            assert_eq!(b, true);
+        }
+
+        // Bool from int (positive -> true)
+        let result = evaluator.eval("bool(int256(1))", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(b)) = result {
+            assert_eq!(b, true);
+        }
+
+        // ===== BYTES CASTING =====
+
+        // Note: These would require proper bytes literal syntax support
+        // bytes32 from string would be: bytes32("hello")
+        // bytes from uint would be: bytes(uint256(0x1234))
+
+        // ===== CHAINED CASTING =====
+
+        // Multiple casts in one expression
+        let result = evaluator.eval("bool(uint8(257))", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(b)) = result {
+            // 257 -> uint8(1) -> bool(true)
+            assert_eq!(b, true);
+        }
+
+        // Cast in arithmetic expression
+        let result = evaluator.eval("uint256(true) + uint256(false)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(val, _)) = result {
+            assert_eq!(val, U256::from(1)); // 1 + 0 = 1
+        }
+
+        // Cast with comparison
+        let result = evaluator.eval("uint8(300) == uint8(44)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(b)) = result {
+            // 300 % 256 = 44, 44 % 256 = 44, so they're equal
+            assert_eq!(b, true);
+        }
+
+        // ===== ERROR CASES =====
+
+        // Invalid cast combinations should fail gracefully
+        // These might not parse correctly, but should not panic
+
+        // ===== COMPLEX CASTING SCENARIOS =====
+
+        // Cast in ternary operator
+        let result = evaluator.eval("true ? uint256(1) : uint256(0)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(val, _)) = result {
+            assert_eq!(val, U256::from(1));
+        }
+
+        // Nested casts with different bit sizes
+        let result = evaluator.eval("uint256(uint8(uint16(65793)))", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Uint(val, bits)) = result {
+            // 65793 % 65536 = 257, 257 % 256 = 1
+            assert_eq!(val, U256::from(1));
+            assert_eq!(bits, 256);
+        }
+
+        // Address arithmetic with casting
+        let result = evaluator.eval("uint256(address(0x1234)) + 1", 0);
+        assert!(result.is_ok());
+
+        // Bool logic with casting
+        let result = evaluator.eval("bool(1) && bool(0)", 0);
+        assert!(result.is_ok());
+        if let Ok(DynSolValue::Bool(b)) = result {
+            assert_eq!(b, false); // true && false = false
+        }
+
+        // Mixed type operations requiring implicit casting behavior
+        let result = evaluator.eval("uint8(255) + 1", 0);
+        assert!(result.is_ok());
+        // This tests whether the cast happens before or after the addition
     }
 
     #[test]

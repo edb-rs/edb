@@ -193,8 +193,8 @@ where
 
     // Sort the entries by type (state variables first), then by name
     entries.sort_by(|a, b| match (&a.ty, &b.ty) {
-        (AbiEntryTy::StateVariable(_), AbiEntryTy::Function) => std::cmp::Ordering::Less,
-        (AbiEntryTy::Function, AbiEntryTy::StateVariable(_)) => std::cmp::Ordering::Greater,
+        (AbiEntryTy::StateVariable(_), AbiEntryTy::Function) => std::cmp::Ordering::Greater,
+        (AbiEntryTy::Function, AbiEntryTy::StateVariable(_)) => std::cmp::Ordering::Less,
         _ => a.name.cmp(&b.name),
     });
 

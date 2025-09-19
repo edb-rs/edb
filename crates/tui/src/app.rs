@@ -739,6 +739,11 @@ impl App {
             }
         }
 
+        if self.current_panel == PanelType::Terminal {
+            // If currently in terminal, we do not show feedback in terminal
+            return;
+        }
+
         // Show intuitive, contextual feedback in terminal
         if let Some(terminal_panel) = self.panels.get_mut(&PanelType::Terminal) {
             if let Some(terminal) = terminal_panel.as_any_mut().downcast_mut::<TerminalPanel>() {

@@ -15,7 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use edb_common::types::EDB_STATE_VAR_FLAG;
-use foundry_compilers::artifacts::{Mutability, StorageLocation, TypeName};
+use foundry_compilers::artifacts::{ContractKind, Mutability, StorageLocation, TypeName};
 use semver::Version;
 
 use crate::{
@@ -95,6 +95,16 @@ pub fn generate_variable_update_hook(
 /// # Returns
 /// * `Option<String>` - The generated view function code, or None if user-defined types are present
 pub fn generate_view_method(state_variable: &VariableRef) -> Option<String> {
+    if state_variable
+        .read()
+        .contract()
+        .map(|c| c.definition().kind != ContractKind::Contract)
+        .unwrap_or(true)
+    {
+        // We only generate view methods for state variables in contracts
+        return None;
+    }
+
     let declaration = state_variable.declaration();
     if declaration.mutability == Some(Mutability::Constant) {
         // We do not need to output constant state variables

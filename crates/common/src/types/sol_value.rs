@@ -274,7 +274,7 @@ impl SolValueFormatter for DynSolValue {
             }
 
             DynSolValue::Bytes(bytes) => {
-                if bytes.len() <= 32 {
+                if bytes.len() <= 32 || !ctx.shorten_long {
                     format!("0x{}", hex::encode(bytes))
                 } else {
                     format!("0x{}...[{} bytes]", hex::encode(&bytes[..16]), bytes.len())
@@ -282,7 +282,7 @@ impl SolValueFormatter for DynSolValue {
             }
 
             DynSolValue::String(s) => {
-                if s.len() <= 64 {
+                if s.len() <= 64 || !ctx.shorten_long {
                     format!("\"{}\"", s.replace('\"', "\\\""))
                 } else {
                     format!("\"{}...\"[{} chars]", &s[..32].replace('\"', "\\\""), s.len())
