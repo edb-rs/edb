@@ -216,6 +216,7 @@ impl ProxyServer {
     ///
     /// # Returns
     /// A new ProxyServer instance with background tasks started
+    #[allow(clippy::too_many_arguments)]
     async fn new(
         rpc_urls: Vec<String>,
         max_cache_items: u32,
@@ -289,7 +290,7 @@ impl ProxyServer {
         // Start background metrics collection task
         let metrics_collector_clone = metrics_collector.clone();
         let cache_manager_clone = cache_manager.clone();
-        let provider_manager_clone = provider_manager.clone();
+        let provider_manager_clone = provider_manager;
         let registry_clone = registry.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
@@ -392,7 +393,7 @@ async fn handle_rpc(
             "edb_register" => {
                 if let Some(params) = request.get("params").and_then(|p| p.as_array()) {
                     if let (Some(pid), Some(timestamp)) = (
-                        params.get(0).and_then(|v| v.as_u64()),
+                        params.first().and_then(|v| v.as_u64()),
                         params.get(1).and_then(|v| v.as_u64()),
                     ) {
                         let response =
@@ -407,7 +408,7 @@ async fn handle_rpc(
             }
             "edb_heartbeat" => {
                 if let Some(params) = request.get("params").and_then(|p| p.as_array()) {
-                    if let Some(pid) = params.get(0).and_then(|v| v.as_u64()) {
+                    if let Some(pid) = params.first().and_then(|v| v.as_u64()) {
                         let response = state.proxy.registry.heartbeat(pid as u32).await;
                         Ok(Json(response))
                     } else {
@@ -666,6 +667,6 @@ async fn handle_rpc(
         Err(StatusCode::BAD_REQUEST)
     };
 
-    debug!("RPC response: {}", &format!("{:?}", response).chars().take(200).collect::<String>());
+    debug!("RPC response: {}", &format!("{response:?}").chars().take(200).collect::<String>());
     response
 }

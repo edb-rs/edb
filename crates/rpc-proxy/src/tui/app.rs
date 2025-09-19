@@ -44,11 +44,11 @@ pub enum Tab {
 impl Tab {
     fn title(&self) -> &'static str {
         match self {
-            Tab::Overview => "Overview",
-            Tab::Providers => "Providers",
-            Tab::Cache => "Cache",
-            Tab::Methods => "Methods",
-            Tab::Instances => "EDB Instances",
+            Self::Overview => "Overview",
+            Self::Providers => "Providers",
+            Self::Cache => "Cache",
+            Self::Methods => "Methods",
+            Self::Instances => "EDB Instances",
         }
     }
 }
@@ -381,11 +381,11 @@ impl App {
                     let hours = (seconds % 86400) / 3600;
                     let minutes = (seconds % 3600) / 60;
                     if days > 0 {
-                        format!("{}d {}h {}m", days, hours, minutes)
+                        format!("{days}d {hours}h {minutes}m")
                     } else if hours > 0 {
-                        format!("{}h {}m", hours, minutes)
+                        format!("{hours}h {minutes}m")
                     } else {
-                        format!("{}m", minutes)
+                        format!("{minutes}m")
                     }
                 })
                 .unwrap_or_else(|| "Unknown".to_string());
@@ -396,7 +396,7 @@ impl App {
                 .map(|p| p.to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            format!("Proxy Server - PID: {} | Up: {}", pid, uptime)
+            format!("Proxy Server - PID: {pid} | Up: {uptime}")
         } else {
             "System info unavailable".to_string()
         };

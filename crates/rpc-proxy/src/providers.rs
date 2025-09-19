@@ -353,9 +353,7 @@ impl ProviderManager {
         for provider in providers_snapshot {
             // Check if provider needs health check (unhealthy or stale)
             let needs_check = !provider.is_healthy
-                || provider
-                    .last_health_check
-                    .map_or(true, |t| t.elapsed() > Duration::from_secs(60));
+                || provider.last_health_check.is_none_or(|t| t.elapsed() > Duration::from_secs(60));
 
             if needs_check {
                 match Self::check_provider_health(&self.client, &provider.url).await {

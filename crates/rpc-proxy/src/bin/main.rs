@@ -167,7 +167,7 @@ async fn run_server(args: ServerArgs) -> Result<()> {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         // Start TUI interface (now remote-based)
-        let proxy_url = format!("http://{}", addr);
+        let proxy_url = format!("http://{addr}");
         let tui_result = tui::run_tui(proxy_url, 250, 5).await;
 
         // Cleanup

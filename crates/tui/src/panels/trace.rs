@@ -515,17 +515,10 @@ impl TracePanelInner {
         // Build the line prefix as a single string
         let line_prefix = if depth == 0 {
             // Root level: collapse indicator at start, then tree structure if has siblings
-            let collapse_char = if has_children {
+            if has_children {
                 self.get_enhanced_collapse_indicator(entry.id, trace)
             } else {
                 "  ".to_string() // spaces for alignment when no children
-            };
-
-            // For root level, check if this is the last root entry
-            if self.is_last_child(entry, trace) {
-                collapse_char.to_string()
-            } else {
-                collapse_char.to_string()
             }
         } else {
             // Child level: tree structure with proper spacing
@@ -792,31 +785,31 @@ impl TracePanelInner {
         // Check if it's a standard Error(string) revert (0x08c379a0)
         if output.len() >= 4 && output.starts_with(&[0x08, 0xc3, 0x79, 0xa0]) {
             // Try to decode the string from Error(string) signature
-            if let Ok(decoded) = alloy_dyn_abi::DynSolType::String.abi_decode(&output[4..]) {
-                if let DynSolValue::String(reason) = decoded {
-                    return format!("\"{reason}\"");
-                }
+            if let Ok(DynSolValue::String(reason)) =
+                alloy_dyn_abi::DynSolType::String.abi_decode(&output[4..])
+            {
+                return format!("\"{reason}\"");
             }
         }
 
         // Check if it's a Panic(uint256) revert (0x4e487b71)
         if output.len() >= 4 && output.starts_with(&[0x4e, 0x48, 0x7b, 0x71]) {
-            if let Ok(decoded) = alloy_dyn_abi::DynSolType::Uint(256).abi_decode(&output[4..]) {
-                if let DynSolValue::Uint(panic_code, _) = decoded {
-                    let panic_reason = match panic_code.to_string().as_str() {
-                        "1" => "assertion failed",
-                        "17" => "arithmetic overflow/underflow",
-                        "18" => "division by zero",
-                        "33" => "enum conversion error",
-                        "34" => "invalid storage byte array access",
-                        "49" => "pop() on empty array",
-                        "50" => "array index out of bounds",
-                        "65" => "memory allocation overflow",
-                        "81" => "zero initialization of invalid type",
-                        _ => "unknown panic",
-                    };
-                    return format!("Panic({panic_code}: {panic_reason})");
-                }
+            if let Ok(DynSolValue::Uint(panic_code, _)) =
+                alloy_dyn_abi::DynSolType::Uint(256).abi_decode(&output[4..])
+            {
+                let panic_reason = match panic_code.to_string().as_str() {
+                    "1" => "assertion failed",
+                    "17" => "arithmetic overflow/underflow",
+                    "18" => "division by zero",
+                    "33" => "enum conversion error",
+                    "34" => "invalid storage byte array access",
+                    "49" => "pop() on empty array",
+                    "50" => "array index out of bounds",
+                    "65" => "memory allocation overflow",
+                    "81" => "zero initialization of invalid type",
+                    _ => "unknown panic",
+                };
+                return format!("Panic({panic_code}: {panic_reason})");
             }
         }
 

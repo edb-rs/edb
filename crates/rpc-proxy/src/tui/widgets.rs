@@ -73,7 +73,7 @@ impl App {
                 provider_status.0,
                 Style::default().fg(provider_status.1),
             )]),
-            Line::from(format!("{}/{} Online", healthy_providers, total_providers)),
+            Line::from(format!("{healthy_providers}/{total_providers} Online")),
         ])
         .block(Block::default().borders(Borders::ALL).title("RPC Providers"))
         .alignment(Alignment::Center);
@@ -107,8 +107,8 @@ impl App {
             Line::from(vec![Span::styled("Cache", Style::default().add_modifier(Modifier::BOLD))]),
             Line::from(""),
             Line::from(vec![Span::styled(&cache_utilization, Style::default().fg(cache_color))]),
-            Line::from(format!("Hit Rate: {}", hit_rate)),
-            Line::from(format!("{} entries", cache_entries)),
+            Line::from(format!("Hit Rate: {hit_rate}")),
+            Line::from(format!("{cache_entries} entries")),
         ])
         .block(Block::default().borders(Borders::ALL).title("Cache Status"))
         .alignment(Alignment::Center);
@@ -133,7 +133,7 @@ impl App {
                 instance_status.0,
                 Style::default().fg(instance_status.1),
             )]),
-            Line::from(format!("{} connected", instance_count)),
+            Line::from(format!("{instance_count} connected")),
         ])
         .block(Block::default().borders(Borders::ALL).title("Debugging Sessions"))
         .alignment(Alignment::Center);
@@ -161,7 +161,7 @@ impl App {
             )]),
             Line::from(""),
             Line::from(vec![Span::styled(
-                format!("{:.0}ms", avg_response_time),
+                format!("{avg_response_time:.0}ms"),
                 Style::default().fg(perf_color),
             )]),
             Line::from("Avg Response"),
@@ -212,7 +212,7 @@ impl App {
         let rows = vec![
             Row::new(vec![
                 Cell::from("Cache Hit Rate"),
-                Cell::from(format!("{:.1}%", hit_rate))
+                Cell::from(format!("{hit_rate:.1}%"))
                     .style(self.get_metric_color(hit_rate, 80.0, 50.0)),
                 Cell::from(self.format_trend(hit_rate_trend, true))
                     .style(self.get_trend_color(hit_rate_trend)),
@@ -220,21 +220,21 @@ impl App {
             ]),
             Row::new(vec![
                 Cell::from("Cache Size"),
-                Cell::from(format!("{}", cache_size)),
+                Cell::from(format!("{cache_size}")),
                 Cell::from(self.format_trend(cache_size_trend, false))
                     .style(self.get_trend_color(cache_size_trend)),
                 Cell::from(self.create_mini_sparkline(&self.get_cache_size_history(), 40)),
             ]),
             Row::new(vec![
                 Cell::from("Requests/Min"),
-                Cell::from(format!("{}", rpm)),
+                Cell::from(format!("{rpm}")),
                 Cell::from(self.format_trend(rpm_trend, false))
                     .style(self.get_trend_color(rpm_trend)),
                 Cell::from(self.create_mini_sparkline(&self.get_rpm_history(), 40)),
             ]),
             Row::new(vec![
                 Cell::from("Avg Response"),
-                Cell::from(format!("{:.0}ms", avg_response))
+                Cell::from(format!("{avg_response:.0}ms"))
                     .style(self.get_response_color(avg_response)),
                 Cell::from(self.format_trend(response_trend, false))
                     .style(self.get_trend_color(-response_trend)), // Invert for response time
@@ -299,12 +299,10 @@ impl App {
             } else {
                 format!("↑ {:.0}", trend.abs())
             }
+        } else if is_percentage {
+            format!("↓ {:.1}%", trend.abs())
         } else {
-            if is_percentage {
-                format!("↓ {:.1}%", trend.abs())
-            } else {
-                format!("↓ {:.0}", trend.abs())
-            }
+            format!("↓ {:.0}", trend.abs())
         }
     }
 
@@ -343,7 +341,7 @@ impl App {
             return "—".repeat(width);
         }
 
-        let chars = vec!['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        let chars = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
         let min = data.iter().fold(f64::INFINITY, |a, &b| a.min(b));
         let max = data.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
         let range = max - min;
@@ -417,7 +415,7 @@ impl App {
                 ]
             }
         } else {
-            vec!["".to_string()]
+            vec![String::new()]
         };
 
         let datasets = vec![Dataset::default()
@@ -486,7 +484,7 @@ impl App {
                 ]
             }
         } else {
-            vec!["".to_string()]
+            vec![String::new()]
         };
 
         let datasets = vec![Dataset::default()
@@ -604,17 +602,17 @@ impl App {
                         Style::default().fg(Color::Red)
                     },
                 ),
-                Cell::from(format!("{}", request_count)),
-                Cell::from(format!("{:.1}%", success_rate)).style(self.get_metric_color(
+                Cell::from(format!("{request_count}")),
+                Cell::from(format!("{success_rate:.1}%")).style(self.get_metric_color(
                     success_rate,
                     95.0,
                     80.0,
                 )),
-                Cell::from(format!("{:.1}%", load_percent)),
+                Cell::from(format!("{load_percent:.1}%")),
                 Cell::from(
                     provider
                         .response_time_ms
-                        .map(|ms| format!("{}ms", ms))
+                        .map(|ms| format!("{ms}ms"))
                         .unwrap_or_else(|| "—".to_string()),
                 )
                 .style(
@@ -630,15 +628,15 @@ impl App {
         provider_rows.insert(
             0,
             Row::new(vec![
-                Cell::from(format!("TOTAL: {} providers", total_providers))
+                Cell::from(format!("TOTAL: {total_providers} providers"))
                     .style(Style::default().add_modifier(Modifier::BOLD)),
-                Cell::from(format!("{}/{}", total_healthy, total_providers))
+                Cell::from(format!("{total_healthy}/{total_providers}"))
                     .style(Style::default().add_modifier(Modifier::BOLD)),
-                Cell::from(format!("{}", total_requests))
+                Cell::from(format!("{total_requests}"))
                     .style(Style::default().add_modifier(Modifier::BOLD)),
                 Cell::from("—"),
                 Cell::from("100%").style(Style::default().add_modifier(Modifier::BOLD)),
-                Cell::from(format!("{:.0}ms", avg_response))
+                Cell::from(format!("{avg_response:.0}ms"))
                     .style(Style::default().add_modifier(Modifier::BOLD)),
             ]),
         );
@@ -671,25 +669,24 @@ impl App {
         let items: Vec<ListItem<'_>> = self
             .providers
             .iter()
-            .enumerate()
-            .map(|(_i, provider)| {
+            .map(|provider| {
                 let status_icon = if provider.is_healthy { "🟢" } else { "🔴" };
                 let response_time = provider
                     .response_time_ms
-                    .map(|ms| format!("{}ms", ms))
+                    .map(|ms| format!("{ms}ms"))
                     .unwrap_or_else(|| "N/A".to_string());
 
                 let line = Line::from(vec![
-                    Span::raw(format!("{} ", status_icon)),
+                    Span::raw(format!("{status_icon} ")),
                     Span::styled(
-                        format!("{}", provider.url.chars().take(40).collect::<String>()),
+                        provider.url.chars().take(40).collect::<String>(),
                         if provider.is_healthy {
                             Style::default().fg(Color::Green)
                         } else {
                             Style::default().fg(Color::Red)
                         },
                     ),
-                    Span::styled(format!(" ({})", response_time), Style::default().fg(Color::Gray)),
+                    Span::styled(format!(" ({response_time})"), Style::default().fg(Color::Gray)),
                 ]);
 
                 ListItem::new(line)
@@ -738,7 +735,7 @@ impl App {
                     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                 let seconds_ago = now.saturating_sub(last_used_timestamp);
                 if seconds_ago < 60 {
-                    format!("{}s ago", seconds_ago)
+                    format!("{seconds_ago}s ago")
                 } else if seconds_ago < 3600 {
                     format!("{}m ago", seconds_ago / 60)
                 } else {
@@ -770,7 +767,7 @@ impl App {
                     Span::raw(
                         provider
                             .response_time_ms
-                            .map(|ms| format!("{}ms", ms))
+                            .map(|ms| format!("{ms}ms"))
                             .unwrap_or_else(|| "N/A".to_string()),
                     ),
                 ]),
@@ -784,7 +781,7 @@ impl App {
                 Line::from(vec![
                     Span::styled("Total Errors: ", Style::default().add_modifier(Modifier::BOLD)),
                     Span::styled(
-                        format!("{}", error_count),
+                        format!("{error_count}"),
                         if error_count > 0 {
                             Style::default().fg(Color::Red)
                         } else {
@@ -804,7 +801,7 @@ impl App {
                     Span::raw(
                         provider
                             .last_health_check_seconds_ago
-                            .map(|s| format!("{}s ago", s))
+                            .map(|s| format!("{s}s ago"))
                             .unwrap_or_else(|| "Never".to_string()),
                     ),
                 ]),
@@ -901,7 +898,7 @@ impl App {
                 Line::from(
                     stats
                         .oldest_entry_age_seconds
-                        .map(|s| format!("{}s ago", s))
+                        .map(|s| format!("{s}s ago"))
                         .unwrap_or_else(|| "N/A".to_string()),
                 ),
                 Line::from("age"),
@@ -919,7 +916,7 @@ impl App {
                 Line::from(
                     stats
                         .newest_entry_age_seconds
-                        .map(|s| format!("{}s ago", s))
+                        .map(|s| format!("{s}s ago"))
                         .unwrap_or_else(|| "N/A".to_string()),
                 ),
                 Line::from("age"),
@@ -988,8 +985,7 @@ impl App {
                             0.0
                         };
                         lines.push(Line::from(format!(
-                            "• {}: {} hits, {:.1}% hit rate",
-                            method, hits, method_hit_rate
+                            "• {method}: {hits} hits, {method_hit_rate:.1}% hit rate"
                         )));
                     }
                     lines
@@ -1022,7 +1018,7 @@ impl App {
                 Line::from(vec![
                     Span::raw("• Hit Rate: "),
                     Span::styled(
-                        format!("{:.1}%", hit_rate),
+                        format!("{hit_rate:.1}%"),
                         if hit_rate > 80.0 {
                             Style::default().fg(Color::Green)
                         } else if hit_rate > 50.0 {
@@ -1032,9 +1028,9 @@ impl App {
                         },
                     ),
                 ]),
-                Line::from(format!("• Cache Hits: {}", cache_hits)),
-                Line::from(format!("• Cache Misses: {}", cache_misses)),
-                Line::from(format!("• Total Requests: {}", total_requests)),
+                Line::from(format!("• Cache Hits: {cache_hits}")),
+                Line::from(format!("• Cache Misses: {cache_misses}")),
+                Line::from(format!("• Total Requests: {total_requests}")),
                 Line::from(""),
                 Line::from(vec![Span::styled(
                     "Entry Age Range:",
@@ -1044,14 +1040,14 @@ impl App {
                     "• Oldest: {}",
                     stats
                         .oldest_entry_age_seconds
-                        .map(|s| format!("{}s ago", s))
+                        .map(|s| format!("{s}s ago"))
                         .unwrap_or_else(|| "N/A".to_string())
                 )),
                 Line::from(format!(
                     "• Newest: {}",
                     stats
                         .newest_entry_age_seconds
-                        .map(|s| format!("{}s ago", s))
+                        .map(|s| format!("{s}s ago"))
                         .unwrap_or_else(|| "N/A".to_string())
                 )),
             ];
@@ -1122,7 +1118,7 @@ impl App {
                         Style::default().add_modifier(Modifier::BOLD),
                     )]),
                     Line::from(""),
-                    Line::from(format!("{}", method_count)),
+                    Line::from(format!("{method_count}")),
                     Line::from("tracked"),
                 ])
                 .block(Block::default().borders(Borders::ALL))
@@ -1197,7 +1193,7 @@ impl App {
                         Style::default().add_modifier(Modifier::BOLD),
                     )]),
                     Line::from(""),
-                    Line::from(format!("{}", total_requests)),
+                    Line::from(format!("{total_requests}")),
                     Line::from("processed"),
                 ])
                 .block(Block::default().borders(Borders::ALL))
@@ -1275,13 +1271,13 @@ impl App {
                     };
 
                     details.push(Line::from(vec![
-                        Span::raw(format!("{:<25}", method_display)),
-                        Span::raw(format!("{:>8}", total)),
-                        Span::raw(format!("{:>8}", hits)),
-                        Span::raw(format!("{:>8}", misses)),
+                        Span::raw(format!("{method_display:<25}")),
+                        Span::raw(format!("{total:>8}")),
+                        Span::raw(format!("{hits:>8}")),
+                        Span::raw(format!("{misses:>8}")),
                         Span::raw("  "),
                         Span::styled(
-                            format!("{:>6.1}%", hit_rate),
+                            format!("{hit_rate:>6.1}%"),
                             Style::default().fg(hit_rate_color),
                         ),
                     ]));
@@ -1395,7 +1391,7 @@ impl App {
                 .map(|&pid| {
                     let line = Line::from(vec![
                         Span::raw("🟢 "),
-                        Span::styled(format!("PID: {}", pid), Style::default().fg(Color::Green)),
+                        Span::styled(format!("PID: {pid}"), Style::default().fg(Color::Green)),
                         Span::styled(" (Active)", Style::default().fg(Color::Gray)),
                     ]);
                     ListItem::new(line)

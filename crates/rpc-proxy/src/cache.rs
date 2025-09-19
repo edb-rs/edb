@@ -240,7 +240,7 @@ impl CacheManager {
         let mut cache = self.cache.write().await;
 
         // Find all keys that start with the method prefix
-        let prefix = format!("{}:", method);
+        let prefix = format!("{method}:");
         let keys_to_delete: Vec<String> =
             cache.keys().filter(|k| k.starts_with(&prefix)).cloned().collect();
 
@@ -347,7 +347,7 @@ impl CacheManager {
     /// # Returns
     /// The full path to the cache file for this RPC endpoint
     pub async fn get_cache_path(
-        rpc_urls: &Vec<String>,
+        rpc_urls: &[String],
         cache_dir: Option<PathBuf>,
     ) -> Result<PathBuf> {
         let chain_ids: HashSet<_> =

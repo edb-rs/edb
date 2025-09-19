@@ -226,7 +226,7 @@ impl HelpOverlay {
         }
 
         // Code Panel section
-        if layout_type != LayoutType::Mobile || true {
+        if layout_type != LayoutType::Mobile {
             // Always show for reference
             sections.push(HelpSection {
                 title: "Code Panel",

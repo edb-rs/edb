@@ -203,48 +203,43 @@ impl RpcHandler {
             let response = self.forward_request(&request).await;
             self.metrics_collector.record_cache_miss();
 
-            match &response {
-                Ok(resp) => {
-                    let success = resp.get("error").is_none();
+            if let Ok(resp) = &response {
+                let success = resp.get("error").is_none();
 
-                    // Only cache successful responses
-                    if success {
-                        // Additional validation for debug/trace methods
-                        if method.starts_with("debug_") || method.starts_with("trace_") {
-                            if !self.is_valid_debug_trace_response(resp) {
-                                debug!("Invalid debug/trace response for {}, not caching", method);
-                                return Ok(resp.clone());
-                            }
-                        }
+                // Only cache successful responses
+                if success {
+                    // Additional validation for debug/trace methods
+                    if (method.starts_with("debug_") || method.starts_with("trace_"))
+                        && !self.is_valid_debug_trace_response(resp)
+                    {
+                        debug!("Invalid debug/trace response for {}, not caching", method);
+                        return Ok(resp.clone());
+                    }
 
-                        self.cache_manager.set(cache_key, resp.clone()).await;
-                        debug!("Cached response for {}", method);
-                    } else {
-                        debug!("Error response for {}, not caching", method);
-                        // Classify error type for metrics
-                        if let Some(error_obj) = resp.get("error") {
-                            if let Some(error_msg) =
-                                error_obj.get("message").and_then(|m| m.as_str())
+                    self.cache_manager.set(cache_key, resp.clone()).await;
+                    debug!("Cached response for {}", method);
+                } else {
+                    debug!("Error response for {}, not caching", method);
+                    // Classify error type for metrics
+                    if let Some(error_obj) = resp.get("error") {
+                        if let Some(error_msg) = error_obj.get("message").and_then(|m| m.as_str()) {
+                            let error_msg_lower = error_msg.to_lowercase();
+                            if RATE_LIMIT_PATTERNS
+                                .iter()
+                                .any(|pattern| error_msg_lower.contains(pattern))
                             {
-                                let error_msg_lower = error_msg.to_lowercase();
-                                if RATE_LIMIT_PATTERNS
-                                    .iter()
-                                    .any(|pattern| error_msg_lower.contains(pattern))
-                                {
-                                    self.metrics_collector.record_error(ErrorType::RateLimit);
-                                } else if USER_ERROR_PATTERNS
-                                    .iter()
-                                    .any(|pattern| error_msg_lower.contains(pattern))
-                                {
-                                    self.metrics_collector.record_error(ErrorType::UserError);
-                                } else {
-                                    self.metrics_collector.record_error(ErrorType::Other);
-                                }
+                                self.metrics_collector.record_error(ErrorType::RateLimit);
+                            } else if USER_ERROR_PATTERNS
+                                .iter()
+                                .any(|pattern| error_msg_lower.contains(pattern))
+                            {
+                                self.metrics_collector.record_error(ErrorType::UserError);
+                            } else {
+                                self.metrics_collector.record_error(ErrorType::Other);
                             }
                         }
                     }
                 }
-                Err(_) => {}
             }
 
             response
@@ -667,13 +662,10 @@ impl RpcHandler {
 
         if let Some(params) = params {
             for param in params {
-                if let Some(param_str) = param.as_str() {
-                    match param_str {
-                        "latest" | "pending" | "earliest" | "safe" | "finalized" => {
-                            return true;
-                        }
-                        _ => {}
-                    }
+                if let Some("latest" | "pending" | "earliest" | "safe" | "finalized") =
+                    param.as_str()
+                {
+                    return true;
                 }
                 // Also check object parameters for block identifiers
                 if let Some(param_obj) = param.as_object() {
@@ -682,13 +674,10 @@ impl RpcHandler {
                         .or_else(|| param_obj.get("toBlock"))
                         .or_else(|| param_obj.get("fromBlock"))
                     {
-                        if let Some(block_str) = block_value.as_str() {
-                            match block_str {
-                                "latest" | "pending" | "earliest" | "safe" | "finalized" => {
-                                    return true;
-                                }
-                                _ => {}
-                            }
+                        if let Some("latest" | "pending" | "earliest" | "safe" | "finalized") =
+                            block_value.as_str()
+                        {
+                            return true;
                         }
                     }
                 }
@@ -708,13 +697,13 @@ impl RpcHandler {
         method.hash(&mut hasher);
 
         // Hash parameters in a consistent way
-        self.hash_json_value(&mut hasher, params);
+        Self::hash_json_value(&mut hasher, params);
 
         format!("{}:{:x}", method, hasher.finish())
     }
 
     /// Hash a JSON value consistently for cache key generation
-    fn hash_json_value(&self, hasher: &mut DefaultHasher, value: &Value) {
+    fn hash_json_value(hasher: &mut DefaultHasher, value: &Value) {
         use std::collections::BTreeMap;
 
         match value {
@@ -726,7 +715,7 @@ impl RpcHandler {
                 "array".hash(hasher);
                 arr.len().hash(hasher);
                 for elem in arr {
-                    self.hash_json_value(hasher, elem);
+                    Self::hash_json_value(hasher, elem);
                 }
             }
             Value::Object(obj) => {
@@ -736,7 +725,7 @@ impl RpcHandler {
                 sorted.len().hash(hasher);
                 for (key, val) in sorted {
                     key.hash(hasher);
-                    self.hash_json_value(hasher, val);
+                    Self::hash_json_value(hasher, val);
                 }
             }
         }

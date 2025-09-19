@@ -677,7 +677,7 @@ impl TerminalPanel {
                 if let Some(info) = dm.execution.get_snapshot_info(id) {
                     let info_str = format!("{info:#?}");
                     for line in info_str.lines() {
-                        self.add_output(&line.to_string());
+                        self.add_output(line);
                     }
                 } else {
                     self.add_error(&format!("No snapshot info found for id {id}"));

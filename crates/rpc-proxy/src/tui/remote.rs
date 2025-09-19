@@ -110,8 +110,6 @@ impl RemoteProxyClient {
     }
 }
 
-/// Data structures for remote monitoring (converted from JSON responses)
-
 /// Cache statistics from a remote proxy server for TUI display
 #[derive(Debug, Clone)]
 pub struct RemoteCacheStats {

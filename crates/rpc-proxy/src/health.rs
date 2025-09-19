@@ -27,6 +27,12 @@ pub struct HealthService {
     start_time: u64,
 }
 
+impl Default for HealthService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HealthService {
     /// Creates a new health service instance
     ///

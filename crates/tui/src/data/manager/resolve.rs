@@ -359,9 +359,7 @@ impl Resolver {
 
     /// Resolve constructor call
     pub fn resolve_constructor_call(&mut self, address: Address) -> Option<String> {
-        let Some(args) = self.get_constructor_args(address).cloned() else {
-            return None;
-        };
+        let args = self.get_constructor_args(address).cloned()?;
 
         if let Some(abi) =
             self.get_contract_abi(address, false).and_then(|abi| abi.constructor().cloned())

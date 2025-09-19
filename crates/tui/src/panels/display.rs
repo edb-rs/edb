@@ -425,9 +425,9 @@ impl DisplayPanel {
             // Find changed bytes if we have previous memory
             let changed_bytes = if let Some(prev) = prev_memory {
                 let mut changes = Vec::new();
-                for i in 0..chunk_data.len() {
+                for (i, item) in chunk_data.iter().enumerate() {
                     let mem_idx = offset + i;
-                    if mem_idx >= prev.len() || prev[mem_idx] != chunk_data[i] {
+                    if mem_idx >= prev.len() || prev[mem_idx] != *item {
                         changes.push(i);
                     }
                 }
