@@ -14,7 +14,27 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Onchain compiler utilities.
+//! On-chain contract compilation utilities.
+//!
+//! This module provides utilities for compiling smart contracts from verified
+//! source code obtained from blockchain explorers like Etherscan. It handles
+//! the complete compilation workflow including source retrieval, compiler
+//! configuration, and artifact generation.
+//!
+//! # Core Features
+//!
+//! - **Source Retrieval**: Fetch verified source code from Etherscan
+//! - **Compiler Configuration**: Set up Solidity compiler with proper settings
+//! - **Multi-file Compilation**: Handle complex projects with dependencies
+//! - **Library Support**: Manage library dependencies and linking
+//! - **Caching**: Cache compilation results for performance
+//!
+//! # Workflow
+//!
+//! 1. Retrieve contract metadata and source code from Etherscan
+//! 2. Configure Solidity compiler with matching settings
+//! 3. Compile the contract with all dependencies
+//! 4. Generate artifact with metadata and compilation output
 
 use std::path::PathBuf;
 

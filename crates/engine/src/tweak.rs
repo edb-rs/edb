@@ -14,6 +14,43 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Contract bytecode modification for debugging through creation transaction replay.
+//!
+//! This module provides the [`CodeTweaker`] utility for modifying deployed contract bytecode
+//! by replaying their creation transactions with replacement init code. This enables debugging
+//! with instrumented or modified contracts without requiring redeployment to the network.
+//!
+//! # Core Functionality
+//!
+//! ## Contract Bytecode Replacement
+//! The [`CodeTweaker`] handles the complete process of:
+//! 1. **Creation Transaction Discovery**: Finding the original deployment transaction
+//! 2. **Transaction Replay**: Re-executing the creation with modified init code
+//! 3. **Bytecode Extraction**: Capturing the resulting runtime bytecode
+//! 4. **State Update**: Replacing the deployed bytecode in the debugging database
+//!
+//! ## Etherscan Integration
+//! - **Creation Data Caching**: Local caching of contract creation transaction data
+//! - **API Key Management**: Automatic API key rotation for rate limit handling
+//! - **Chain Support**: Multi-chain support through configurable Etherscan endpoints
+//!
+//! # Workflow Integration
+//!
+//! The code tweaking process is typically used in the debugging workflow to:
+//! 1. Replace original contracts with instrumented versions for hook-based debugging
+//! 2. Substitute contracts with modified versions for testing different scenarios
+//! 3. Enable debugging of contracts that weren't originally compiled with debug information
+//!
+//! # Usage Example
+//!
+//! ```rust,ignore
+//! let mut tweaker = CodeTweaker::new(&mut edb_context, rpc_url, etherscan_api_key);
+//! tweaker.tweak(&contract_address, &original_artifact, &instrumented_artifact, false).await?;
+//! ```
+//!
+//! This replaces the deployed bytecode at `contract_address` with the instrumented version,
+//! enabling advanced debugging features on the modified contract.
+
 use std::path::PathBuf;
 
 use alloy_primitives::{Address, Bytes, TxHash};
@@ -34,11 +71,15 @@ use tracing::{debug, error};
 
 use crate::{next_etherscan_api_key, Artifact, TweakInspector};
 
-/// A utility for modifying deployed contract bytecode by replaying their creation transactions
-/// with replacement bytecode from compiled artifacts.
+/// Utility for modifying deployed contract bytecode through creation transaction replay.
 ///
-/// This struct handles the process of finding contract creation transactions,
-/// replaying them with modified init code, and updating the contract's runtime bytecode.
+/// The [`CodeTweaker`] enables replacing deployed contract bytecode by:
+/// 1. Finding the original contract creation transaction
+/// 2. Replaying that transaction with modified init code from recompiled artifacts
+/// 3. Extracting the resulting runtime bytecode
+/// 4. Updating the contract's bytecode in the debugging database
+///
+/// This allows debugging with instrumented contracts without requiring network redeployment.
 pub struct CodeTweaker<'a, DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
@@ -71,17 +112,24 @@ where
         Self { ctx, rpc_url, etherscan_api_key }
     }
 
-    /// Replaces the bytecode of a deployed contract with bytecode from a compiled artifact.
+    /// Replaces deployed contract bytecode with instrumented bytecode from artifacts.
+    ///
+    /// This method performs the complete bytecode replacement workflow:
+    /// 1. Finds the contract creation transaction using Etherscan API
+    /// 2. Replays the transaction with the recompiled artifact's init code
+    /// 3. Extracts the resulting runtime bytecode
+    /// 4. Updates the contract's bytecode in the debugging database
     ///
     /// # Arguments
     ///
-    /// * `addr` - Address of the deployed contract to tweak
-    /// * `artifact` - Compiled artifact containing the replacement bytecode
-    /// * `quick` - Whether to use quick mode for faster but less accurate replay
+    /// * `addr` - Address of the deployed contract to modify
+    /// * `artifact` - Original compiled artifact for constructor argument extraction
+    /// * `recompiled_artifact` - Recompiled artifact containing the replacement init code
+    /// * `quick` - Whether to use quick mode (faster but potentially less accurate)
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the bytecode was successfully replaced, or an error if the operation failed.
+    /// Returns `Ok(())` if the bytecode replacement succeeds, or an error if any step fails.
     pub async fn tweak(
         &mut self,
         addr: &Address,
@@ -109,6 +157,13 @@ where
         Ok(())
     }
 
+    /// Generate the tweaked runtime bytecode by replaying the creation transaction.
+    ///
+    /// This internal method handles the complex process of:
+    /// 1. Forking the blockchain state at the creation transaction
+    /// 2. Setting up the replay environment with modified constraints
+    /// 3. Using the TweakInspector to intercept and modify the deployment
+    /// 4. Extracting the resulting runtime bytecode
     async fn get_tweaked_code(
         &self,
         addr: &Address,

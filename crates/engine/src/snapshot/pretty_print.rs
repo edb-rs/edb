@@ -14,6 +14,33 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Pretty printing and statistics for unified snapshot collections.
+//!
+//! This module provides comprehensive display and analysis capabilities for the unified
+//! snapshot collections. It offers detailed statistics, formatted output, and visual
+//! summaries to help developers understand snapshot distribution and debugging coverage.
+//!
+//! # Core Features
+//!
+//! ## Statistics Generation
+//! - **Snapshot Distribution**: Breakdown of hook vs opcode snapshots
+//! - **Frame Coverage**: Analysis of execution frame coverage
+//! - **Type Analysis**: Detailed categorization of snapshot types
+//!
+//! ## Visual Display
+//! - **Summary Output**: Comprehensive formatted summary with colors and icons
+//! - **Frame-by-Frame Details**: Organized display by execution frame
+//! - **Coverage Visualization**: Clear indication of debugging coverage
+//! - **Statistics Dashboard**: Overview of snapshot collection metrics
+//!
+//! # Usage
+//!
+//! The pretty printing functionality is designed for:
+//! - **Development Analysis**: Understanding snapshot collection effectiveness
+//! - **Debug Coverage Assessment**: Identifying gaps in debugging instrumentation
+//! - **Performance Analysis**: Analyzing snapshot overhead and distribution
+//! - **User-Friendly Display**: Providing clear, formatted output for developers
+
 use std::collections::HashMap;
 
 use edb_common::types::ExecutionFrameId;
@@ -22,7 +49,10 @@ use tracing::error;
 
 use crate::{Snapshot, SnapshotDetail, Snapshots};
 
-/// Statistics about snapshot distribution
+/// Comprehensive statistics about snapshot distribution and coverage.
+///
+/// This structure provides detailed metrics about how snapshots are distributed
+/// across execution frames, enabling analysis of debugging coverage and effectiveness.
 #[derive(Debug, Clone)]
 pub struct SnapshotStats {
     /// Total number of snapshots
@@ -39,14 +69,17 @@ pub struct SnapshotStats {
     pub frames_with_opcodes: usize,
 }
 
-/// Pretty printing implementation for unified snapshot debugging
+/// Pretty printing and statistics implementation for unified snapshot collections.
 impl<DB> Snapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
-    /// Get statistics about hook vs opcode snapshot distribution
+    /// Generate comprehensive statistics about snapshot distribution.
+    ///
+    /// This method analyzes the snapshot collection to provide detailed metrics
+    /// about the distribution of hook vs opcode snapshots and frame coverage.
     pub fn get_snapshot_stats(&self) -> SnapshotStats {
         let mut hook_count = 0;
         let mut opcode_count = 0;
@@ -76,11 +109,11 @@ where
         }
     }
 
-    /// Print comprehensive summary of all snapshots with frame aggregation
+    /// Print comprehensive visual summary of all snapshots with frame aggregation.
     ///
-    /// This method provides an integrated view of both hook and opcode snapshots,
-    /// organized by execution frame for easier debugging. Multiple snapshots within
-    /// the same frame are aggregated and summarized for clarity.
+    /// This method provides a beautifully formatted, integrated view of both hook and
+    /// opcode snapshots, organized by execution frame for easier debugging analysis.
+    /// The output includes statistics, frame details, and a legend for easy interpretation.
     pub fn print_summary(&self) {
         println!(
             "\n\x1b[36m╔══════════════════════════════════════════════════════════════════╗\x1b[0m"
@@ -176,7 +209,10 @@ where
         println!("  \x1b[94m⚙️ Opcode\x1b[0m  - Fine-grained instruction-level snapshot");
     }
 
-    /// Print detailed information for a single frame
+    /// Print detailed information for a single execution frame.
+    ///
+    /// This method displays comprehensive information about all snapshots within
+    /// a specific execution frame, including type analysis and address information.
     fn print_frame_summary(
         &self,
         display_idx: usize,
@@ -233,7 +269,10 @@ where
         }
     }
 
-    /// Print details for hook snapshots in a frame
+    /// Print detailed information for hook snapshots within a frame.
+    ///
+    /// This method displays USID information and other hook-specific details
+    /// for all hook snapshots in the given frame.
     fn print_hook_details(&self, snapshots: &[&Snapshot<DB>], indent: &str) {
         let hook_snapshots: Vec<_> = snapshots
             .iter()
@@ -273,7 +312,10 @@ where
         }
     }
 
-    /// Print summary for opcode snapshots in a frame
+    /// Print summary information for opcode snapshots within a frame.
+    ///
+    /// This method displays program counter ranges, stack depth information,
+    /// and other opcode-specific details for all opcode snapshots in the frame.
     fn print_opcode_summary(&self, snapshots: &[&Snapshot<DB>], indent: &str) {
         let opcode_snapshots: Vec<_> = snapshots
             .iter()

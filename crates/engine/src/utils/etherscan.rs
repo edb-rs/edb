@@ -14,7 +14,23 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Etherscan utilities.
+//! Etherscan API integration utilities.
+//!
+//! This module provides utilities for interacting with Etherscan APIs, including
+//! API key management and rotation to handle rate limits gracefully. The module
+//! maintains a pool of API keys and automatically rotates between them to avoid
+//! hitting rate limits during intensive debugging sessions.
+//!
+//! # Key Features
+//!
+//! - **API Key Rotation**: Automatic rotation between multiple API keys
+//! - **Rate Limit Handling**: Built-in support for managing API rate limits
+//! - **Randomized Key Pool**: Shuffled key order to distribute load
+//!
+//! # Usage
+//!
+//! The module provides a simple interface through [`next_etherscan_api_key()`]
+//! which returns the next available API key in the rotation pool.
 
 use once_cell::sync::Lazy;
 use rand::seq::SliceRandom;
@@ -47,7 +63,10 @@ fn next(c: &AtomicUsize) -> usize {
     c.fetch_add(1, Ordering::SeqCst)
 }
 
-/// Returns the next etherscan API key to use.
+/// Returns the next Etherscan API key to use from the rotation pool.
+///
+/// This function implements a round-robin rotation strategy across the available
+/// API keys to distribute load and avoid hitting rate limits on any single key.
 pub fn next_etherscan_api_key() -> String {
     let idx = next(&NEXT_ETHERSCAN_MAINNET_KEY) % ETHERSCAN_MAINNET_KEYS.len();
     ETHERSCAN_MAINNET_KEYS[idx].to_string()

@@ -14,6 +14,43 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Engine context management and EVM instantiation for debugging.
+//!
+//! This module provides the core [`EngineContext`] struct that consolidates all debugging
+//! data and state needed for time travel debugging and expression evaluation. The context
+//! serves as the primary data structure passed to the JSON-RPC server and contains all
+//! analysis results, snapshots, artifacts, and execution state.
+//!
+//! # Core Components
+//!
+//! ## EngineContext
+//! The [`EngineContext`] is the central data structure that encapsulates:
+//! - **Fork Information**: Network and block context for the debugging session
+//! - **EVM Environment**: Configuration, block, and transaction environments
+//! - **Snapshots**: Merged opcode-level and hook-based execution snapshots
+//! - **Artifacts**: Original and recompiled contract artifacts with source code
+//! - **Analysis Results**: Instrumentation points and debugging metadata
+//! - **Execution Trace**: Call hierarchy and frame structure
+//!
+//! ## EVM Instantiation
+//! The context provides methods to create derived EVMs for expression evaluation:
+//! - **Snapshot-specific EVMs**: Create EVM instances at any execution point
+//! - **Transaction replay**: Send mock transactions in derived state
+//! - **Function calls**: Invoke contract functions for expression evaluation
+//!
+//! # Workflow Integration
+//!
+//! 1. **Context Building**: Constructed after analysis and snapshot collection
+//! 2. **Finalization**: Processes traces and pre-evaluates state variables
+//! 3. **Server Integration**: Passed to JSON-RPC server for debugging API
+//! 4. **Expression Evaluation**: Used to create derived EVMs for real-time evaluation
+//!
+//! # Thread Safety
+//!
+//! The [`EngineContext`] is designed to be thread-safe and can be shared across
+//! multiple debugging clients through Arc wrapping. All database operations
+//! use read-only snapshots to ensure debugging session integrity.
+
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -85,7 +122,27 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// Build a new EngineContext
+    /// Build a new EngineContext with all debugging data.
+    ///
+    /// This constructor consolidates all the debugging data collected during the analysis
+    /// and snapshot collection phases into a unified context for debugging operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `fork_info` - Network and fork information for the debugging session
+    /// * `cfg` - EVM configuration environment
+    /// * `block` - Block environment for the target block
+    /// * `tx` - Transaction environment for the target transaction
+    /// * `tx_hash` - Hash of the target transaction
+    /// * `snapshots` - Merged snapshots from opcode and hook collection
+    /// * `artifacts` - Original contract artifacts with source code
+    /// * `recompiled_artifacts` - Recompiled artifacts with instrumentation
+    /// * `analysis_results` - Analysis results identifying instrumentation points
+    /// * `trace` - Execution trace showing call hierarchy
+    ///
+    /// # Returns
+    ///
+    /// Returns a finalized [`EngineContext`] ready for debugging operations.
     pub fn build(
         fork_info: ForkInfo,
         cfg: CfgEnv,
@@ -117,7 +174,12 @@ where
         Ok(context)
     }
 
-    /// Finalize the EngineContext
+    /// Finalize the EngineContext by processing traces and snapshots.
+    ///
+    /// This method performs post-processing on the collected debugging data:
+    /// 1. Links trace entries with their corresponding snapshot IDs
+    /// 2. Pre-evaluates state variables for all hook-based snapshots
+    /// 3. Populates derived mappings for efficient lookups
     fn finalize(&mut self) -> Result<()> {
         self.finalize_trace()?;
         self.finalize_snapshots()?;
@@ -125,7 +187,10 @@ where
         Ok(())
     }
 
-    /// Finalize the trace by adding the first_step_id to each entry
+    /// Finalize the trace by linking trace entries with their corresponding snapshot IDs.
+    ///
+    /// This method processes the execution trace to establish the relationship between
+    /// trace entries and snapshots, enabling efficient navigation during debugging.
     fn finalize_trace(&mut self) -> Result<()> {
         for entry in &mut self.trace {
             let trace_id = entry.id;
@@ -142,7 +207,11 @@ where
         Ok(())
     }
 
-    /// Finalize snapshots
+    /// Finalize snapshots by pre-evaluating state variables.
+    ///
+    /// This method processes all hook-based snapshots to pre-evaluate their state
+    /// variables, making them immediately available for expression evaluation.
+    /// This optimization reduces latency during debugging sessions.
     fn finalize_snapshots(&mut self) -> Result<()> {
         let tx_hash = self.tx_hash;
 
@@ -215,26 +284,35 @@ where
     }
 }
 
-// Get methods for context
+// Context query methods for debugging operations
 impl<DB> EngineContext<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// Get code address of a given snapshot id
+    /// Get the bytecode address for a snapshot.
+    ///
+    /// Returns the address where the executing bytecode is stored, which may differ
+    /// from the target address in cases of delegatecall or proxy contracts.
     pub fn get_bytecode_address(&self, snapshot_id: usize) -> Option<Address> {
         let (frame_id, _) = self.snapshots.get(snapshot_id)?;
         self.trace.get(frame_id.trace_entry_id()).and_then(|entry| Some(entry.code_address))
     }
 
-    /// Get target address of a given snapshot id
+    /// Get the target address for a snapshot.
+    ///
+    /// Returns the address that was the target of the call, which is the address
+    /// receiving the call in the current execution frame.
     pub fn get_target_address(&self, snapshot_id: usize) -> Option<Address> {
         let (frame_id, _) = self.snapshots.get(snapshot_id)?;
         self.trace.get(frame_id.trace_entry_id()).and_then(|entry| Some(entry.target))
     }
 
-    /// Is the given trace id a parent of another trace id?
+    /// Check if one trace entry is the parent of another.
+    ///
+    /// This method determines the parent-child relationship between trace entries,
+    /// useful for understanding call hierarchy during debugging.
     pub fn is_parent_trace(&self, parent_id: usize, child_id: usize) -> bool {
         match self.trace.get(child_id) {
             Some(child_entry) => child_entry.parent_id == Some(parent_id),
@@ -242,7 +320,11 @@ where
         }
     }
 
-    /// Get or initialize the address to code address mapping
+    /// Get the address to code address mapping.
+    ///
+    /// Returns a cached mapping from target addresses to all code addresses that
+    /// have been executed for each target. This is useful for understanding
+    /// proxy patterns and delegatecall relationships.
     pub fn address_code_address_map(&self) -> &HashMap<Address, HashSet<Address>> {
         self.address_code_address_map.get_or_init(|| {
             let mut map: HashMap<Address, HashSet<Address>> = HashMap::new();
@@ -254,14 +336,26 @@ where
     }
 }
 
-// EVM creation and manipulation
+// EVM creation and expression evaluation methods
 impl<DB> EngineContext<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// Create an EVM for the given snapshot id
+    /// Create a derived EVM instance for a specific snapshot.
+    ///
+    /// This method creates a new EVM instance using the database state from the
+    /// specified snapshot. The resulting EVM can be used for expression evaluation
+    /// and function calls without affecting the original debugging state.
+    ///
+    /// # Arguments
+    ///
+    /// * `snapshot_id` - The snapshot ID to create the EVM for
+    ///
+    /// # Returns
+    ///
+    /// Returns a configured EVM instance or None if the snapshot doesn't exist.
     pub fn create_evm_for_snapshot(
         &self,
         snapshot_id: usize,
@@ -279,7 +373,22 @@ where
         Some(ctx.build_mainnet())
     }
 
-    /// Send a mocked transaction in the EVM for the given snapshot id
+    /// Send a mock transaction in a derived EVM.
+    ///
+    /// This method executes a transaction in the EVM state at the specified snapshot
+    /// without affecting the original debugging state. Used for expression evaluation
+    /// that requires transaction execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `snapshot_id` - The snapshot ID to use as the base state
+    /// * `to` - The target address for the transaction
+    /// * `data` - The transaction data (call data)
+    /// * `value` - The value to send with the transaction
+    ///
+    /// # Returns
+    ///
+    /// Returns the execution result or an error if the transaction fails.
     pub fn send_transaction_in_derived_evm(
         &self,
         snapshot_id: usize,
@@ -302,7 +411,23 @@ where
         evm.transact_one(tx_env).map_err(|e| eyre!(e.to_string()))
     }
 
-    /// Invoke a call in the EVM for the given snapshot id
+    /// Invoke a contract function call in a derived EVM.
+    ///
+    /// This method calls a specific contract function in the EVM state at the
+    /// specified snapshot. It handles ABI encoding/decoding automatically and
+    /// returns the decoded result.
+    ///
+    /// # Arguments
+    ///
+    /// * `snapshot_id` - The snapshot ID to use as the base state
+    /// * `to` - The contract address to call
+    /// * `function` - The ABI function definition
+    /// * `args` - The function arguments
+    /// * `value` - Optional value to send with the call
+    ///
+    /// # Returns
+    ///
+    /// Returns the decoded function result or an error if the call fails.
     pub fn call_in_derived_evm(
         &self,
         snapshot_id: usize,

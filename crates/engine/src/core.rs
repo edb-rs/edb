@@ -14,13 +14,37 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! EDB Engine - Core analysis and instrumentation logic
+//! Core engine functionality for transaction analysis and debugging.
 //!
-//! This crate provides the core functionality for debugging Ethereum transactions
-//! including source code instrumentation, recompilation, and state snapshot collection.
+//! This module provides the main engine implementation that orchestrates the complete
+//! debugging workflow for Ethereum transactions. It handles source code analysis,
+//! contract instrumentation, transaction execution with debugging inspectors,
+//! and RPC server management.
 //!
-//! The engine accepts a forked database and EVM configuration as inputs (prepared by edb binary)
-//! and focuses on the instrumentation and analysis workflow.a
+//! # Workflow Overview
+//!
+//! 1. **Preparation**: Accept forked database and transaction configuration
+//! 2. **Analysis**: Download and analyze contract source code
+//! 3. **Instrumentation**: Inject debugging hooks into contract bytecode
+//! 4. **Execution**: Replay transaction with comprehensive debugging inspectors
+//! 5. **Collection**: Gather execution snapshots and trace data
+//! 6. **API**: Start RPC server for debugging interface
+//!
+//! # Key Components
+//!
+//! - [`EngineConfig`] - Engine configuration and settings
+//! - [`run_transaction_analysis`] - Main analysis workflow function
+//! - Inspector coordination for comprehensive data collection
+//! - Source code fetching and compilation management
+//! - Snapshot generation and organization
+//!
+//! # Supported Features
+//!
+//! - **Multi-contract analysis**: Analyze all contracts involved in execution
+//! - **Source fetching**: Automatic download from Etherscan and verification
+//! - **Quick mode**: Fast analysis with reduced operations
+//! - **Instrumentation**: Automatic debugging hook injection
+//! - **Comprehensive inspection**: Opcode and source-level snapshot collection
 
 use alloy_primitives::{Address, Bytes, TxHash};
 use eyre::Result;
@@ -64,14 +88,17 @@ use crate::{
     OpcodeSnapshots, SnapshotAnalysis, Snapshots,
 };
 
-/// Configuration for the engine (reduced scope - no RPC URL or forking config)
+/// Configuration for the EDB debugging engine.
+///
+/// Contains settings that control the engine's behavior during transaction analysis,
+/// source code fetching, and debugging operations.
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
-    /// RPC Provider URL
+    /// RPC provider URL for blockchain interaction (typically a proxy or archive node)
     pub rpc_proxy_url: String,
-    /// Etherscan API key for source code download
+    /// Optional Etherscan API key for automatic source code downloading and verification
     pub etherscan_api_key: Option<String>,
-    /// Quick mode - skip certain operations for faster analysis
+    /// Quick mode flag - when enabled, skips time-intensive operations for faster analysis
     pub quick: bool,
 }
 

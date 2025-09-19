@@ -14,6 +14,41 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Snapshot analysis for navigation and call stack tracking.
+//!
+//! This module provides sophisticated analysis capabilities for snapshots to enable
+//! efficient debugging navigation. It analyzes execution flows, call hierarchies,
+//! and snapshot relationships to support step-over, step-into, and step-out operations.
+//!
+//! # Core Analysis Features
+//!
+//! ## Next/Previous Step Analysis
+//! - **Step Navigation**: Determines next/previous snapshots for debugging navigation
+//! - **Call Stack Tracking**: Maintains function call hierarchy across snapshots
+//! - **Return Analysis**: Identifies function returns and modifier exits
+//! - **Hole Detection**: Handles gaps in snapshot coverage for complex call patterns
+//!
+//! ## Source-Level Analysis
+//! The analysis engine provides specialized handling for source-level (hook-based) snapshots:
+//! - **Function Entry/Exit Tracking**: Identifies function and modifier boundaries
+//! - **Internal Call Detection**: Recognizes internal function calls and library calls
+//! - **Call Stack Management**: Maintains accurate call stack state across snapshots
+//! - **Return Chain Analysis**: Handles complex return patterns through nested calls
+//!
+//! ## Opcode-Level Analysis
+//! For opcode snapshots, the analysis provides:
+//! - **Sequential Linking**: Links consecutive opcode snapshots within execution frames
+//! - **Frame Boundary Detection**: Identifies transitions between execution frames
+//! - **Fallback Coverage**: Ensures complete navigation even without source-level analysis
+//!
+//! # Navigation Support
+//!
+//! The analysis results enable sophisticated debugging operations:
+//! - **Step Over**: Navigate to the next snapshot in the same scope
+//! - **Step Into**: Enter function calls when available
+//! - **Step Out**: Exit current function to parent scope
+//! - **Reverse Navigation**: Support for backwards debugging through previous snapshots
+
 use std::collections::{HashMap, HashSet};
 
 use alloy_primitives::Address;
@@ -28,9 +63,16 @@ use crate::{
     Snapshot, Snapshots,
 };
 
-/// Trait for analyzing snapshots.
+/// Trait for analyzing snapshots to enable debugging navigation.
+///
+/// This trait provides the interface for analyzing snapshot collections to determine
+/// navigation relationships, call stack hierarchies, and execution flow patterns.
 pub trait SnapshotAnalysis {
-    /// Given the trace and analysis result of source code, updates the snapshot analysis.
+    /// Analyze snapshots using execution trace and source code analysis results.
+    ///
+    /// This method processes the snapshot collection to establish navigation relationships,
+    /// call stack hierarchies, and execution flow patterns based on the execution trace
+    /// and source code analysis results.
     fn analyze(&mut self, trace: &Trace, analysis: &HashMap<Address, AnalysisResult>)
         -> Result<()>;
 }
@@ -50,13 +92,17 @@ where
     }
 }
 
-// Next (step over the call) snapshot information analysis
+// Implementation of snapshot analysis for next/previous step navigation
 impl<DB> Snapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
+    /// Analyze next step relationships for debugging navigation.
+    ///
+    /// This method processes all snapshots to determine their next/previous relationships,
+    /// handling both opcode-level and source-level analysis with call stack tracking.
     fn analyze_next_steps(
         &mut self,
         trace: &Trace,
@@ -107,6 +153,10 @@ where
         Ok(())
     }
 
+    /// Analyze previous step relationships for reverse navigation.
+    ///
+    /// This method establishes the previous step links for all snapshots,
+    /// enabling backwards debugging navigation through the execution history.
     fn analyze_prev_steps(&mut self) -> Result<()> {
         for i in 0..self.len() {
             let current_snapshot = &self[i].1;
@@ -132,6 +182,11 @@ where
         Ok(())
     }
 
+    /// Find next steps for holed snapshots that don't have direct successors.
+    ///
+    /// This method handles snapshots that represent the end of execution frames
+    /// by finding their next steps in ancestor frames, ensuring complete navigation
+    /// coverage even for complex call patterns.
     fn find_next_step_for_holed_snapshots(
         &mut self,
         trace: &Trace,
@@ -171,7 +226,10 @@ where
         Ok(())
     }
 
-    // Helper function for opcode analysis
+    /// Analyze next steps for opcode-level snapshots.
+    ///
+    /// For opcode snapshots, the analysis is straightforward: link each snapshot
+    /// to the next one in the same execution frame, providing sequential navigation.
     fn analyze_next_steps_for_opcode(
         mut snapshots: Vec<&mut (ExecutionFrameId, Snapshot<DB>)>,
     ) -> Result<()> {
@@ -187,7 +245,11 @@ where
         Ok(())
     }
 
-    // Helper function for source analysis
+    /// Analyze next steps for source-level (hook-based) snapshots.
+    ///
+    /// This is the most complex part of snapshot analysis, handling function calls,
+    /// returns, modifier executions, and call stack management to provide accurate
+    /// navigation for source-level debugging.
     fn analyze_next_steps_for_source(
         mut snapshots: Vec<&mut (ExecutionFrameId, Snapshot<DB>)>,
         holed_snapshots: &mut HashSet<usize>,
