@@ -623,10 +623,18 @@ impl Analyzer {
 
         // add a new variable to the current scope
         let scope = self.current_scope();
+        let function = self.current_function.clone();
+        let contract = self.current_contract.clone();
         let uvid = UVID::next();
         let state_variable = declaration.state_variable;
-        let variable: VariableRef =
-            Variable::Plain { uvid, declaration: declaration.clone(), state_variable }.into();
+        let variable: VariableRef = Variable::Plain {
+            uvid,
+            declaration: declaration.clone(),
+            state_variable,
+            function,
+            contract,
+        }
+        .into();
         self.check_state_variable_visibility(&variable)?;
         if state_variable {
             self.state_variables.push(variable.clone());

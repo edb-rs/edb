@@ -41,7 +41,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::analysis::macros::universal_id;
+use crate::analysis::{macros::universal_id, ContractRef, FunctionRef};
 
 // use crate::{
 //     // Visitor, Walk
@@ -134,6 +134,14 @@ impl VariableRef {
             self.clone()
         }
     }
+
+    pub fn function(&self) -> Option<FunctionRef> {
+        self.inner.read().function()
+    }
+
+    pub fn contract(&self) -> Option<ContractRef> {
+        self.inner.read().contract()
+    }
 }
 
 impl Serialize for VariableRef {
@@ -191,6 +199,10 @@ pub enum Variable {
         declaration: VariableDeclaration,
         /// Whether this is a state variable (true) or local variable (false).
         state_variable: bool,
+        /// Function that this variable is declared in.
+        function: Option<FunctionRef>,
+        /// Contract that this variable is declared in.
+        contract: Option<ContractRef>,
     },
     /// A member access variable (e.g., `obj.field`).
     Member {
@@ -233,6 +245,24 @@ impl Variable {
             Self::Member { base, .. } => base.read().declaration(),
             Self::Index { base, .. } => base.read().declaration(),
             Self::IndexRange { base, .. } => base.read().declaration(),
+        }
+    }
+
+    pub fn function(&self) -> Option<FunctionRef> {
+        match self {
+            Self::Plain { function, .. } => function.clone(),
+            Self::Member { base, .. } => base.read().function(),
+            Self::Index { base, .. } => base.read().function(),
+            Self::IndexRange { base, .. } => base.read().function(),
+        }
+    }
+
+    pub fn contract(&self) -> Option<ContractRef> {
+        match self {
+            Self::Plain { contract, .. } => contract.clone(),
+            Self::Member { base, .. } => base.read().contract(),
+            Self::Index { base, .. } => base.read().contract(),
+            Self::IndexRange { base, .. } => base.read().contract(),
         }
     }
 
