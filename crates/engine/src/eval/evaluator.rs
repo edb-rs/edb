@@ -30,6 +30,52 @@ use crate::EngineContext;
 use super::handlers::EvaluatorHandlers;
 use super::utils::parse_input;
 
+/// Main expression evaluator for Solidity-like expressions.
+///
+/// The `ExpressionEvaluator` parses and evaluates Solidity-like expressions against
+/// configurable data sources through the handler pattern. It supports a wide range
+/// of expression types including variables, function calls, arithmetic operations,
+/// type casting, and blockchain context access.
+///
+/// # Architecture
+///
+/// The evaluator uses a handler-based architecture where different aspects of
+/// evaluation are delegated to specialized handlers:
+/// - Variable resolution
+/// - Function calls
+/// - Mapping/array access
+/// - Member access
+/// - Blockchain context (`msg`, `tx`, `block`)
+/// - Value validation
+///
+/// # Supported Operations
+///
+/// - **Variables**: Local variables, state variables, special variables (`this`)
+/// - **Literals**: Numbers (decimal/hex), strings, booleans, addresses
+/// - **Arithmetic**: `+`, `-`, `*`, `/`, `%`, `**`
+/// - **Comparison**: `==`, `!=`, `<`, `<=`, `>`, `>=`
+/// - **Logical**: `&&`, `||`, `!`
+/// - **Bitwise**: `&`, `|`, `^`, `~`, `<<`, `>>`
+/// - **Indexing**: Arrays and mappings with bracket notation
+/// - **Member Access**: Dot notation for structs and contract members
+/// - **Function Calls**: Contract functions and built-in functions
+/// - **Type Casting**: Explicit type conversions (e.g., `uint256(value)`)
+/// - **Ternary**: Conditional operator `? :`
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use edb_engine::eval::{ExpressionEvaluator, handlers::EdbHandler};
+///
+/// // Create evaluator with EDB handlers
+/// let handlers = EdbHandler::create_handlers(engine_context);
+/// let evaluator = ExpressionEvaluator::new(handlers);
+///
+/// // Evaluate various expressions
+/// let balance = evaluator.eval("balances[msg.sender]", snapshot_id)?;
+/// let is_owner = evaluator.eval("msg.sender == owner", snapshot_id)?;
+/// let calculation = evaluator.eval("totalSupply() * price / 1e18", snapshot_id)?;
+/// ```
 #[derive(Clone)]
 pub struct ExpressionEvaluator {
     handlers: EvaluatorHandlers,
@@ -461,8 +507,8 @@ impl ExpressionEvaluator {
             }
 
             // ============ TYPE CHECKING PROPERTIES ============
-            ("isZero", DynSolValue::Uint(val, bits)) => Ok(Some(DynSolValue::Bool(val.is_zero()))),
-            ("isZero", DynSolValue::Int(val, bits)) => Ok(Some(DynSolValue::Bool(val.is_zero()))),
+            ("isZero", DynSolValue::Uint(val, _bits)) => Ok(Some(DynSolValue::Bool(val.is_zero()))),
+            ("isZero", DynSolValue::Int(val, _bits)) => Ok(Some(DynSolValue::Bool(val.is_zero()))),
             ("isZero", DynSolValue::Address(addr)) => {
                 Ok(Some(DynSolValue::Bool(*addr == Address::ZERO)))
             }
@@ -1926,7 +1972,7 @@ mod tests {
         // Int8 overflow/truncation (128 becomes -128 in two's complement)
         let result = evaluator.eval("int8(128)", 0);
         assert!(result.is_ok());
-        if let Ok(DynSolValue::Int(val, bits)) = result {
+        if let Ok(DynSolValue::Int(_val, bits)) = result {
             // In 8-bit signed, 128 (0x80) should be -128 due to sign extension
             assert_eq!(bits, 8);
             // The exact value depends on how sign extension is handled
@@ -2323,7 +2369,7 @@ mod tests {
     #[test]
     fn test_simulation_debug_handler_mapping_access() {
         let (handlers, debug_handler) = create_simulation_debug_handlers();
-        let evaluator = ExpressionEvaluator::new(handlers);
+        let _evaluator = ExpressionEvaluator::new(handlers);
 
         debug_handler.clear_log();
 
@@ -2346,7 +2392,7 @@ mod tests {
     #[test]
     fn test_simulation_debug_handler_member_access() {
         let (handlers, debug_handler) = create_simulation_debug_handlers();
-        let evaluator = ExpressionEvaluator::new(handlers);
+        let _evaluator = ExpressionEvaluator::new(handlers);
 
         // Test member access (this would require actual member access syntax)
         // For now we test the handler directly
@@ -2484,7 +2530,7 @@ mod tests {
 
     #[test]
     fn test_blockchain_context_simulation() {
-        let (handlers, debug_handler) = create_simulation_debug_handlers();
+        let (handlers, _debug_handler) = create_simulation_debug_handlers();
         let evaluator = ExpressionEvaluator::new(handlers);
 
         // Test blockchain context access

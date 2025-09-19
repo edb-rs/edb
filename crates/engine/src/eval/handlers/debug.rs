@@ -14,13 +14,55 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Debug handler implementations for testing and simulation.
+//!
+//! This module provides handler implementations designed for testing, debugging,
+//! and simulation scenarios. It includes two main types of handlers:
+//!
+//! # Handler Types
+//!
+//! ## [`DebugHandler`]
+//! A simple error-only handler that returns detailed error messages for all operations.
+//! Useful for testing error conditions and understanding the evaluation flow.
+//!
+//! ## [`SimulationDebugHandler`]
+//! An advanced simulation handler that:
+//! - Returns mock values for variables and function calls
+//! - Logs all operations for debugging
+//! - Allows pre-configuration of specific return values
+//! - Generates plausible default values based on naming conventions
+//!
+//! # Usage
+//!
+//! ## Error-Only Debug Handler
+//! ```rust,ignore
+//! let handlers = create_debug_handlers();
+//! let evaluator = ExpressionEvaluator::new(handlers);
+//! // All operations will return detailed error messages
+//! ```
+//!
+//! ## Simulation Handler
+//! ```rust,ignore
+//! let (handlers, debug_handler) = create_simulation_debug_handlers();
+//! debug_handler.set_variable("balance", DynSolValue::Uint(U256::from(1000), 256));
+//! debug_handler.set_function("totalSupply", DynSolValue::Uint(U256::from(1000000), 256));
+//!
+//! let evaluator = ExpressionEvaluator::new(handlers);
+//! let result = evaluator.eval("balance + totalSupply()", 0)?; // Returns mock values
+//!
+//! // Check execution log
+//! let log = debug_handler.get_log();
+//! for entry in log {
+//!     println!("Operation: {}", entry);
+//! }
+//! ```
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use alloy_dyn_abi::DynSolValue;
-use alloy_primitives::{Address, I256, U256};
+use alloy_primitives::{Address, U256};
 use eyre::{bail, Result};
-use revm::handler::validation;
 
 use super::*;
 
@@ -29,6 +71,10 @@ use super::*;
 pub struct DebugHandler;
 
 impl DebugHandler {
+    /// Create a new debug handler.
+    ///
+    /// Returns a handler that will return detailed error messages for all operations,
+    /// making it useful for testing error conditions and debugging evaluation flow.
     pub fn new() -> Self {
         Self
     }

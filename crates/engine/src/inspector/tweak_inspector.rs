@@ -23,16 +23,13 @@ use alloy_dyn_abi::JsonAbiExt;
 use alloy_primitives::{Address, Bytes, U256};
 use edb_common::EdbContext;
 use eyre::Result;
-use foundry_compilers::{
-    artifacts::{Contract, ContractBytecode},
-    Artifact as _,
-};
+use foundry_compilers::{artifacts::Contract, Artifact as _};
 use itertools::Itertools;
 use revm::{
     bytecode::OpCode,
-    context::{ContextTr, CreateScheme, Host, JournalTr},
+    context::{CreateScheme, JournalTr},
     database::CacheDB,
-    interpreter::{interpreter_types::Jumps, CreateInputs, CreateOutcome, Interpreter},
+    interpreter::{CreateInputs, CreateOutcome},
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use tracing::{debug, error, info, warn};
@@ -379,7 +376,7 @@ where
 
     fn create_end(
         &mut self,
-        context: &mut EdbContext<DB>,
+        _context: &mut EdbContext<DB>,
         inputs: &CreateInputs,
         outcome: &mut CreateOutcome,
     ) {

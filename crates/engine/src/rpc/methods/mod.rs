@@ -14,9 +14,44 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! RPC method handlers
+//! JSON-RPC method implementations for EDB debugging API.
 //!
-//! This module contains all the RPC method implementations for the debug server.
+//! This module contains all the RPC method implementations organized by functionality.
+//! Each sub-module provides specific debugging capabilities:
+//!
+//! # Method Categories
+//!
+//! ## Artifact Management ([`artifact`])
+//! - `edb_getCode` - Retrieve contract bytecode
+//! - `edb_getConstructorArgs` - Get constructor arguments
+//!
+//! ## Expression Evaluation ([`expr`])
+//! - `edb_evalOnSnapshot` - Evaluate expressions against snapshots
+//!
+//! ## Navigation ([`navigation`])
+//! - `edb_getNextCall` - Navigate to next function call
+//! - `edb_getPrevCall` - Navigate to previous function call
+//!
+//! ## Resolution ([`resolve`])
+//! - `edb_getContractABI` - Resolve contract ABI information
+//! - `edb_getCallableABI` - Get callable function ABI details
+//!
+//! ## Snapshot Management ([`snapshot`])
+//! - `edb_getSnapshotCount` - Get total number of snapshots
+//! - `edb_getSnapshotInfo` - Get detailed snapshot information
+//!
+//! ## Storage Inspection ([`storage`])
+//! - `edb_getStorage` - Read contract storage at specific snapshot
+//! - `edb_getStorageDiff` - Compare storage between snapshots
+//!
+//! ## Trace Analysis ([`trace`])
+//! - `edb_getTrace` - Get complete execution trace
+//!
+//! # Architecture
+//!
+//! All methods are stateless and operate through the [`MethodHandler`] which
+//! provides access to the immutable debugging context. Methods follow a consistent
+//! pattern of parameter validation, operation execution, and result serialization.
 
 mod artifact;
 mod expr;
@@ -32,14 +67,21 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use std::sync::Arc;
 use tracing::debug;
 
-/// Method handler for dispatching RPC calls (stateless)
+/// Stateless RPC method dispatcher for EDB debugging API.
+///
+/// This handler provides a centralized entry point for all RPC methods.
+/// It maintains a reference to the immutable debugging context and routes
+/// method calls to their appropriate implementation modules.
+///
+/// The handler is designed to be thread-safe and stateless, allowing
+/// concurrent processing of RPC requests without side effects.
 pub struct MethodHandler<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// Immutable debugging context
+    /// Immutable debugging context providing read-only access to debugging data
     context: Arc<EngineContext<DB>>,
 }
 

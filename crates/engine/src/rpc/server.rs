@@ -14,10 +14,32 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! RPC server implementation with standard multi-threaded pattern
+//! JSON-RPC server implementation for EDB debugging API.
 //!
-//! This module implements the main JSON-RPC server that handles debugging requests
-//! using the standard Axum multi-threaded approach with Send+Sync EngineContext.
+//! This module implements the main HTTP server that handles JSON-RPC debugging requests
+//! using the Axum web framework. The server provides a thread-safe, multi-client debugging
+//! interface with graceful shutdown capabilities.
+//!
+//! # Features
+//!
+//! - **Multi-threaded**: Handles concurrent debugging requests from multiple clients
+//! - **Thread-safe**: Uses Arc-wrapped EngineContext for safe shared access
+//! - **Graceful shutdown**: Supports clean server termination
+//! - **Health monitoring**: Provides health check endpoint for monitoring
+//! - **Error handling**: Comprehensive error reporting with JSON-RPC 2.0 compliance
+//!
+//! # Server Architecture
+//!
+//! The server follows a standard Axum pattern:
+//! 1. Creates a router with RPC and health check endpoints
+//! 2. Spawns the server in a background task
+//! 3. Returns a handle for monitoring and shutdown
+//! 4. Routes requests to the appropriate method handlers
+//!
+//! # Endpoints
+//!
+//! - `POST /` - Main JSON-RPC endpoint for debugging methods
+//! - `GET /health` - Health check endpoint returning server status
 
 use super::methods::MethodHandler;
 use super::types::{RpcError, RpcRequest, RpcResponse};
@@ -37,12 +59,15 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tracing::{error, info, warn};
 
-/// Handle to the running RPC server
+/// Handle to control a running RPC server.
+///
+/// This handle provides access to server information and allows for graceful shutdown.
+/// The server runs in a background task and can be monitored and controlled through this handle.
 #[derive(Debug)]
 pub struct RpcServerHandle {
     /// Address the server is listening on
     pub addr: SocketAddr,
-    /// Shutdown signal
+    /// Shutdown signal sender (consumed when shutting down)
     shutdown_tx: oneshot::Sender<()>,
 }
 
@@ -66,7 +91,10 @@ impl RpcServerHandle {
     }
 }
 
-/// Thread-safe RPC state for Axum
+/// Thread-safe RPC state for Axum request handling.
+///
+/// This wrapper provides the shared state needed by Axum handlers.
+/// It contains the server instance wrapped in Arc for thread-safe sharing.
 #[derive(Clone)]
 struct RpcState<DB>
 where
@@ -74,20 +102,27 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// The debug RPC server instance
+    /// The debug RPC server instance (shared across request handlers)
     server: Arc<DebugRpcServer<DB>>,
 }
 
-/// Debug RPC server that provides read-only access to EngineContext
+/// Main debug RPC server providing JSON-RPC debugging API.
+///
+/// This server provides read-only access to the debugging engine context through
+/// a JSON-RPC interface. It handles method dispatch, error handling, and response
+/// formatting according to the JSON-RPC 2.0 specification.
+///
+/// The server is thread-safe and can handle concurrent requests from multiple clients.
+/// All access to the engine context is read-only to ensure debugging session integrity.
 pub struct DebugRpcServer<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    /// Immutable debugging context (read-only access)
+    /// Immutable debugging context providing read-only access to debugging data
     context: Arc<EngineContext<DB>>,
-    /// Method handler for RPC dispatch
+    /// Method handler for dispatching RPC requests to appropriate implementations
     method_handler: Arc<MethodHandler<DB>>,
 }
 
@@ -230,17 +265,4 @@ where
 {
     let server = DebugRpcServer::new(context);
     server.start().await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Tests would need a concrete DB type to compile
-    // #[test]
-    // fn test_rpc_state_is_send_sync() {
-    //     fn assert_send_sync<T: Send + Sync>() {}
-    //     // Would need a concrete DB type like:
-    //     // assert_send_sync::<RpcState<EmptyDB>>();
-    // }
 }

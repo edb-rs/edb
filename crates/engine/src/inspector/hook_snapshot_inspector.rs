@@ -26,19 +26,13 @@
 //! making it more efficient for tracking specific execution states.
 
 use alloy_dyn_abi::{DynSolType, DynSolValue};
-use alloy_primitives::{address, Address, Bytes, U256};
-use axum::extract::rejection::LengthLimitError;
+use alloy_primitives::{Address, Bytes, U256};
 use edb_common::{
     types::{CallResult, EdbSolValue, ExecutionFrameId, Trace},
     EdbContext,
 };
 use eyre::Result;
-use foundry_compilers::{
-    artifacts::{
-        bytecode, Contract, Expression, Mutability, StateMutability, TypeName, VariableDeclaration,
-    },
-    Artifact,
-};
+use foundry_compilers::{artifacts::Contract, Artifact};
 use revm::{
     bytecode::OpCode,
     context::{ContextTr, CreateScheme, JournalTr},
@@ -58,10 +52,7 @@ use std::{
 use tracing::{debug, error};
 
 use crate::{
-    analysis::{
-        self, dyn_sol_type, AnalysisResult, UserDefinedTypeRef, UserDefinedTypeVariant,
-        VariableRef, UTID, UVID,
-    },
+    analysis::{dyn_sol_type, AnalysisResult, UserDefinedTypeRef, VariableRef, UVID},
     USID,
 };
 
@@ -826,14 +817,35 @@ where
     }
 }
 
-/// Decode the variable value from the given abi.encoded data according to the variable declaration.
+/// Decode the variable value from the given ABI-encoded data according to the variable declaration.
+///
+/// This function takes raw ABI-encoded data and decodes it according to the variable's
+/// type information from its declaration. It handles both primitive Solidity types
+/// (uint, address, bool, etc.) and user-defined types (structs, enums).
 ///
 /// # Arguments
-/// * `declaration` - The variable declaration
-/// * `data` - The encoded variable value
+/// * `user_defined_types` - Mapping of type IDs to user-defined type references for resolving custom types
+/// * `variable` - The variable reference containing the declaration and type information
+/// * `data` - The ABI-encoded variable value as raw bytes
 ///
 /// # Returns
-/// The decoded variable value
+/// The decoded variable value as a [`DynSolValue`] that can be used in expression evaluation
+///
+/// # Errors
+/// Returns an error if:
+/// - The variable declaration lacks type information
+/// - The type cannot be resolved from the declaration
+/// - The data cannot be ABI-decoded according to the resolved type
+///
+/// # Example
+/// ```rust,ignore
+/// let decoded = decode_variable_value(&user_types, &variable_ref, &encoded_data)?;
+/// match decoded {
+///     DynSolValue::Uint(val, _) => println!("Uint value: {}", val),
+///     DynSolValue::Address(addr) => println!("Address: {}", addr),
+///     _ => println!("Other type: {:?}", decoded),
+/// }
+/// ```
 pub fn decode_variable_value(
     user_defined_types: &HashMap<usize, UserDefinedTypeRef>,
     variable: &VariableRef,

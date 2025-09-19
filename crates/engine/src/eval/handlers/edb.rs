@@ -14,18 +14,45 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! EDB handler implementations for the expression evaluator.
+//!
+//! This module provides concrete implementations of all handler traits that work
+//! with EDB's debug snapshot and execution context. The handlers enable real-time
+//! expression evaluation over debug modes (opcode mode and source mode).
+//!
+//! # Key Features
+//!
+//! - **Variable Resolution**: Access local variables, state variables, and `this`
+//! - **Function Calls**: Execute contract functions and EDB pre-compiled functions
+//! - **Storage Access**: Read from contract storage, transient storage, memory, and stack
+//! - **Blockchain Context**: Access `msg`, `tx`, and `block` global variables
+//! - **Cross-Contract Calls**: Function calls and state access on different addresses
+//!
+//! # Pre-compiled Functions (EDB-Version)
+//!
+//! - `edb_sload(address, slot)` - Read storage slot
+//! - `edb_tsload(address, slot)` - Read transient storage (opcode mode only)
+//! - `edb_stack(index)` - Read EVM stack (opcode mode only)
+//! - `edb_memory(offset, size)` - Read EVM memory (opcode mode only)
+//! - `edb_calldata(offset, size)` - Read call data slice
+//! - `keccak256(bytes)` - Compute keccak256 hash
+//! - `edb_help()` - Show help information
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! let handlers = EdbHandler::create_handlers(engine_context);
+//! let evaluator = ExpressionEvaluator::new(handlers);
+//! let result = evaluator.eval("balances[msg.sender]", snapshot_id)?;
+//! ```
+
 use std::{collections::HashSet, sync::Arc};
 
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::U256;
-use edb_common::types::{
-    parse_callable_abi_entries, CallableAbiEntry, SnapshotInfoDetail, TraceEntry,
-};
+use edb_common::types::{parse_callable_abi_entries, CallableAbiEntry, TraceEntry};
 use eyre::{bail, eyre, Result};
-use revm::{
-    database::CacheDB, interpreter::instructions::system::address, Database, DatabaseCommit,
-    DatabaseRef,
-};
+use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use tracing::debug;
 
 use super::*;
@@ -74,6 +101,13 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
+    /// Create a new EDB handler with the given engine context.
+    ///
+    /// # Arguments
+    /// * `context` - The EDB engine context containing snapshots, trace, and recompiled artifacts
+    ///
+    /// # Returns
+    /// A new [`EdbHandler`] instance
     pub fn new(context: Arc<EngineContext<DB>>) -> Self {
         Self { context }
     }
@@ -95,6 +129,11 @@ where
 }
 
 // Wrapper structs for each handler trait
+
+/// EDB implementation of [`VariableHandler`].
+///
+/// Resolves variable names to their values using debug snapshot context.
+/// Supports local variables, state variables, mappings, arrays, and the special `this` variable.
 #[derive(Clone)]
 pub struct EdbVariableHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -102,6 +141,10 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+/// EDB implementation of [`MappingArrayHandler`].
+///
+/// Handles mapping and array access operations by either reading from debug snapshot
+/// data or making EVM calls for storage-based mappings.
 #[derive(Clone)]
 pub struct EdbMappingArrayHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -109,6 +152,13 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+/// EDB implementation of [`FunctionCallHandler`].
+///
+/// Executes function calls including:
+/// - Contract functions (view/pure functions)
+/// - EDB pre-compiled functions (`edb_sload`, `edb_stack`, etc.)
+/// - Built-in functions (`keccak256`)
+/// - Cross-contract function calls
 #[derive(Clone)]
 pub struct EdbFunctionCallHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -116,6 +166,10 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+/// EDB implementation of [`MemberAccessHandler`].
+///
+/// Handles member access operations on addresses, enabling access to contract
+/// state variables and view functions on different addresses.
 #[derive(Clone)]
 pub struct EdbMemberAccessHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -123,6 +177,10 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+/// EDB implementation of [`MsgHandler`].
+///
+/// Provides access to transaction context variables (`msg.sender`, `msg.value`)
+/// from the current debug snapshot's trace entry.
 #[derive(Clone)]
 pub struct EdbMsgHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -130,6 +188,10 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+/// EDB implementation of [`TxHandler`].
+///
+/// Provides access to transaction-level context (`tx.origin`) from the root
+/// trace entry of the current debug session.
 #[derive(Clone)]
 pub struct EdbTxHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -137,6 +199,10 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+/// EDB implementation of [`BlockHandler`].
+///
+/// Provides access to blockchain context (`block.number`, `block.timestamp`)
+/// from the EDB engine's fork information and block data.
 #[derive(Clone)]
 pub struct EdbBlockHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -144,6 +210,11 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync;
 
+/// EDB implementation of [`ValidationHandler`].
+///
+/// Validates final expression results, ensuring that placeholder values (like ABI info)
+/// are not returned as final results and must be resolved to concrete values.
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct EdbValidationHandler<DB>(Arc<EdbHandler<DB>>)
 where
@@ -727,7 +798,7 @@ where
                                 None,
                             ) {
                                 Ok(result) => return Ok(result),
-                                Err(e) => {
+                                Err(_e) => {
                                     debug!(
                                     "Function '{}' found in contract at address {:?}, but call failed",
                                     member, address_candidate

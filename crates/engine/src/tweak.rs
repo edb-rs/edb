@@ -16,14 +16,13 @@
 
 use std::path::PathBuf;
 
-use alloy_primitives::{address, Address, Bytes, TxHash};
+use alloy_primitives::{Address, Bytes, TxHash};
 use edb_common::{
     fork_and_prepare, relax_evm_constraints, Cache, CachePath, EdbCache, EdbCachePath, EdbContext,
     ForkResult,
 };
 use eyre::Result;
 use foundry_block_explorers::{contract::ContractCreationData, Client};
-use foundry_compilers::Artifact as _;
 use revm::{
     context::{Cfg, ContextTr},
     database::CacheDB,

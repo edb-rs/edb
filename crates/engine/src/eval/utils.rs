@@ -14,12 +14,37 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+//! Parsing utilities for expression evaluation.
+//!
+//! This module provides utilities for parsing Solidity-like expressions into
+//! abstract syntax trees that can be evaluated by the expression evaluator.
+
 use eyre::{bail, Result};
 use solang_parser::{
     parse,
     pt::{Expression, SourceUnit, SourceUnitPart, Statement},
 };
 
+/// Parse a string input into a Solidity expression AST.
+///
+/// This function wraps the input string in a dummy function definition to
+/// leverage the Solang parser, then extracts the expression from the function body.
+///
+/// # Arguments
+/// * `input` - The expression string to parse (e.g., "a + b", "balanceOf(user)")
+///
+/// # Returns
+/// A parsed [`Expression`] AST node that can be evaluated
+///
+/// # Errors
+/// Returns an error if the input cannot be parsed as a valid Solidity expression
+///
+/// # Examples
+/// ```rust,ignore
+/// let expr = parse_input("msg.sender == owner")?;
+/// let expr = parse_input("balances[user] > 1000")?;
+/// let expr = parse_input("totalSupply() * price / 1e18")?;
+/// ```
 pub fn parse_input(input: &str) -> Result<Expression> {
     let trimmed = input.trim();
     let wrapped_input = if trimmed.ends_with(";") {

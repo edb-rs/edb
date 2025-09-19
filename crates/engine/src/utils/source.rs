@@ -14,13 +14,12 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use alloy_primitives::map::foldhash::HashMap;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, BlockOrStatement, StateMutability, Statement, TypeName, Visibility,
 };
 use semver::VersionReq;
 
-use crate::analysis::{stmt_src, VariableRef};
+use crate::analysis::stmt_src;
 
 /// Get the source string at the given location.
 ///

@@ -14,16 +14,88 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{f64::consts::E, sync::Arc};
+//! Expression evaluation RPC methods.
+//!
+//! This module implements the core expression evaluation functionality that allows
+//! real-time evaluation of Solidity-like expressions against any debugging snapshot.
+//! This is one of the most powerful features of EDB, enabling interactive debugging
+//! and inspection of contract state.
+//!
+//! # Available Methods
+//!
+//! - `edb_evalOnSnapshot` - Evaluate an expression against a specific snapshot
+//!
+//! # Supported Expressions
+//!
+//! The evaluator supports a wide range of Solidity-compatible expressions:
+//! - **Variables**: `balance`, `owner`, `this`
+//! - **Mappings/Arrays**: `balances[user]`, `data[0]`
+//! - **Function Calls**: `balanceOf(user)`, `totalSupply()`
+//! - **Member Access**: `token.symbol`, `addr.balance`
+//! - **Arithmetic**: `balance * price / 1e18`
+//! - **Comparisons**: `msg.sender == owner`
+//! - **Blockchain Context**: `msg.sender`, `msg.value`, `block.timestamp`
+//! - **Type Casting**: `uint256(value)`, `address(0x123...)`
+//! - **Logical Operations**: `approved && amount > 0`
+//!
+//! # Example Usage
+//!
+//! ```json
+//! // Request
+//! {
+//!   "method": "edb_evalOnSnapshot",
+//!   "params": [150, "balances[msg.sender] > 1000"]
+//! }
+//!
+//! // Response
+//! {
+//!   "result": {
+//!     "type": "bool",
+//!     "value": true
+//!   }
+//! }
+//! ```
 
-use alloy_primitives::Address;
-use edb_common::types::{parse_callable_abi_info, CallableAbiInfo, ContractTy, EdbSolValue};
+use std::sync::Arc;
+
+use edb_common::types::EdbSolValue;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
 
 use crate::{error_codes, eval, EngineContext, RpcError};
 
+/// Evaluate a Solidity-like expression against a specific snapshot.
+///
+/// This is the core debugging method that enables real-time expression evaluation.
+/// It takes a snapshot ID and an expression string, then evaluates the expression
+/// in the context of that snapshot's execution state.
+///
+/// # Parameters
+/// - `snapshot_id` (number) - The snapshot ID to evaluate against (0-indexed)
+/// - `expr` (string) - The expression to evaluate
+///
+/// # Returns
+/// An object containing the evaluated result with type information:
+/// ```json
+/// {
+///   "type": "uint256",
+///   "value": "1000000000000000000"
+/// }
+/// ```
+///
+/// # Supported Expression Types
+/// - Variables and state access
+/// - Function calls (view/pure functions)
+/// - Arithmetic and logical operations
+/// - Type casting and comparisons
+/// - Blockchain context (msg, tx, block)
+///
+/// # Error Conditions
+/// - Invalid snapshot ID (out of bounds)
+/// - Expression parsing errors
+/// - Runtime evaluation errors (e.g., division by zero)
+/// - Type resolution failures
 pub fn eval_on_snapshot<DB>(
     context: &Arc<EngineContext<DB>>,
     params: Option<Value>,

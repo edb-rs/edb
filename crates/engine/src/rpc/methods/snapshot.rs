@@ -14,7 +14,22 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Snapshot information RPC method implementation
+//! Snapshot management RPC methods.
+//!
+//! This module implements RPC methods for accessing and navigating execution snapshots.
+//! Snapshots capture the execution state at specific points, allowing detailed inspection
+//! of variables, memory, stack, and storage at any moment during contract execution.
+//!
+//! # Available Methods
+//!
+//! - `edb_getSnapshotCount` - Get the total number of available snapshots
+//! - `edb_getSnapshotInfo` - Get detailed information about a specific snapshot
+//!
+//! # Snapshot Types
+//!
+//! The system supports two types of snapshots:
+//! - **Opcode snapshots** - Low-level EVM state (PC, stack, memory, storage)
+//! - **Hook snapshots** - High-level source information (variables, source location)
 
 use std::sync::Arc;
 
@@ -183,7 +198,21 @@ where
     Ok(json_value)
 }
 
-/// Get the total number of snapshots
+/// Get the total number of available snapshots.
+///
+/// Returns the count of all snapshots captured during the debugging session.
+/// This includes both opcode-level and hook-based snapshots.
+///
+/// # Parameters
+/// None - this method takes no parameters
+///
+/// # Returns
+/// The total number of snapshots as a JSON number
+///
+/// # Example Response
+/// ```json
+/// 150
+/// ```
 pub fn get_snapshot_count<DB>(context: &Arc<EngineContext<DB>>) -> Result<Value, RpcError>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,

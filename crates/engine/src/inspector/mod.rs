@@ -14,7 +14,50 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Inspectors for analyzing and instrumenting EVM execution
+//! EVM execution inspectors for debugging and analysis.
+//!
+//! This module provides various inspector implementations that hook into the EVM
+//! execution process to collect debugging information, create snapshots, and
+//! modify execution behavior for debugging purposes.
+//!
+//! # Inspector Types
+//!
+//! ## [`CallTracer`]
+//! Traces all contract calls during execution, building a hierarchical call tree
+//! that captures the complete execution flow including internal calls, delegate calls,
+//! and create operations.
+//!
+//! ## [`HookSnapshotInspector`]
+//! Creates detailed snapshots at specific hook points during execution, capturing
+//! local variables, state variables, and execution context for source-level debugging.
+//! This inspector works with source maps and debug information to provide high-level
+//! debugging capabilities.
+//!
+//! ## [`OpcodeSnapshotInspector`]
+//! Creates snapshots at the opcode level, capturing low-level EVM state including
+//! stack, memory, storage, and transient storage. Useful for detailed execution
+//! analysis and opcode-level debugging.
+//!
+//! ## [`TweakInspector`]
+//! Allows runtime modification of contract bytecode and behavior for debugging
+//! purposes. Can inject custom logic, modify return values, and alter execution
+//! flow to test different scenarios.
+//!
+//! # Usage
+//!
+//! Inspectors are typically chained together to provide comprehensive debugging:
+//!
+//! ```rust,ignore
+//! let call_tracer = CallTracer::new();
+//! let hook_inspector = HookSnapshotInspector::new(context);
+//! let opcode_inspector = OpcodeSnapshotInspector::new(context);
+//! ```
+//!
+//! # Architecture
+//!
+//! All inspectors implement the REVM `Inspector` trait. Each inspector focuses
+//! on a specific aspect of execution analysis while maintaining minimal overhead
+//! when not actively collecting data.
 
 mod call_tracer;
 mod hook_snapshot_inspector;

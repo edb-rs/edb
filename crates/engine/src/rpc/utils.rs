@@ -14,10 +14,23 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! RPC server utilities
+//! Utility functions for RPC server operations.
 //!
-//! This module provides utility functions for RPC server operations,
-//! including port discovery and helper functions.
+//! This module provides common utilities needed by the RPC server including:
+//! - Port discovery and availability checking
+//! - Socket address parsing with sensible defaults
+//! - Error handling helpers for JSON-RPC responses
+//! - Convenience functions for common error types
+//!
+//! # Port Management
+//!
+//! The module includes functions to find available ports automatically,
+//! starting from a preferred port (3000) and searching upward if needed.
+//!
+//! # Error Handling
+//!
+//! Provides helper functions to create properly formatted JSON-RPC error
+//! responses with standard error codes and descriptive messages.
 
 use eyre::{eyre, Result};
 use std::net::{SocketAddr, TcpListener};
