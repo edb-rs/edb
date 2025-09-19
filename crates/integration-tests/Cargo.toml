@@ -1,5 +1,6 @@
 [package]
 name = "edb-integration-tests"
+publish = false
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

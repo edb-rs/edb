@@ -1,6 +1,7 @@
 [package]
 name = "edb-webui"
 description = "Web User Interface for EDB"
+publish = false
 
 version.workspace = true
 edition.workspace = true
