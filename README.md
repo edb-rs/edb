@@ -43,6 +43,7 @@ edb --rpc-urls <RPC_ENDPOINTS> replay 0x5bedd885ff628e935fe47dacb6065c6ac80514a8
 The `RPC_ENDPOINTS` should be a comma-separated list of RPC endpoint URLs.
 EDB will utilize the RPC endpoints to obtain on-chain states to replay the transaction.
 The more RPC endpoints are provided, the faster the replay is.
+If none is provided, EDB will default to the ten most popular public RPC endpoints, which may be slow and unreliable.
 
 EDB will by default start a TUI debugger:
 ![EDB TUI](resources/edb-tui.png)
