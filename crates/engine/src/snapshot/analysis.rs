@@ -458,7 +458,7 @@ enum FunctionInfo {
     ModifierOnly(Vec<UFID>),
     FunctionOnly(UFID),
     ModifiedFunction { func: UFID, modifiers: Vec<UFID> },
-    INVALID,
+    Invalid,
 }
 
 impl FunctionInfo {
@@ -470,19 +470,16 @@ impl FunctionInfo {
             Self::ModifiedFunction { func, modifiers } => {
                 *func == ufid || modifiers.contains(&ufid)
             }
-            Self::INVALID => false,
+            Self::Invalid => false,
         }
     }
 
     fn is_valid(&self) -> bool {
-        !matches!(self, Self::INVALID)
+        !matches!(self, Self::Invalid)
     }
 
     fn _certainly_in_body(&self) -> bool {
-        match self {
-            Self::FunctionOnly(..) | Self::ModifiedFunction { .. } => true,
-            _ => false,
-        }
+        matches!(self, Self::FunctionOnly(..) | Self::ModifiedFunction { .. })
     }
 
     fn with_modifier(&mut self, modifier: UFID) {
@@ -499,7 +496,7 @@ impl FunctionInfo {
             Self::ModifiedFunction { modifiers, .. } => {
                 modifiers.push(modifier);
             }
-            Self::INVALID => {}
+            Self::Invalid => {}
         }
     }
 
@@ -509,9 +506,9 @@ impl FunctionInfo {
             Self::ModifierOnly(ids) => {
                 *self = Self::ModifiedFunction { func: function, modifiers: ids.clone() }
             }
-            Self::FunctionOnly(..) => *self = Self::INVALID,
-            Self::ModifiedFunction { .. } => *self = Self::INVALID,
-            Self::INVALID => {}
+            Self::FunctionOnly(..) => *self = Self::Invalid,
+            Self::ModifiedFunction { .. } => *self = Self::Invalid,
+            Self::Invalid => {}
         }
     }
 }

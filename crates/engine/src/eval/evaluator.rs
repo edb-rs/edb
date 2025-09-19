@@ -155,9 +155,11 @@ impl ExpressionEvaluator {
             }
 
             // Array and mapping access
-            Expression::ArraySubscript(_, array, index) => {
-                self.evaluate_array_or_mapping_access(array, index.as_ref(), snapshot_id)
-            }
+            Expression::ArraySubscript(_, array, index) => self.evaluate_array_or_mapping_access(
+                array,
+                index.as_ref().map(|v| &**v),
+                snapshot_id,
+            ),
 
             // Function calls
             Expression::FunctionCall(_, func, args) => {
@@ -382,13 +384,13 @@ impl ExpressionEvaluator {
     fn evaluate_array_or_mapping_access(
         &self,
         base: &Expression,
-        index: Option<&Box<Expression>>,
+        index: Option<&Expression>,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
         let index = index.ok_or_else(|| eyre::eyre!("Array/mapping access requires an index"))?;
 
         // Collect all indices for multi-level access
-        let (root, indices) = self.collect_access_chain(base, vec![index.as_ref()], snapshot_id)?;
+        let (root, indices) = self.collect_access_chain(base, vec![index], snapshot_id)?;
 
         // Get the value using all indices at once
         self.get_mapping_or_array_value(root, indices, snapshot_id)
@@ -1056,7 +1058,7 @@ impl ExpressionEvaluator {
                     let addr = Address::from_slice(&addr_bytes[12..]);
                     Ok(DynSolValue::Address(addr))
                 }
-                DynSolValue::FixedBytes(bytes, len) if len == 20 => {
+                DynSolValue::FixedBytes(bytes, 20) => {
                     let addr = Address::from_slice(&bytes[..20]);
                     Ok(DynSolValue::Address(addr))
                 }

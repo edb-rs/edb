@@ -322,7 +322,7 @@ where
         self.frame_stack.push(frame_id);
 
         // Initialize empty snapshot list for this frame if not exists
-        self.snapshots.entry(frame_id).or_insert_with(Vec::new);
+        self.snapshots.entry(frame_id).or_default();
     }
 
     /// Stop tracking current execution frame and increment re-entry count

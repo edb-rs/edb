@@ -143,6 +143,7 @@ where
     /// # Returns
     ///
     /// Returns a finalized [`EngineContext`] ready for debugging operations.
+    #[allow(clippy::too_many_arguments)]
     pub fn build(
         fork_info: ForkInfo,
         cfg: CfgEnv,

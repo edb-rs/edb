@@ -145,16 +145,17 @@ pub struct Engine {
     pub quick: bool,
 }
 
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new(EngineConfig::default())
+    }
+}
+
 impl Engine {
     /// Create a new Engine instance from configuration
     pub fn new(config: EngineConfig) -> Self {
         let EngineConfig { rpc_proxy_url, etherscan_api_key, quick } = config;
         Self { rpc_proxy_url, host_port: None, etherscan_api_key, quick }
-    }
-
-    /// Create an Engine with default configuration
-    pub fn default() -> Self {
-        Self::new(EngineConfig::default())
     }
 
     /// Main preparation method for the engine
@@ -651,7 +652,7 @@ fn extract_code_context(
 
     let file = fs::File::open(file_path).ok()?;
     let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines().filter_map(Result::ok).collect();
+    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
 
     // Convert byte positions to line/column
     let mut current_pos = 0i32;
