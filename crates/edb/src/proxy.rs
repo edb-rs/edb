@@ -67,7 +67,7 @@ async fn proxy_health_check(port: u16) -> Result<Value> {
     });
 
     let response = client
-        .post(&format!("http://127.0.0.1:{}", port))
+        .post(format!("http://127.0.0.1:{port}"))
         .json(&request)
         .timeout(Duration::from_secs(2))
         .send()
@@ -95,7 +95,7 @@ async fn register_with_proxy(port: u16) -> Result<()> {
     });
 
     let response = client
-        .post(&format!("http://127.0.0.1:{}", port))
+        .post(format!("http://127.0.0.1:{port}"))
         .json(&request)
         .timeout(Duration::from_secs(5))
         .send()
@@ -128,7 +128,7 @@ fn start_heartbeat_task(port: u16, interval: u64) {
             });
 
             if let Err(e) = client
-                .post(&format!("http://127.0.0.1:{}", port))
+                .post(format!("http://127.0.0.1:{port}"))
                 .json(&request)
                 .timeout(Duration::from_secs(5))
                 .send()

@@ -34,7 +34,7 @@ pub async fn show_proxy_status(cli: &crate::Cli) -> Result<()> {
     });
 
     let response = client
-        .post(&format!("http://127.0.0.1:{}", cli.proxy_port))
+        .post(format!("http://127.0.0.1:{}", cli.proxy_port))
         .json(&request)
         .timeout(Duration::from_secs(5))
         .send()
@@ -43,7 +43,7 @@ pub async fn show_proxy_status(cli: &crate::Cli) -> Result<()> {
     let response_json: serde_json::Value = response.json().await?;
 
     if let Some(error) = response_json.get("error") {
-        println!("❌ Error getting proxy status: {}", error);
+        println!("❌ Error getting proxy status: {error}");
         return Ok(());
     }
 
@@ -55,7 +55,7 @@ pub async fn show_proxy_status(cli: &crate::Cli) -> Result<()> {
 
         println!("🌐 EDB RPC Proxy Status");
         println!("=====================");
-        println!("📊 Provider Summary: {}/{} healthy", healthy_count, total_count);
+        println!("📊 Provider Summary: {healthy_count}/{total_count} healthy");
         println!();
 
         for (i, provider) in providers.iter().enumerate() {
@@ -69,19 +69,19 @@ pub async fn show_proxy_status(cli: &crate::Cli) -> Result<()> {
             let status_text = if is_healthy { "Healthy" } else { "Unhealthy" };
 
             println!("{}. {} {}", i + 1, status_emoji, status_text);
-            println!("   URL: {}", url);
+            println!("   URL: {url}");
 
             if let Some(rt) = response_time {
-                println!("   Response Time: {}ms", rt);
+                println!("   Response Time: {rt}ms");
             }
 
             if failures > 0 {
-                println!("   Failures: {}", failures);
+                println!("   Failures: {failures}");
             }
 
             if let Some(last) = last_check {
                 if last < 60 {
-                    println!("   Last Check: {}s ago", last);
+                    println!("   Last Check: {last}s ago");
                 } else if last < 3600 {
                     println!("   Last Check: {}m ago", last / 60);
                 } else {
@@ -95,7 +95,7 @@ pub async fn show_proxy_status(cli: &crate::Cli) -> Result<()> {
             println!("⚠️  Warning: No healthy providers available!");
             println!("   The proxy will attempt to health-check providers automatically.");
         } else if healthy_count < total_count {
-            println!("⚠️  Some providers are unhealthy but {} are still working.", healthy_count);
+            println!("⚠️  Some providers are unhealthy but {healthy_count} are still working.");
         } else {
             println!("✨ All providers are healthy!");
         }
