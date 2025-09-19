@@ -136,7 +136,7 @@ where
 
     let json_value = serde_json::to_value(value).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize ABI: {}", e),
+        message: format!("Failed to serialize ABI: {e}"),
         data: None,
     })?;
 

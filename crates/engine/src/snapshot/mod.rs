@@ -273,6 +273,17 @@ where
     }
 }
 
+impl<DB> Default for Snapshots<DB>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone,
+    <CacheDB<DB> as Database>::Error: Clone,
+    <DB as Database>::Error: Clone,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<DB> Snapshots<DB>
 where
     DB: Database + DatabaseCommit + DatabaseRef + Clone,

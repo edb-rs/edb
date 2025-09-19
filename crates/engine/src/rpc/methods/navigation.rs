@@ -53,7 +53,7 @@ where
     // Get the snapshot at the specified index
     let _ = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
         code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
-        message: format!("Snapshot with id {} not found", snapshot_id),
+        message: format!("Snapshot with id {snapshot_id} not found"),
         data: None,
     })?;
 
@@ -68,7 +68,7 @@ where
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(next_call).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize snapshot info: {}", e),
+        message: format!("Failed to serialize snapshot info: {e}"),
         data: None,
     })?;
 
@@ -100,7 +100,7 @@ where
     // Get the snapshot at the specified index
     let _ = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
         code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
-        message: format!("Snapshot with id {} not found", snapshot_id),
+        message: format!("Snapshot with id {snapshot_id} not found"),
         data: None,
     })?;
 
@@ -115,7 +115,7 @@ where
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(prev_call).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize snapshot info: {}", e),
+        message: format!("Failed to serialize snapshot info: {e}"),
         data: None,
     })?;
 
@@ -151,13 +151,13 @@ where
             let analysis_result =
                 context.analysis_results.get(&address).ok_or_else(|| RpcError {
                     code: error_codes::INVALID_ADDRESS,
-                    message: format!("Analysis result for address {} not found", address),
+                    message: format!("Analysis result for address {address} not found"),
                     data: None,
                 })?;
 
             let step_info = analysis_result.usid_to_step.get(&usid).ok_or_else(|| RpcError {
                 code: error_codes::USID_NOT_FOUND,
-                message: format!("Step info for USID {} not found", usid),
+                message: format!("Step info for USID {usid} not found"),
                 data: None,
             })?;
 

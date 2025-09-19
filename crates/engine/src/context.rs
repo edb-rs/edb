@@ -227,11 +227,11 @@ where
         let mut results: HashMap<usize, _> = HashMap::new();
         for (snapshot_id, (_, snapshot)) in self.snapshots.iter().enumerate() {
             if snapshot.is_opcode() {
-                console_bar.set_message(format!("Analyzing step {} w/o source code", snapshot_id));
+                console_bar.set_message(format!("Analyzing step {snapshot_id} w/o source code"));
                 console_bar.inc(1);
                 continue;
             } else {
-                console_bar.set_message(format!("Analyzing step {} with source code", snapshot_id));
+                console_bar.set_message(format!("Analyzing step {snapshot_id} with source code"));
                 console_bar.inc(1);
             }
 
@@ -297,7 +297,7 @@ where
     /// from the target address in cases of delegatecall or proxy contracts.
     pub fn get_bytecode_address(&self, snapshot_id: usize) -> Option<Address> {
         let (frame_id, _) = self.snapshots.get(snapshot_id)?;
-        self.trace.get(frame_id.trace_entry_id()).and_then(|entry| Some(entry.code_address))
+        self.trace.get(frame_id.trace_entry_id()).map(|entry| entry.code_address)
     }
 
     /// Get the target address for a snapshot.
@@ -306,7 +306,7 @@ where
     /// receiving the call in the current execution frame.
     pub fn get_target_address(&self, snapshot_id: usize) -> Option<Address> {
         let (frame_id, _) = self.snapshots.get(snapshot_id)?;
-        self.trace.get(frame_id.trace_entry_id()).and_then(|entry| Some(entry.target))
+        self.trace.get(frame_id.trace_entry_id()).map(|entry| entry.target)
     }
 
     /// Check if one trace entry is the parent of another.

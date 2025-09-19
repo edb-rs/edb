@@ -218,10 +218,10 @@ where
             EdbCachePath::new(None as Option<PathBuf>).etherscan_chain_cache_dir(chain_id);
 
         let cache = EdbCache::<ContractCreationData>::new(etherscan_cache_dir, None)?;
-        let label = format!("contract_creation_{}", addr);
+        let label = format!("contract_creation_{addr}");
 
         if let Some(creation_data) = cache.load_cache(&label) {
-            return Ok(creation_data.transaction_hash.into());
+            Ok(creation_data.transaction_hash)
         } else {
             let etherscan_api_key =
                 self.etherscan_api_key.clone().unwrap_or(next_etherscan_api_key());
@@ -235,7 +235,7 @@ where
             // Get creation tx
             let creation_data = etherscan.contract_creation_data(*addr).await?;
             cache.save_cache(&label, &creation_data)?;
-            Ok(creation_data.transaction_hash.into())
+            Ok(creation_data.transaction_hash)
         }
     }
 }

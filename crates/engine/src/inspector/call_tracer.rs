@@ -119,7 +119,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             caller,
             target,
             code_address,
-            input: inputs.input.bytes(context).clone(),
+            input: inputs.input.bytes(context),
             value: inputs.transfer_value().unwrap_or(U256::ZERO),
             result: None,        // Will be filled in call_end
             events: vec![],      // Will be filled in log

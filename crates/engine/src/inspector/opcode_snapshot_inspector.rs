@@ -288,7 +288,7 @@ where
                     ctx.local()
                         .shared_memory_buffer_slice(range.clone())
                         .map(|slice| Bytes::from(slice.to_vec()))
-                        .unwrap_or_else(|| Bytes::new()),
+                        .unwrap_or_else(Bytes::new),
                 ),
                 revm::interpreter::CallInput::Bytes(bytes) => Arc::new(bytes.clone()),
             }
@@ -322,9 +322,7 @@ where
         self.frame_stack.push(frame_id);
 
         // Initialize empty snapshot list for this frame if not exists
-        if !self.snapshots.contains_key(&frame_id) {
-            self.snapshots.insert(frame_id, Vec::new());
-        }
+        self.snapshots.entry(frame_id).or_insert_with(Vec::new);
     }
 
     /// Stop tracking current execution frame and increment re-entry count
@@ -469,8 +467,8 @@ where
         let total_snapshots: usize = self.values().map(|v| v.len()).sum();
 
         println!("\x1b[33m📊 Overall Statistics:\x1b[0m");
-        println!("  Total frames recorded: \x1b[32m{}\x1b[0m", total_frames);
-        println!("  Total snapshots recorded:  \x1b[32m{}\x1b[0m", total_snapshots);
+        println!("  Total frames recorded: \x1b[32m{total_frames}\x1b[0m");
+        println!("  Total snapshots recorded:  \x1b[32m{total_snapshots}\x1b[0m");
 
         if self.is_empty() {
             println!("\n\x1b[90m  No opcode snapshots were recorded.\x1b[0m");
@@ -550,7 +548,7 @@ where
                 let preview_count = 3.min(snapshots.len());
 
                 // First few snapshots
-                println!("     \x1b[90mFirst {} snapshots:\x1b[0m", preview_count);
+                println!("     \x1b[90mFirst {preview_count} snapshots:\x1b[0m");
                 for (i, snapshot) in snapshots.iter().take(preview_count).enumerate() {
                     self.print_snapshot_line(i, snapshot, "     ");
                 }
@@ -561,7 +559,7 @@ where
                         "     \x1b[90m... {} more snapshots ...\x1b[0m",
                         snapshots.len() - preview_count * 2
                     );
-                    println!("     \x1b[90mLast {} snapshots:\x1b[0m", preview_count);
+                    println!("     \x1b[90mLast {preview_count} snapshots:\x1b[0m");
                     let start_idx = snapshots.len() - preview_count;
                     for (i, snapshot) in snapshots.iter().skip(start_idx).enumerate() {
                         self.print_snapshot_line(start_idx + i, snapshot, "     ");
@@ -579,8 +577,8 @@ where
                     as f64
                     / snapshots.len() as f64;
 
-                println!("     \x1b[90m├─ Avg stack depth: {:.1}\x1b[0m", avg_stack_depth);
-                println!("     \x1b[90m└─ Total memory used: {} bytes\x1b[0m", total_memory);
+                println!("     \x1b[90m├─ Avg stack depth: {avg_stack_depth:.1}\x1b[0m");
+                println!("     \x1b[90m└─ Total memory used: {total_memory} bytes\x1b[0m");
             }
         }
 
@@ -592,7 +590,7 @@ where
     /// Helper to print a single snapshot line
     fn print_snapshot_line(&self, index: usize, snapshot: &OpcodeSnapshot<DB>, indent: &str) {
         let opcode = unsafe { OpCode::new_unchecked(snapshot.opcode) };
-        let opcode_str = format!("{}", opcode.as_str());
+        let opcode_str = opcode.as_str().to_string();
 
         #[allow(deprecated)]
         let addr_short = format!("{:?}", snapshot.bytecode_address);

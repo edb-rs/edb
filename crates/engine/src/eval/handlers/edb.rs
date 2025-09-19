@@ -124,7 +124,7 @@ where
             .with_msg_handler(Box::new(EdbMsgHandler(handler.clone())))
             .with_tx_handler(Box::new(EdbTxHandler(handler.clone())))
             .with_block_handler(Box::new(EdbBlockHandler(handler.clone())))
-            .with_validation_handler(Box::new(EdbValidationHandler(handler.clone())))
+            .with_validation_handler(Box::new(EdbValidationHandler(handler)))
     }
 }
 
@@ -461,7 +461,7 @@ where
             if idx >= stack.len() {
                 bail!("Index {} out of bounds for stack with {} elements", idx, stack.len());
             }
-            Ok(stack[stack.len() - 1 - idx].clone().into())
+            Ok(stack[stack.len() - 1 - idx].into())
         }
         _ => {
             bail!("Invalid argument to edb_stack: expected u256, got {:?}", index);
@@ -862,7 +862,7 @@ where
             .0
             .context
             .trace
-            .get(0)
+            .first()
             .ok_or_else(|| eyre::eyre!("No trace entry found in EdbHandler::get_tx_origin"))?;
 
         Ok(DynSolValue::Address(entry.caller))

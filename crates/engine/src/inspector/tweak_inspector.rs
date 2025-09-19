@@ -180,7 +180,7 @@ impl<'a> TweakInspector<'a> {
             constructor
                 .abi_encode_input(&decoded)
                 .ok()
-                .map(|encoded| &encoded == data)
+                .map(|encoded| encoded == data)
                 .unwrap_or(false)
         } else {
             false

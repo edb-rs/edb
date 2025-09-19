@@ -203,7 +203,7 @@ impl Engine {
         let opcode_snapshots = self.capture_opcode_level_snapshots(
             ctx.clone(),
             tx.clone(),
-            artifacts.keys().into_iter().cloned().collect(),
+            artifacts.keys().cloned().collect(),
             &replay_result.execution_trace,
         )?;
 
@@ -338,15 +338,15 @@ impl Engine {
 
             match compiler.compile(&etherscan, *address).await {
                 Ok(Some(artifact)) => {
-                    console_bar.set_message(format!("✅ 0x{}... compiled", short_addr));
+                    console_bar.set_message(format!("✅ 0x{short_addr}... compiled"));
                     artifacts.insert(*address, artifact);
                 }
                 Ok(None) => {
-                    console_bar.set_message(format!("⚠️  0x{}... no source", short_addr));
+                    console_bar.set_message(format!("⚠️  0x{short_addr}... no source"));
                     debug!("No source code available for contract {}", address);
                 }
                 Err(e) => {
-                    console_bar.set_message(format!("❌ 0x{}... failed", short_addr));
+                    console_bar.set_message(format!("❌ 0x{short_addr}... failed"));
                     warn!("Failed to compile contract {}: {:?}", address, e);
                 }
             }
@@ -571,7 +571,7 @@ impl Engine {
                 eyre::bail!("No recompiled artifact found for address {}", address);
             };
 
-            hook_creation.extend(artifact.find_creation_hooks(&recompiled_artifact));
+            hook_creation.extend(artifact.find_creation_hooks(recompiled_artifact));
         }
 
         Ok(hook_creation)
@@ -693,11 +693,11 @@ fn extract_code_context(
         // Format line with line number
         if line_num >= start_line && line_num <= end_line {
             // Error line - highlight it
-            context.push_str(&format!("  {} | {}\n", line_number, line));
+            context.push_str(&format!("  {line_number} | {line}\n"));
 
             // Add underline for the error position on the first error line
             if line_num == start_line {
-                let padding = format!("  {} | ", line_number).len();
+                let padding = format!("  {line_number} | ").len();
                 let mut underline = " ".repeat(padding + start_col);
                 let underline_len = if start_line == end_line {
                     (end_col - start_col).max(1)
@@ -705,11 +705,11 @@ fn extract_code_context(
                     line.len() - start_col
                 };
                 underline.push_str(&"^".repeat(underline_len));
-                context.push_str(&format!("{}\n", underline));
+                context.push_str(&format!("{underline}\n"));
             }
         } else {
             // Context line
-            context.push_str(&format!("  {} | {}\n", line_number, line));
+            context.push_str(&format!("  {line_number} | {line}\n"));
         }
     }
 
@@ -728,7 +728,7 @@ fn format_compiler_errors(
 
         // Add error severity and type
         if let Some(error_code) = &error.error_code {
-            formatted.push_str(&format!("Error [{}]: ", error_code));
+            formatted.push_str(&format!("Error [{error_code}]: "));
         } else {
             formatted.push_str("Error: ");
         }
@@ -763,7 +763,7 @@ fn format_compiler_errors(
         if !error.secondary_source_locations.is_empty() {
             for sec_loc in &error.secondary_source_locations {
                 if let Some(msg) = &sec_loc.message {
-                    formatted.push_str(&format!("\n  Note: {}", msg));
+                    formatted.push_str(&format!("\n  Note: {msg}"));
                 }
                 if let Some(file) = &sec_loc.file {
                     formatted.push_str(&format!(
@@ -779,7 +779,7 @@ fn format_compiler_errors(
                         let source_file = dump_dir.join(&sanitized_path);
 
                         if let Some(context) = extract_code_context(&source_file, start, end, 1) {
-                            formatted.push_str("\n");
+                            formatted.push('\n');
                             formatted.push_str(&context);
                         }
                     }
@@ -805,7 +805,7 @@ fn dump_source_for_debugging(
 
     // Create temp directories
     let temp_dir = std::env::temp_dir();
-    let debug_dir = temp_dir.join(format!("edb_debug_{}", address));
+    let debug_dir = temp_dir.join(format!("edb_debug_{address}"));
     let original_dir = debug_dir.join("original");
     let instrumented_dir = debug_dir.join("instrumented");
 

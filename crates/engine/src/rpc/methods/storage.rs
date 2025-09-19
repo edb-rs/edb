@@ -49,7 +49,7 @@ where
 
     let (f_id, snapshot) = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
         code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
-        message: format!("Snapshot with id {} not found", snapshot_id),
+        message: format!("Snapshot with id {snapshot_id} not found"),
         data: None,
     })?;
 
@@ -58,7 +58,7 @@ where
         .get(f_id.trace_entry_id())
         .ok_or_else(|| RpcError {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Execution frame id {} not found in trace", f_id),
+            message: format!("Execution frame id {f_id} not found in trace"),
             data: None,
         })?
         .target;
@@ -74,7 +74,7 @@ where
 
     let src_db = context
         .snapshots
-        .get(0)
+        .first()
         .ok_or_else(|| RpcError {
             code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
             message: "Initial snapshot (id 0) not found".to_string(),
@@ -87,10 +87,7 @@ where
     for (slot, dst_value) in dst_cached_storage.iter() {
         let src_value = src_db.storage_ref(target_address, *slot).map_err(|e| RpcError {
             code: error_codes::INTERNAL_ERROR,
-            message: format!(
-                "Failed to retrieve storage at {} for slot {}: {}",
-                target_address, slot, e
-            ),
+            message: format!("Failed to retrieve storage at {target_address} for slot {slot}: {e}"),
             data: None,
         })?;
         if &src_value != dst_value {
@@ -101,7 +98,7 @@ where
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(changes).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize snapshot info: {}", e),
+        message: format!("Failed to serialize snapshot info: {e}"),
         data: None,
     })?;
 
@@ -144,7 +141,7 @@ where
 
     let (f_id, snapshot) = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
         code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
-        message: format!("Snapshot with id {} not found", snapshot_id),
+        message: format!("Snapshot with id {snapshot_id} not found"),
         data: None,
     })?;
 
@@ -153,7 +150,7 @@ where
         .get(f_id.trace_entry_id())
         .ok_or_else(|| RpcError {
             code: error_codes::INTERNAL_ERROR,
-            message: format!("Execution frame id {} not found in trace", f_id),
+            message: format!("Execution frame id {f_id} not found in trace"),
             data: None,
         })?
         .target;
@@ -161,17 +158,14 @@ where
     let db = snapshot.db();
     let value = db.storage_ref(target_address, slot).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!(
-            "Failed to retrieve storage at {} for slot {}: {}",
-            target_address, slot, e
-        ),
+        message: format!("Failed to retrieve storage at {target_address} for slot {slot}: {e}"),
         data: None,
     })?;
 
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(value).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize snapshot info: {}", e),
+        message: format!("Failed to serialize snapshot info: {e}"),
         data: None,
     })?;
 

@@ -55,7 +55,7 @@ impl DisassemblyInstruction {
     /// Check if this instruction is a PUSH instruction
     pub fn is_push(&self) -> bool {
         let opcode_byte = self.opcode.get();
-        opcode_byte >= 0x60 && opcode_byte <= 0x7F
+        (0x60..=0x7F).contains(&opcode_byte)
     }
 
     /// Get the size of the immediate data for this instruction
@@ -149,7 +149,7 @@ pub fn disassemble(bytecode: &Bytes) -> DisassemblyResult {
         let opcode = unsafe { OpCode::new_unchecked(opcode_byte) };
 
         // Handle PUSH instructions (PUSH1 through PUSH32)
-        if opcode_byte >= 0x60 && opcode_byte <= 0x7F {
+        if (0x60..=0x7F).contains(&opcode_byte) {
             // PUSHX instruction
             let push_size = (opcode_byte - 0x60 + 1) as usize;
             let data_start = pc + 1;
@@ -248,11 +248,10 @@ pub fn format_instruction(instruction: &DisassemblyInstruction, show_pc: bool) -
     };
 
     if instruction.is_push() && !instruction.push_data.is_empty() {
-        let hex_data =
-            instruction.push_data.iter().map(|b| format!("{:02x}", b)).collect::<String>();
-        format!("{}{} 0x{}", pc_part, opcode_name, hex_data)
+        let hex_data = instruction.push_data.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        format!("{pc_part}{opcode_name} 0x{hex_data}")
     } else {
-        format!("{}{}", pc_part, opcode_name)
+        format!("{pc_part}{opcode_name}")
     }
 }
 

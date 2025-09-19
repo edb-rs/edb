@@ -75,7 +75,7 @@ where
 
     let json_value = serde_json::to_value(abi).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize ABI: {}", e),
+        message: format!("Failed to serialize ABI: {e}"),
         data: None,
     })?;
 
@@ -143,16 +143,14 @@ where
         .into_iter()
         .filter_map(|(addr, ty)| {
             context.recompiled_artifacts.get(&addr).and_then(|artifact| {
-                artifact
-                    .contract()
-                    .and_then(|contract| Some(parse_callable_abi_info(addr, contract, ty)))
+                artifact.contract().map(|contract| parse_callable_abi_info(addr, contract, ty))
             })
         })
         .collect::<Vec<CallableAbiInfo>>();
 
     let json_value = serde_json::to_value(abi_info).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize callable ABI: {}", e),
+        message: format!("Failed to serialize callable ABI: {e}"),
         data: None,
     })?;
 

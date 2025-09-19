@@ -96,7 +96,7 @@ pub fn internal_error(message: &str) -> crate::rpc::types::RpcError {
 pub fn method_not_found(method: &str) -> crate::rpc::types::RpcError {
     to_rpc_error(
         crate::rpc::types::error_codes::METHOD_NOT_FOUND,
-        &format!("Method '{}' not found", method),
+        &format!("Method '{method}' not found"),
         None,
     )
 }

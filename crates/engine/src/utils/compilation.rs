@@ -150,9 +150,9 @@ pub fn get_compilation_input_from_metadata(meta: &Metadata, addr: Address) -> Re
                 let addr = parts.next()?;
 
                 if addr.starts_with("0x") {
-                    Some(format!("{}:{}:{}", file, name, addr))
+                    Some(format!("{file}:{name}:{addr}"))
                 } else {
-                    Some(format!("{}:{}:0x{}", file, name, addr))
+                    Some(format!("{file}:{name}:0x{addr}"))
                 }
             })
             .collect::<Vec<_>>();

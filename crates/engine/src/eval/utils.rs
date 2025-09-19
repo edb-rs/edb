@@ -48,9 +48,9 @@ use solang_parser::{
 pub fn parse_input(input: &str) -> Result<Expression> {
     let trimmed = input.trim();
     let wrapped_input = if trimmed.ends_with(";") {
-        format!("function __edb_sol_repl_() public {{ {} }}", trimmed)
+        format!("function __edb_sol_repl_() public {{ {trimmed} }}")
     } else {
-        format!("function __edb_sol_repl_() public {{ {}; }}", trimmed)
+        format!("function __edb_sol_repl_() public {{ {trimmed}; }}")
     };
 
     let (SourceUnit(parts), _comments) = parse(&wrapped_input, 0).map_err(|e| {

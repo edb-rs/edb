@@ -93,6 +93,12 @@ pub struct SimulationDebugHandler {
     verbose: bool,
 }
 
+impl Default for SimulationDebugHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimulationDebugHandler {
     /// Create a new simulation debug handler
     pub fn new() -> Self {
@@ -168,7 +174,7 @@ impl SimulationDebugHandler {
                 DynSolValue::Bool(true) // Default boolean
             }
             name if name.contains("name") || name.contains("symbol") || name.contains("uri") => {
-                DynSolValue::String(format!("Mock_{}", name)) // Mock string
+                DynSolValue::String(format!("Mock_{name}")) // Mock string
             }
             _ => DynSolValue::Uint(U256::from(42), 256), // Default fallback
         }
@@ -192,7 +198,7 @@ impl MappingArrayHandler for DebugHandler {
         indices: Vec<DynSolValue>,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        let indices_str = indices.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(", ");
+        let indices_str = indices.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
         bail!(
             "DebugHandler::get_mapping_or_array_value called with root={:?}, indices=[{}], snapshot_id={}",
             root,
@@ -210,8 +216,8 @@ impl FunctionCallHandler for DebugHandler {
         callee: Option<&DynSolValue>,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        let args_str = args.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(", ");
-        let callee_str = callee.map(|c| format!("{:?}", c)).unwrap_or_else(|| "None".to_string());
+        let args_str = args.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
+        let callee_str = callee.map(|c| format!("{c:?}")).unwrap_or_else(|| "None".to_string());
         bail!(
             "DebugHandler::call_function called with name='{}', args=[{}], callee={}, snapshot_id={}",
             name,
@@ -273,21 +279,18 @@ impl ValidationHandler for DebugHandler {
 // Implement handler traits for SimulationDebugHandler
 impl VariableHandler for SimulationDebugHandler {
     fn get_variable_value(&self, name: &str, snapshot_id: usize) -> Result<DynSolValue> {
-        self.log_operation(format!(
-            "get_variable_value: name='{}', snapshot_id={}",
-            name, snapshot_id
-        ));
+        self.log_operation(format!("get_variable_value: name='{name}', snapshot_id={snapshot_id}"));
 
         if let Ok(vars) = self.variables.lock() {
             if let Some(value) = vars.get(name) {
-                self.log_operation(format!("  -> returning stored value: {:?}", value));
+                self.log_operation(format!("  -> returning stored value: {value:?}"));
                 return Ok(value.clone());
             }
         }
 
         // Generate a plausible default based on variable name
         let default_value = self.generate_default_value(name);
-        self.log_operation(format!("  -> generating default value: {:?}", default_value));
+        self.log_operation(format!("  -> generating default value: {default_value:?}"));
         Ok(default_value)
     }
 }
@@ -299,10 +302,9 @@ impl MappingArrayHandler for SimulationDebugHandler {
         indices: Vec<DynSolValue>,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        let indices_str = indices.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(", ");
+        let indices_str = indices.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
         self.log_operation(format!(
-            "get_mapping_or_array_value: root={:?}, indices=[{}], snapshot_id={}",
-            root, indices_str, snapshot_id
+            "get_mapping_or_array_value: root={root:?}, indices=[{indices_str}], snapshot_id={snapshot_id}"
         ));
 
         // For arrays, return a mock element
@@ -323,7 +325,7 @@ impl MappingArrayHandler for SimulationDebugHandler {
             _ => DynSolValue::Uint(U256::from(42), 256),
         };
 
-        self.log_operation(format!("  -> returning: {:?}", result));
+        self.log_operation(format!("  -> returning: {result:?}"));
         Ok(result)
     }
 }
@@ -336,16 +338,15 @@ impl FunctionCallHandler for SimulationDebugHandler {
         callee: Option<&DynSolValue>,
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
-        let args_str = args.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(", ");
-        let callee_str = callee.map(|c| format!("{:?}", c)).unwrap_or_else(|| "None".to_string());
+        let args_str = args.iter().map(|v| format!("{v:?}")).collect::<Vec<_>>().join(", ");
+        let callee_str = callee.map(|c| format!("{c:?}")).unwrap_or_else(|| "None".to_string());
         self.log_operation(format!(
-            "call_function: name='{}', args=[{}], callee={}, snapshot_id={}",
-            name, args_str, callee_str, snapshot_id
+            "call_function: name='{name}', args=[{args_str}], callee={callee_str}, snapshot_id={snapshot_id}"
         ));
 
         if let Ok(funcs) = self.functions.lock() {
             if let Some(value) = funcs.get(name) {
-                self.log_operation(format!("  -> returning stored value: {:?}", value));
+                self.log_operation(format!("  -> returning stored value: {value:?}"));
                 return Ok(value.clone());
             }
         }
@@ -361,7 +362,7 @@ impl FunctionCallHandler for SimulationDebugHandler {
             _ => self.generate_default_value(name),
         };
 
-        self.log_operation(format!("  -> returning generated value: {:?}", result));
+        self.log_operation(format!("  -> returning generated value: {result:?}"));
         Ok(result)
     }
 }
@@ -374,8 +375,7 @@ impl MemberAccessHandler for SimulationDebugHandler {
         snapshot_id: usize,
     ) -> Result<DynSolValue> {
         self.log_operation(format!(
-            "access_member: value={:?}, member='{}', snapshot_id={}",
-            value, member, snapshot_id
+            "access_member: value={value:?}, member='{member}', snapshot_id={snapshot_id}"
         ));
 
         // Handle common member accesses
@@ -386,48 +386,48 @@ impl MemberAccessHandler for SimulationDebugHandler {
             _ => self.generate_default_value(member),
         };
 
-        self.log_operation(format!("  -> returning: {:?}", result));
+        self.log_operation(format!("  -> returning: {result:?}"));
         Ok(result)
     }
 }
 
 impl MsgHandler for SimulationDebugHandler {
     fn get_msg_sender(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        self.log_operation(format!("get_msg_sender: snapshot_id={}", snapshot_id));
+        self.log_operation(format!("get_msg_sender: snapshot_id={snapshot_id}"));
         let result = DynSolValue::Address(Address::from([0x42; 20])); // Mock sender
-        self.log_operation(format!("  -> returning: {:?}", result));
+        self.log_operation(format!("  -> returning: {result:?}"));
         Ok(result)
     }
 
     fn get_msg_value(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        self.log_operation(format!("get_msg_value: snapshot_id={}", snapshot_id));
+        self.log_operation(format!("get_msg_value: snapshot_id={snapshot_id}"));
         let result = DynSolValue::Uint(U256::from(1000000000000000000u64), 256); // 1 ETH
-        self.log_operation(format!("  -> returning: {:?}", result));
+        self.log_operation(format!("  -> returning: {result:?}"));
         Ok(result)
     }
 }
 
 impl TxHandler for SimulationDebugHandler {
     fn get_tx_origin(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        self.log_operation(format!("get_tx_origin: snapshot_id={}", snapshot_id));
+        self.log_operation(format!("get_tx_origin: snapshot_id={snapshot_id}"));
         let result = DynSolValue::Address(Address::from([0x11; 20])); // Mock origin
-        self.log_operation(format!("  -> returning: {:?}", result));
+        self.log_operation(format!("  -> returning: {result:?}"));
         Ok(result)
     }
 }
 
 impl BlockHandler for SimulationDebugHandler {
     fn get_block_number(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        self.log_operation(format!("get_block_number: snapshot_id={}", snapshot_id));
+        self.log_operation(format!("get_block_number: snapshot_id={snapshot_id}"));
         let result = DynSolValue::Uint(U256::from(18500000), 256); // Mock block number
-        self.log_operation(format!("  -> returning: {:?}", result));
+        self.log_operation(format!("  -> returning: {result:?}"));
         Ok(result)
     }
 
     fn get_block_timestamp(&self, snapshot_id: usize) -> Result<DynSolValue> {
-        self.log_operation(format!("get_block_timestamp: snapshot_id={}", snapshot_id));
+        self.log_operation(format!("get_block_timestamp: snapshot_id={snapshot_id}"));
         let result = DynSolValue::Uint(U256::from(1700000000), 256); // Mock timestamp
-        self.log_operation(format!("  -> returning: {:?}", result));
+        self.log_operation(format!("  -> returning: {result:?}"));
         Ok(result)
     }
 }

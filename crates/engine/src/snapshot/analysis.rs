@@ -464,54 +464,54 @@ enum FunctionInfo {
 impl FunctionInfo {
     fn contains_ufid(&self, ufid: UFID) -> bool {
         match self {
-            FunctionInfo::Unknown => false,
-            FunctionInfo::ModifierOnly(ids) => ids.contains(&ufid),
-            FunctionInfo::FunctionOnly(id) => *id == ufid,
-            FunctionInfo::ModifiedFunction { func, modifiers } => {
+            Self::Unknown => false,
+            Self::ModifierOnly(ids) => ids.contains(&ufid),
+            Self::FunctionOnly(id) => *id == ufid,
+            Self::ModifiedFunction { func, modifiers } => {
                 *func == ufid || modifiers.contains(&ufid)
             }
-            FunctionInfo::INVALID => false,
+            Self::INVALID => false,
         }
     }
 
     fn is_valid(&self) -> bool {
-        !matches!(self, FunctionInfo::INVALID)
+        !matches!(self, Self::INVALID)
     }
 
     fn _certainly_in_body(&self) -> bool {
         match self {
-            FunctionInfo::FunctionOnly(..) | FunctionInfo::ModifiedFunction { .. } => true,
+            Self::FunctionOnly(..) | Self::ModifiedFunction { .. } => true,
             _ => false,
         }
     }
 
     fn with_modifier(&mut self, modifier: UFID) {
         match self {
-            FunctionInfo::Unknown => {
-                *self = FunctionInfo::ModifierOnly(vec![modifier]);
+            Self::Unknown => {
+                *self = Self::ModifierOnly(vec![modifier]);
             }
-            FunctionInfo::ModifierOnly(ids) => {
+            Self::ModifierOnly(ids) => {
                 ids.push(modifier);
             }
-            FunctionInfo::FunctionOnly(func) => {
-                *self = FunctionInfo::ModifiedFunction { func: *func, modifiers: vec![modifier] };
+            Self::FunctionOnly(func) => {
+                *self = Self::ModifiedFunction { func: *func, modifiers: vec![modifier] };
             }
-            FunctionInfo::ModifiedFunction { modifiers, .. } => {
+            Self::ModifiedFunction { modifiers, .. } => {
                 modifiers.push(modifier);
             }
-            FunctionInfo::INVALID => {}
+            Self::INVALID => {}
         }
     }
 
     fn with_function(&mut self, function: UFID) {
         match self {
-            FunctionInfo::Unknown => *self = FunctionInfo::FunctionOnly(function),
-            FunctionInfo::ModifierOnly(ids) => {
-                *self = FunctionInfo::ModifiedFunction { func: function, modifiers: ids.clone() }
+            Self::Unknown => *self = Self::FunctionOnly(function),
+            Self::ModifierOnly(ids) => {
+                *self = Self::ModifiedFunction { func: function, modifiers: ids.clone() }
             }
-            FunctionInfo::FunctionOnly(..) => *self = FunctionInfo::INVALID,
-            FunctionInfo::ModifiedFunction { .. } => *self = FunctionInfo::INVALID,
-            FunctionInfo::INVALID => {}
+            Self::FunctionOnly(..) => *self = Self::INVALID,
+            Self::ModifiedFunction { .. } => *self = Self::INVALID,
+            Self::INVALID => {}
         }
     }
 }

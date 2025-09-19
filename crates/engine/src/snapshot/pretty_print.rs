@@ -244,13 +244,12 @@ where
         );
 
         println!(
-            "       └─ Type: \x1b[33m{}\x1b[0m | Snapshots: \x1b[32m{}\x1b[0m",
-            frame_type, total_count
+            "       └─ Type: \x1b[33m{frame_type}\x1b[0m | Snapshots: \x1b[32m{total_count}\x1b[0m"
         );
 
         if hook_count > 0 && opcode_count > 0 {
-            println!("          ├─ Hook snapshots: \x1b[32m{}\x1b[0m", hook_count);
-            println!("          └─ Opcode snapshots: \x1b[32m{}\x1b[0m", opcode_count);
+            println!("          ├─ Hook snapshots: \x1b[32m{hook_count}\x1b[0m");
+            println!("          └─ Opcode snapshots: \x1b[32m{opcode_count}\x1b[0m");
         } else if hook_count > 0 {
             // Show hook details
             self.print_hook_details(snapshots, "          ");
@@ -337,7 +336,7 @@ where
         } else {
             let min_pc = opcode_snapshots.iter().map(|s| s.pc).min().unwrap_or(0);
             let max_pc = opcode_snapshots.iter().map(|s| s.pc).max().unwrap_or(0);
-            format!("PC {}..{}", min_pc, max_pc)
+            format!("PC {min_pc}..{max_pc}")
         };
 
         let avg_stack: f64 = if !opcode_snapshots.is_empty() {
@@ -347,7 +346,7 @@ where
             0.0
         };
 
-        println!("{}├─ Range: \x1b[36m{}\x1b[0m", indent, pc_range);
-        println!("{}└─ Avg stack depth: \x1b[36m{:.1}\x1b[0m", indent, avg_stack);
+        println!("{indent}├─ Range: \x1b[36m{pc_range}\x1b[0m");
+        println!("{indent}└─ Avg stack depth: \x1b[36m{avg_stack:.1}\x1b[0m");
     }
 }

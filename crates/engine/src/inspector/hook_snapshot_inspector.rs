@@ -332,7 +332,7 @@ where
         let address = self
             .current_frame_id()
             .and_then(|frame_id| self.trace.get(frame_id.trace_entry_id()))
-            .and_then(|entry| Some(entry.code_address))
+            .map(|entry| entry.code_address)
             .unwrap_or(interp.input.target_address());
 
         let usid_opt = if data.len() >= 32 {
@@ -405,7 +405,7 @@ where
         let address = self
             .current_frame_id()
             .and_then(|frame_id| self.trace.get(frame_id.trace_entry_id()))
-            .and_then(|entry| Some(entry.code_address))
+            .map(|entry| entry.code_address)
             .unwrap_or(interp.input.target_address());
 
         // The data is decoded as (uint256 magic, uint256 uvid, abi.encode(value))
@@ -700,8 +700,8 @@ where
         let hook_frames = self.get_frames_with_hooks().len();
 
         println!("\x1b[33m📊 Overall Statistics:\x1b[0m");
-        println!("  Total frames tracked: \x1b[32m{}\x1b[0m", total_frames);
-        println!("  Frames with hooks: \x1b[32m{}\x1b[0m", hook_frames);
+        println!("  Total frames tracked: \x1b[32m{total_frames}\x1b[0m");
+        println!("  Frames with hooks: \x1b[32m{hook_frames}\x1b[0m");
         println!(
             "  Hook trigger rate: \x1b[32m{:.1}%\x1b[0m",
             if total_frames > 0 { hook_frames as f64 / total_frames as f64 * 100.0 } else { 0.0 }
@@ -774,7 +774,7 @@ where
 
                 // Show addresses (usually just one per frame)
                 for address in &addresses {
-                    println!("          ├─ Address: \x1b[36m{:?}\x1b[0m", address);
+                    println!("          ├─ Address: \x1b[36m{address:?}\x1b[0m");
                 }
 
                 // Show USIDs in execution order with smart formatting

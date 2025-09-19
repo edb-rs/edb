@@ -554,7 +554,7 @@ impl ExpressionEvaluator {
             // String concatenation
             ("concat", DynSolValue::String(s), 1) => {
                 if let DynSolValue::String(other) = &args[0] {
-                    Ok(Some(DynSolValue::String(format!("{}{}", s, other))))
+                    Ok(Some(DynSolValue::String(format!("{s}{other}"))))
                 } else {
                     Ok(None)
                 }
@@ -907,7 +907,7 @@ impl ExpressionEvaluator {
             DynSolValue::Uint(v, bits) => {
                 // Convert to signed integer and negate
                 let signed = I256::from_raw(v);
-                Ok(DynSolValue::Int(-signed, bits as usize))
+                Ok(DynSolValue::Int(-signed, bits))
             }
             DynSolValue::Int(v, bits) => Ok(DynSolValue::Int(-v, bits)),
             _ => bail!("Unary minus requires numeric type"),
@@ -996,7 +996,7 @@ impl ExpressionEvaluator {
             let cleaned = hex_str.replace(['_', ' '], "");
 
             // Ensure even number of characters
-            let hex = if cleaned.len() % 2 != 0 { format!("0{}", cleaned) } else { cleaned };
+            let hex = if cleaned.len() % 2 != 0 { format!("0{cleaned}") } else { cleaned };
 
             // Convert hex string to bytes
             for chunk in hex.as_bytes().chunks(2) {

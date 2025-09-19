@@ -120,7 +120,7 @@ where
             // Unimplemented methods
             _ => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,
-                message: format!("Method '{}' not found", method),
+                message: format!("Method '{method}' not found"),
                 data: None,
             }),
         }

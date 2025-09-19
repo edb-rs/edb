@@ -80,7 +80,7 @@ where
     // Get the snapshot at the specified index
     let (frame_id, snapshot) = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
         code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
-        message: format!("Snapshot with id {} not found", snapshot_id),
+        message: format!("Snapshot with id {snapshot_id} not found"),
         data: None,
     })?;
 
@@ -129,7 +129,7 @@ where
             let analysis_result =
                 context.analysis_results.get(&bytecode_address).ok_or_else(|| RpcError {
                     code: error_codes::INVALID_ADDRESS,
-                    message: format!("No analysis result found for address {}", bytecode_address),
+                    message: format!("No analysis result found for address {bytecode_address}"),
                     data: None,
                 })?;
 
@@ -149,7 +149,7 @@ where
             let source_analysis =
                 analysis_result.sources.get(&source_index).ok_or_else(|| RpcError {
                     code: error_codes::CODE_NOT_FOUND,
-                    message: format!("No source analysis found for index {}", source_index),
+                    message: format!("No source analysis found for index {source_index}"),
                     data: None,
                 })?;
 
@@ -190,7 +190,7 @@ where
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(snapshot_info).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize snapshot info: {}", e),
+        message: format!("Failed to serialize snapshot info: {e}"),
         data: None,
     })?;
 
@@ -220,9 +220,9 @@ where
     <DB as Database>::Error: Clone + Send + Sync,
 {
     let total_snapshots = context.snapshots.len();
-    Ok(serde_json::to_value(total_snapshots).map_err(|e| RpcError {
+    serde_json::to_value(total_snapshots).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize total snapshots: {}", e),
+        message: format!("Failed to serialize total snapshots: {e}"),
         data: None,
-    })?)
+    })
 }

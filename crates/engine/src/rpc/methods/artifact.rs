@@ -64,7 +64,7 @@ where
     // Get the snapshot at the specified index
     let (frame_id, snapshot) = context.snapshots.get(snapshot_id).ok_or_else(|| RpcError {
         code: error_codes::SNAPSHOT_OUT_OF_BOUNDS,
-        message: format!("Snapshot with id {} not found", snapshot_id),
+        message: format!("Snapshot with id {snapshot_id} not found"),
         data: None,
     })?;
 
@@ -87,7 +87,7 @@ where
                 data: None,
             })?;
 
-            let disasm_result = disassemble(&bytecode);
+            let disasm_result = disassemble(bytecode);
 
             let mut codes = HashMap::new();
             for instruction in disasm_result.instructions {
@@ -108,7 +108,7 @@ where
             // Get the artifact for this address
             let artifact = context.artifacts.get(&bytecode_address).ok_or_else(|| RpcError {
                 code: error_codes::INVALID_ADDRESS,
-                message: format!("No artifact found for address {}", bytecode_address),
+                message: format!("No artifact found for address {bytecode_address}"),
                 data: None,
             })?;
 
@@ -125,7 +125,7 @@ where
     // Serialize the Code enum to JSON
     let json_value = serde_json::to_value(code).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize code: {}", e),
+        message: format!("Failed to serialize code: {e}"),
         data: None,
     })?;
 
@@ -159,7 +159,7 @@ where
 
     let json_value = serde_json::to_value(args).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize ABI: {}", e),
+        message: format!("Failed to serialize ABI: {e}"),
         data: None,
     })?;
 
