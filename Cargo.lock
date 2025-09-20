@@ -2029,6 +2029,7 @@ dependencies = [
  "dotenv",
  "edb-common",
  "edb-engine",
+ "edb-tui",
  "edb-webui",
  "eyre",
  "foundry-compilers",
