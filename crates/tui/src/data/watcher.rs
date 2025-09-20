@@ -14,17 +14,27 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+use std::collections::HashSet;
+
 /// Watcher for monitoring user-defined expressions
 #[derive(Debug, Clone, Default)]
 pub struct Watcher {
     /// Expressions being monitored
     expressions: Vec<String>,
+    /// Keys of the expressions in the current state
+    expression_keys: HashSet<String>,
+}
+
+fn normalize_expression(expr: &str) -> String {
+    expr.chars().filter(|&c| !c.is_whitespace()).collect()
 }
 
 impl Watcher {
     /// Add a new expression to the watcher
     pub fn add_expression(&mut self, expr: String) -> Option<usize> {
-        if !self.expressions.contains(&expr) {
+        let expr_key = normalize_expression(&expr);
+        if !self.expression_keys.contains(&expr_key) {
+            self.expression_keys.insert(expr_key);
             self.expressions.push(expr);
             Some(self.expressions.len()) // Return 1-based index
         } else {
@@ -35,7 +45,10 @@ impl Watcher {
     /// Remove an expression from the watcher
     pub fn remove_expression(&mut self, expr_id: usize) -> Option<String> {
         if expr_id > 0 && expr_id <= self.expressions.len() {
-            Some(self.expressions.remove(expr_id.saturating_sub(1))) // Convert to 0-based index
+            let expr = self.expressions.remove(expr_id.saturating_sub(1));
+            let expr_key = normalize_expression(&expr);
+            self.expression_keys.remove(&expr_key);
+            Some(expr)
         } else {
             None
         }

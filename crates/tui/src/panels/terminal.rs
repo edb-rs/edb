@@ -886,12 +886,12 @@ impl TerminalPanel {
                     self.add_error("Usage: watch add <expr>");
                     return;
                 }
-                let expr = args[..].trim();
+                let expr = args[3..].trim();
                 if !expr.starts_with('$') {
                     self.add_error("Watch expression must start with '$'");
                     return;
                 }
-                match dm.watcher.add_expression(expr.to_string()) {
+                match dm.watcher.add_expression(expr[1..].trim().to_string()) {
                     Some(id) => {
                         self.add_output(&format!("Added watch #{id}: {expr}"));
                     }
@@ -946,6 +946,7 @@ impl TerminalPanel {
                 self.add_output("Usage:");
                 self.add_output("  watch add <expr>    - Add watch expression");
                 self.add_output("  watch remove <id>   - Remove watch expression");
+                self.add_output("  watch list          - List all watch expressions");
                 self.add_output("  watch clear         - Clear all watch expressions");
             }
         }

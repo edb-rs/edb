@@ -40,6 +40,7 @@ use ratatui::{
     Frame,
 };
 use revm::state::TransientStorage;
+use std::cmp::Ordering;
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -50,6 +51,8 @@ use tracing::debug;
 /// Variable display category for hooked snapshots
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum VariableCategory {
+    /// Expression watches
+    Expression,
     /// Local variables from current scope
     Local,
     /// State variables (contract storage)
@@ -60,7 +63,10 @@ pub enum VariableCategory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayMode {
     /// Show variables (both local and state, for hooked snapshots)
+    /// Special note: variables will also include expressions in hooked snapshots
     Variables,
+    /// Show expression watches (for both opcode and hooked snapshots)
+    Expressions,
     /// Show breakpoints (for hooked snapshots)
     _Breakpoints,
     /// Show current stack (for opcode snapshots)
@@ -76,12 +82,14 @@ pub enum DisplayMode {
 }
 
 /// Represents a variable entry for display
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct VariableEntry {
     name: String,
     value: Option<Arc<EdbSolValue>>,
     category: VariableCategory,
     is_multi_line: bool,
+    /// For expressions, stores the original expression text
+    expression: Option<String>,
 }
 
 impl DisplayMode {
@@ -89,6 +97,7 @@ impl DisplayMode {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Variables => "Variables",
+            Self::Expressions => "Expressions",
             Self::_Breakpoints => "Breakpoints",
             Self::Stack => "Stack",
             Self::Memory => "Memory",
@@ -187,6 +196,10 @@ pub struct DisplayPanel {
     variables: Vec<VariableEntry>,
     /// Variables that are toggled to multi-line (persisted by name)
     multi_line_variables: HashSet<String>,
+    /// Expression watch entries
+    expressions: Vec<VariableEntry>,
+    /// Expressions that are toggled to multi-line (persisted by expression)
+    multi_line_expressions: HashSet<String>,
     /// Cached display line count for storage mode
     storage_display_lines: usize,
     /// Cached display line count for transient storage mode
@@ -220,6 +233,9 @@ impl DisplayPanel {
             prev_stack: None,
             variables: Vec::new(),
             multi_line_variables: HashSet::new(),
+            expressions: Vec::new(),
+            multi_line_expressions: HashSet::new(),
+            // Mocked data for breakpoints
             breakpoints: vec![
                 "Line 42: Transfer.sol - require(balance >= amount)".to_string(),
                 "Line 58: Token.sol - emit Transfer(from, to, amount)".to_string(),
@@ -233,6 +249,12 @@ impl DisplayPanel {
     /// Update snapshot data from data manager
     fn update_snapshot_data(&mut self, dm: &mut DataManager) -> Option<()> {
         let current_snapshot = dm.execution.get_current_snapshot();
+
+        // Expressions could be updated anytime (and hence forcing variables to refresh)
+        if self.update_expression_watches(dm, current_snapshot) {
+            self.variables.retain(|var| var.category != VariableCategory::Expression);
+            self.variables.splice(0..0, self.expressions.iter().cloned());
+        }
 
         // Check if snapshot changed
         if self.current_execution_snapshot == Some(current_snapshot) {
@@ -252,6 +274,7 @@ impl DisplayPanel {
                     DisplayMode::CallData,
                     DisplayMode::Storage,
                     DisplayMode::TransientStorage,
+                    DisplayMode::Expressions,
                 ];
 
                 // Update opcode-specific data
@@ -288,7 +311,9 @@ impl DisplayPanel {
 
     /// Update data for hook snapshots
     fn update_hook_data(&mut self, hook_detail: &HookSnapshotInfoDetail) {
+        // Let's include expression first
         self.variables.clear();
+        self.variables.extend(self.expressions.clone());
 
         // Extract local variables
         for (name, value_opt) in &hook_detail.locals {
@@ -298,6 +323,7 @@ impl DisplayPanel {
                 value: value_opt.clone(),
                 category: VariableCategory::Local,
                 is_multi_line,
+                expression: None,
             });
         }
 
@@ -309,12 +335,13 @@ impl DisplayPanel {
                 value: value_opt.clone(),
                 category: VariableCategory::State,
                 is_multi_line,
+                expression: None,
             });
         }
 
         // Sort variables by:
-        // 1. Category: Local (0) before State (1)
-        // 2. Value availability: has value (0) before None (1)
+        // 1. Category: Expression (0), Local (1), and State (1)
+        // 2. Value availability (non-expr): has value (0) before None (1)
         // 3. Name: alphabetical
         self.variables.sort_by(|a, b| {
             let a_has_value = if a.value.is_some() { 0 } else { 1 };
@@ -322,7 +349,11 @@ impl DisplayPanel {
 
             a.category
                 .cmp(&b.category)
-                .then(a_has_value.cmp(&b_has_value))
+                .then(if a.category == VariableCategory::Expression {
+                    Ordering::Equal
+                } else {
+                    a_has_value.cmp(&b_has_value)
+                })
                 .then(a.name.cmp(&b.name))
         });
     }
@@ -538,6 +569,10 @@ impl DisplayPanel {
                 // Calculate actual max width for variables by formatting each entry
                 self.calculate_variables_max_width(dm)
             }
+            DisplayMode::Expressions => {
+                // Calculate actual max width for expressions by formatting each entry
+                self.calculate_expressions_max_width(dm)
+            }
             DisplayMode::_Breakpoints => {
                 self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0)
             }
@@ -635,12 +670,13 @@ impl DisplayPanel {
     ) -> Vec<Span<'static>> {
         // Add category prefix for better organization
         let prefix = match entry.category {
-            VariableCategory::Local => "🔹 ", // Blue diamond for local
-            VariableCategory::State => "🔸 ", // Orange diamond for state
+            VariableCategory::Local => "🔵 ",      // Blue circle for local
+            VariableCategory::State => "🟠 ",      // Orange circle for state
+            VariableCategory::Expression => "🟢 ", // Green circle for expressions
         };
 
         let mut spans = vec![Span::raw(prefix.to_string())];
-        spans.push(Span::raw(format!("{}: ", entry.name)));
+        spans.push(Span::raw(format!("{} = ", entry.name)));
 
         // Format and highlight the value
         match &entry.value {
@@ -706,12 +742,33 @@ impl DisplayPanel {
         spans
     }
 
-    /// Get current variable list
-    fn get_current_variables(&self) -> &[VariableEntry] {
-        match self.mode {
-            DisplayMode::Variables => &self.variables,
-            _ => &[],
+    /// Update expression watches for current snapshot
+    /// Returns true if the expressions data has actually changed
+    fn update_expression_watches(&mut self, dm: &mut DataManager, current_snapshot: usize) -> bool {
+        // Store old values for comparison
+        let old_values = mem::take(&mut self.expressions);
+
+        for (expr_id, expression) in dm.watcher.list_expressions() {
+            let is_multi_line = self.multi_line_expressions.contains(expression);
+            let name = format!("#{expr_id} ${expression}");
+
+            // Evaluate expression on current snapshot
+            let value = match dm.resolver.eval_on_snapshot(current_snapshot, expression) {
+                Some(Ok(sol_value)) => Some(Arc::new(sol_value.clone())),
+                _ => None, // N/A for None or Some(Err)
+            };
+
+            self.expressions.push(VariableEntry {
+                name,
+                value,
+                category: VariableCategory::Expression,
+                is_multi_line,
+                expression: Some(expression.clone()),
+            });
         }
+
+        old_values.len() != self.expressions.len()
+            || self.expressions.iter().zip(old_values.iter()).any(|(a, b)| a != b)
     }
 
     /// Calculate the maximum width for variables display
@@ -720,8 +777,8 @@ impl DisplayPanel {
 
         for entry in &self.variables {
             // Calculate prefix width (Unicode emojis take more space)
-            let prefix_width = 4; // Both 🔹 and 🔸 take roughly 4 display chars
-            let name_width = entry.name.len() + 2; // ": "
+            let prefix_width = 4; // all 🔵, 🟠, and 🟢 take roughly 4 display chars
+            let name_width = entry.name.len() + 4; // " = "
 
             // Calculate value width by actually formatting it
             let value_width = match &entry.value {
@@ -774,12 +831,68 @@ impl DisplayPanel {
         total_lines.max(1)
     }
 
+    /// Calculate the maximum width for expressions display
+    fn calculate_expressions_max_width(&self, dm: &mut DataManager) -> usize {
+        let mut max_width = 0;
+
+        for entry in &self.expressions {
+            // Calculate prefix width (Unicode emojis take more space)
+            let prefix_width = 4; // 🔹 takes roughly 4 display chars
+            let name_width = entry.name.len() + 3; // " = "
+
+            // Calculate value width by actually formatting it
+            let value_width = match &entry.value {
+                Some(value) => {
+                    let ctx = if entry.is_multi_line {
+                        SolValueFormatterContext::new().with_ty(true).multi_line(true)
+                    } else {
+                        SolValueFormatterContext::new().with_ty(true)
+                    };
+                    let formatted = dm.resolver.resolve_sol_value(value, Some(ctx));
+
+                    // For multi-line values, find the longest line
+                    if entry.is_multi_line {
+                        formatted.lines().map(|line| line.len()).max().unwrap_or(formatted.len())
+                    } else {
+                        formatted.len()
+                    }
+                }
+                None => 3, // "N/A"
+            };
+
+            let indicator_width = if entry.is_multi_line { 3 } else { 0 }; // " ⬇"
+
+            let total_width = prefix_width + name_width + value_width + indicator_width;
+            max_width = max_width.max(total_width);
+        }
+
+        max_width.max(50) // Minimum width
+    }
+
+    /// Calculate the actual number of display lines for expressions (accounting for multi-line)
+    fn calculate_expressions_display_lines(&self, dm: &mut DataManager) -> usize {
+        let mut total_lines = 0;
+
+        for entry in &self.expressions {
+            if entry.is_multi_line && entry.value.is_some() {
+                // Multi-line expressions take multiple lines - actually count them
+                if let Some(value) = &entry.value {
+                    let ctx = SolValueFormatterContext::new().with_ty(true).multi_line(true);
+                    let formatted = dm.resolver.resolve_sol_value(value, Some(ctx));
+                    total_lines += formatted.lines().count().max(1);
+                } else {
+                    total_lines += 1;
+                }
+            } else {
+                total_lines += 1;
+            }
+        }
+
+        total_lines.max(1)
+    }
+
     /// Apply horizontal offset to a line for horizontal scrolling
-    fn apply_horizontal_offset<'a>(
-        &self,
-        line: ratatui::text::Line<'a>,
-    ) -> ratatui::text::Line<'a> {
-        use ratatui::text::{Line, Span};
+    fn apply_horizontal_offset<'a>(&self, line: Line<'a>) -> Line<'a> {
         if self.horizontal_offset == 0 {
             return line;
         }
@@ -809,22 +922,37 @@ impl DisplayPanel {
         Line::from(new_spans)
     }
 
-    /// Toggle multi-line display for the currently selected variable
-    fn toggle_variable_multiline(&mut self) {
-        let variables = match self.mode {
-            DisplayMode::Variables => &mut self.variables,
-            _ => return,
-        };
+    /// Toggle multi-line display for the currently selected variable or expression
+    fn toggle_multiline(&mut self, _dm: &mut DataManager) {
+        match self.mode {
+            DisplayMode::Variables => {
+                if let Some(entry) = self.variables.get_mut(self.selected_index) {
+                    entry.is_multi_line = !entry.is_multi_line;
 
-        if let Some(entry) = variables.get_mut(self.selected_index) {
-            entry.is_multi_line = !entry.is_multi_line;
-
-            // Persist the toggle state
-            if entry.is_multi_line {
-                self.multi_line_variables.insert(entry.name.clone());
-            } else {
-                self.multi_line_variables.remove(&entry.name);
+                    // Persist the toggle state
+                    if entry.is_multi_line {
+                        self.multi_line_variables.insert(entry.name.clone());
+                    } else {
+                        self.multi_line_variables.remove(&entry.name);
+                    }
+                }
             }
+            DisplayMode::Expressions => {
+                if let Some(entry) = self.expressions.get_mut(self.selected_index) {
+                    if let Some(expr) = &entry.expression {
+                        // Toggle the multi-line state
+                        entry.is_multi_line = !entry.is_multi_line;
+
+                        // Persist the toggle state
+                        if entry.is_multi_line {
+                            self.multi_line_expressions.insert(expr.clone());
+                        } else {
+                            self.multi_line_expressions.remove(expr);
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -854,6 +982,7 @@ impl DisplayPanel {
             DisplayMode::Storage => self.storage_display_lines.max(1),
             DisplayMode::TransientStorage => self.tstorage_display_lines.max(1),
             DisplayMode::Variables => self.calculate_variables_display_lines(dm),
+            DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
             DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
@@ -1428,9 +1557,62 @@ impl DisplayPanel {
         self.render_status_and_help(frame, area, dm);
     }
 
+    /// Render expressions display (for both opcode and hooked snapshots)
+    fn render_expressions(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
+        if self.expressions.is_empty() {
+            let empty_msg = "No expressions watched";
+            let paragraph = Paragraph::new(empty_msg).block(BorderPresets::display(
+                self.focused,
+                self.title(dm),
+                dm.theme.focused_border,
+                dm.theme.unfocused_border,
+            ));
+            frame.render_widget(paragraph, area);
+            return;
+        }
+
+        let items: Vec<ListItem<'_>> = self
+            .expressions
+            .iter()
+            .enumerate()
+            .skip(self.scroll_offset)
+            .take(self.context_height)
+            .map(|(display_idx, entry)| {
+                let is_selected = display_idx == self.selected_index;
+
+                // Format the expression entry with syntax highlighting
+                let formatted_spans = self.format_variable_entry(entry, dm);
+
+                // Create a line from the spans
+                let line = Line::from(formatted_spans);
+                let formatted_line = self.apply_horizontal_offset(line);
+
+                // Apply selection style if selected
+                let style = if is_selected && self.focused {
+                    Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
+                } else {
+                    // Default style - the highlighting is already applied to individual spans
+                    Style::default()
+                };
+
+                ListItem::new(formatted_line).style(style)
+            })
+            .collect();
+
+        let list = List::new(items).block(BorderPresets::display(
+            self.focused,
+            self.title(dm),
+            dm.theme.focused_border,
+            dm.theme.unfocused_border,
+        ));
+
+        frame.render_widget(list, area);
+        self.render_status_and_help(frame, area, dm);
+    }
+
     /// Render variables display (for hooked snapshots)
     fn render_variables(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
-        let current_variables = self.get_current_variables();
+        let current_variables = &self.variables;
 
         if current_variables.is_empty() {
             let empty_msg = "No variables available";
@@ -1530,6 +1712,7 @@ impl DisplayPanel {
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.calculate_variables_display_lines(dm),
+            DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
             DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
@@ -1576,7 +1759,7 @@ impl DisplayPanel {
             Rect { x: area.x + 1, y: area.y + area.height - 2, width: area.width - 2, height: 1 };
 
         let mut help_text = match self.mode {
-            DisplayMode::Variables => {
+            DisplayMode::Variables | DisplayMode::Expressions => {
                 "↑/↓: Navigate • s/S: Switch mode • Enter: Toggle multi-line".to_string()
             }
             _ => "↑/↓: Navigate • s/S: Switch mode".to_string(),
@@ -1611,6 +1794,7 @@ impl PanelTr for DisplayPanel {
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
+            DisplayMode::Expressions => self.expressions.len(),
             DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
@@ -1641,15 +1825,12 @@ impl PanelTr for DisplayPanel {
             DisplayMode::Storage => self.render_storage(frame, area, dm),
             DisplayMode::TransientStorage => self.render_transient_storage(frame, area, dm),
             DisplayMode::Variables => self.render_variables(frame, area, dm),
+            DisplayMode::Expressions => self.render_expressions(frame, area, dm),
             DisplayMode::_Breakpoints => self.render_breakpoints(frame, area, dm),
         }
     }
 
-    fn handle_key_event(
-        &mut self,
-        event: KeyEvent,
-        _dm: &mut DataManager,
-    ) -> Result<EventResponse> {
+    fn handle_key_event(&mut self, event: KeyEvent, dm: &mut DataManager) -> Result<EventResponse> {
         if !self.focused || event.kind != KeyEventKind::Press {
             return Ok(EventResponse::NotHandled);
         }
@@ -1668,7 +1849,7 @@ impl PanelTr for DisplayPanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::Down => {
-                self.move_down(_dm);
+                self.move_down(dm);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Left => {
@@ -1698,7 +1879,7 @@ impl PanelTr for DisplayPanel {
             }
             KeyCode::PageDown => {
                 for _ in 0..5 {
-                    self.move_down(_dm);
+                    self.move_down(dm);
                 }
                 Ok(EventResponse::Handled)
             }
@@ -1719,17 +1900,18 @@ impl PanelTr for DisplayPanel {
                     }
                     DisplayMode::Storage => self.storage_display_lines.max(1),
                     DisplayMode::TransientStorage => self.tstorage_display_lines.max(1),
-                    DisplayMode::Variables => self.calculate_variables_display_lines(_dm),
+                    DisplayMode::Variables => self.calculate_variables_display_lines(dm),
+                    DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
                     DisplayMode::_Breakpoints => self.breakpoints.len(),
                 };
                 self.selected_index = max_items.saturating_sub(1);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Enter => {
-                // Toggle multi-line display for variables
+                // Toggle multi-line display for variables and expressions
                 match self.mode {
-                    DisplayMode::Variables => {
-                        self.toggle_variable_multiline();
+                    DisplayMode::Variables | DisplayMode::Expressions => {
+                        self.toggle_multiline(dm);
                         Ok(EventResponse::Handled)
                     }
                     _ => Ok(EventResponse::NotHandled),

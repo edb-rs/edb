@@ -22,7 +22,7 @@ use alloy_primitives::{Address, FixedBytes, I256, U256};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Wrapper around DynSolValue with custom serialization for EDB debugging and analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EdbSolValue(pub DynSolValue);
 
 impl From<DynSolValue> for EdbSolValue {
