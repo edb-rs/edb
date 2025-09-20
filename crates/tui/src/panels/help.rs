@@ -337,7 +337,7 @@ impl HelpOverlay {
                 },
                 HelpItem {
                     keys: "Vim Navigation",
-                    description: "j/k/h/l, gg/G (in Vim mode)",
+                    description: "j/k/h/l, gg/G, ↑/↓, ←/→ (in Vim mode)",
                     layout_specific: None,
                 },
                 HelpItem {

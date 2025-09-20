@@ -456,7 +456,11 @@ impl TerminalPanel {
         };
 
         // Add welcome message with fancy styling
-        panel.add_output(&format!("{} EDB Time-Travel Debugger v1.0", Icons::TARGET_REACHED));
+        panel.add_output(&format!(
+            "{} EDB Time-Travel Debugger v{}",
+            Icons::TARGET_REACHED,
+            env!("CARGO_PKG_VERSION")
+        ));
         panel.add_output(&format!("{} Connected to RPC server", Icons::CONNECTED));
         panel.add_output(&format!("{} Type 'help' for available commands", Icons::INFO));
         panel.add_output("");
