@@ -456,7 +456,7 @@ impl DisplayPanel {
     }
 
     /// Calculate the maximum line width for horizontal scrolling
-    fn calculate_max_line_width(&mut self) {
+    fn calculate_max_line_width(&mut self, dm: &mut DataManager) {
         self.max_line_width = match self.mode {
             DisplayMode::Stack => {
                 // Find longest stack item (index + hex + decoded + diff indicator)
@@ -535,8 +535,8 @@ impl DisplayPanel {
                 max_width.max(header_width).max(80) // At least 80 chars
             }
             DisplayMode::Variables => {
-                // Return reasonable default for now
-                80
+                // Calculate actual max width for variables by formatting each entry
+                self.calculate_variables_max_width(dm)
             }
             DisplayMode::_Breakpoints => {
                 self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0)
@@ -714,6 +714,101 @@ impl DisplayPanel {
         }
     }
 
+    /// Calculate the maximum width for variables display
+    fn calculate_variables_max_width(&self, dm: &mut DataManager) -> usize {
+        let mut max_width = 0;
+
+        for entry in &self.variables {
+            // Calculate prefix width (Unicode emojis take more space)
+            let prefix_width = 4; // Both 🔹 and 🔸 take roughly 4 display chars
+            let name_width = entry.name.len() + 2; // ": "
+
+            // Calculate value width by actually formatting it
+            let value_width = match &entry.value {
+                Some(value) => {
+                    let ctx = if entry.is_multi_line {
+                        SolValueFormatterContext::new().with_ty(true).multi_line(true)
+                    } else {
+                        SolValueFormatterContext::new().with_ty(true)
+                    };
+                    let formatted = dm.resolver.resolve_sol_value(value, Some(ctx));
+
+                    // For multi-line values, find the longest line
+                    if entry.is_multi_line {
+                        formatted.lines().map(|line| line.len()).max().unwrap_or(formatted.len())
+                    } else {
+                        formatted.len()
+                    }
+                }
+                None => 3, // "???"
+            };
+
+            let indicator_width = if entry.is_multi_line { 3 } else { 0 }; // " ⬇"
+
+            let total_width = prefix_width + name_width + value_width + indicator_width;
+            max_width = max_width.max(total_width);
+        }
+
+        max_width.max(50) // Minimum width
+    }
+
+    /// Calculate the actual number of display lines for variables (accounting for multi-line)
+    fn calculate_variables_display_lines(&self, dm: &mut DataManager) -> usize {
+        let mut total_lines = 0;
+
+        for entry in &self.variables {
+            if entry.is_multi_line && entry.value.is_some() {
+                // Multi-line variables take multiple lines - actually count them
+                if let Some(value) = &entry.value {
+                    let ctx = SolValueFormatterContext::new().with_ty(true).multi_line(true);
+                    let formatted = dm.resolver.resolve_sol_value(value, Some(ctx));
+                    total_lines += formatted.lines().count().max(1);
+                } else {
+                    total_lines += 1;
+                }
+            } else {
+                total_lines += 1;
+            }
+        }
+
+        total_lines.max(1)
+    }
+
+    /// Apply horizontal offset to a line for horizontal scrolling
+    fn apply_horizontal_offset<'a>(
+        &self,
+        line: ratatui::text::Line<'a>,
+    ) -> ratatui::text::Line<'a> {
+        use ratatui::text::{Line, Span};
+        if self.horizontal_offset == 0 {
+            return line;
+        }
+        let mut accumulated_width = 0;
+        let mut new_spans = Vec::new();
+        let mut started_content = false;
+        for span in line.spans {
+            let span_width = span.content.chars().count();
+            if accumulated_width + span_width <= self.horizontal_offset {
+                accumulated_width += span_width;
+            } else if accumulated_width >= self.horizontal_offset {
+                new_spans.push(span);
+                started_content = true;
+            } else {
+                let skip_chars = self.horizontal_offset - accumulated_width;
+                let visible_content: String = span.content.chars().skip(skip_chars).collect();
+                if !visible_content.is_empty() {
+                    new_spans.push(Span::styled(visible_content, span.style));
+                    started_content = true;
+                }
+                accumulated_width += span_width;
+            }
+        }
+        if !started_content {
+            return Line::from("");
+        }
+        Line::from(new_spans)
+    }
+
     /// Toggle multi-line display for the currently selected variable
     fn toggle_variable_multiline(&mut self) {
         let variables = match self.mode {
@@ -745,7 +840,7 @@ impl DisplayPanel {
     }
 
     /// Move selection down with auto-scrolling
-    fn move_down(&mut self) {
+    fn move_down(&mut self, dm: &mut DataManager) {
         let max_items = match self.mode {
             DisplayMode::Stack => self.stack_items.len(),
             DisplayMode::Memory => self.memory_chunks.len(),
@@ -756,9 +851,9 @@ impl DisplayPanel {
                     self.calldata.len().div_ceil(32)
                 }
             }
-            DisplayMode::Storage => self.storage_display_lines,
-            DisplayMode::TransientStorage => self.tstorage_display_lines,
-            DisplayMode::Variables => self.variables.len(),
+            DisplayMode::Storage => self.storage_display_lines.max(1),
+            DisplayMode::TransientStorage => self.tstorage_display_lines.max(1),
+            DisplayMode::Variables => self.calculate_variables_display_lines(dm),
             DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
@@ -807,7 +902,16 @@ impl DisplayPanel {
                     _ => "",
                 };
 
-                let content = format!("{index_str} {value_str} {diff_indicator}");
+                // Create line with spans for better styling
+                let mut line_spans =
+                    vec![Span::raw(index_str), Span::raw(" "), Span::raw(value_str)];
+
+                if !diff_indicator.is_empty() {
+                    line_spans.push(Span::raw(diff_indicator));
+                }
+
+                let line = Line::from(line_spans);
+                let formatted_line = self.apply_horizontal_offset(line);
 
                 // Apply styling based on diff status and selection
                 let mut style = if is_selected && self.focused {
@@ -823,7 +927,7 @@ impl DisplayPanel {
                     style = style.fg(dm.theme.warning_color);
                 }
 
-                ListItem::new(content).style(style)
+                ListItem::new(formatted_line).style(style)
             })
             .collect();
 
@@ -871,13 +975,16 @@ impl DisplayPanel {
                 let mut line = vec![Span::raw(offset_str), Span::raw(" ")];
                 line.extend(byte_spans);
 
+                let line_obj = Line::from(line);
+                let formatted_line = self.apply_horizontal_offset(line_obj);
+
                 let style = if is_selected && self.focused {
                     Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
                 } else {
                     Style::default()
                 };
 
-                ListItem::new(Line::from(line)).style(style)
+                ListItem::new(formatted_line).style(style)
             })
             .collect();
 
@@ -919,7 +1026,9 @@ impl DisplayPanel {
             let mut line = vec![Span::raw(offset_str), Span::raw(" ")];
             line.extend(byte_spans);
 
-            items.push(ListItem::new(Line::from(line)));
+            let line_obj = Line::from(line);
+            let formatted_line = self.apply_horizontal_offset(line_obj);
+            items.push(ListItem::new(formatted_line));
         }
 
         // Apply scrolling and selection
@@ -1124,7 +1233,8 @@ impl DisplayPanel {
                     }
                 };
 
-                ListItem::new(line.clone()).style(style)
+                let formatted_line = self.apply_horizontal_offset(Line::from(line.clone()));
+                ListItem::new(formatted_line).style(style)
             })
             .collect();
 
@@ -1302,7 +1412,8 @@ impl DisplayPanel {
                     }
                 };
 
-                ListItem::new(line.clone()).style(style)
+                let formatted_line = self.apply_horizontal_offset(Line::from(line.clone()));
+                ListItem::new(formatted_line).style(style)
             })
             .collect();
 
@@ -1346,6 +1457,7 @@ impl DisplayPanel {
 
                 // Create a line from the spans
                 let line = Line::from(formatted_spans);
+                let formatted_line = self.apply_horizontal_offset(line);
 
                 // Apply selection style if selected
                 let style = if is_selected && self.focused {
@@ -1355,7 +1467,7 @@ impl DisplayPanel {
                     Style::default()
                 };
 
-                ListItem::new(line).style(style)
+                ListItem::new(formatted_line).style(style)
             })
             .collect();
 
@@ -1385,7 +1497,8 @@ impl DisplayPanel {
                 } else {
                     Style::default()
                 };
-                ListItem::new(bp.clone()).style(style)
+                let formatted_line = self.apply_horizontal_offset(Line::from(bp.clone()));
+                ListItem::new(formatted_line).style(style)
             })
             .collect();
 
@@ -1401,7 +1514,7 @@ impl DisplayPanel {
     }
 
     /// Render status and help text
-    fn render_status_and_help(&self, frame: &mut Frame<'_>, area: Rect, dm: &DataManager) {
+    fn render_status_and_help(&self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
         if !self.focused || area.height <= 10 {
             return;
         }
@@ -1416,7 +1529,7 @@ impl DisplayPanel {
             DisplayMode::CallData => self.calldata.len().div_ceil(32),
             DisplayMode::Storage => self.storage_display_lines,
             DisplayMode::TransientStorage => self.tstorage_display_lines,
-            DisplayMode::Variables => self.variables.len(),
+            DisplayMode::Variables => self.calculate_variables_display_lines(dm),
             DisplayMode::_Breakpoints => self.breakpoints.len(),
         };
 
@@ -1426,18 +1539,53 @@ impl DisplayPanel {
             .message(format!("Items: {item_count}"));
 
         let status_text = status_bar.build();
+
+        // Add horizontal scroll indicator if content is scrollable
+        let final_status_text = if self.max_line_width > self.content_width {
+            let scrollable_width = self.max_line_width.saturating_sub(self.content_width);
+            let scroll_percentage = if scrollable_width > 0 {
+                (self.horizontal_offset as f32 / scrollable_width as f32).min(1.0)
+            } else {
+                0.0
+            };
+
+            let indicator_width = 15;
+            let thumb_position = (scroll_percentage * (indicator_width - 3) as f32) as usize;
+
+            let mut indicator = String::from(" [");
+            for i in 0..indicator_width {
+                if i >= thumb_position && i < thumb_position + 3 {
+                    indicator.push('█'); // Full block character
+                } else {
+                    indicator.push('─'); // Horizontal line character
+                }
+            }
+            indicator.push(']');
+
+            format!("{status_text}{indicator}")
+        } else {
+            status_text
+        };
+
         let status_paragraph =
-            Paragraph::new(status_text).style(Style::default().fg(dm.theme.accent_color));
+            Paragraph::new(final_status_text).style(Style::default().fg(dm.theme.accent_color));
         frame.render_widget(status_paragraph, status_area);
 
         // Help line
         let help_area =
             Rect { x: area.x + 1, y: area.y + area.height - 2, width: area.width - 2, height: 1 };
 
-        let help_text = match self.mode {
-            DisplayMode::Variables => "↑/↓: Navigate • s/S: Switch mode • Enter: Toggle multi-line",
-            _ => "↑/↓: Navigate • s/S: Switch mode",
+        let mut help_text = match self.mode {
+            DisplayMode::Variables => {
+                "↑/↓: Navigate • s/S: Switch mode • Enter: Toggle multi-line".to_string()
+            }
+            _ => "↑/↓: Navigate • s/S: Switch mode".to_string(),
         };
+
+        // Add horizontal scroll help if content is scrollable
+        if self.max_line_width > self.content_width {
+            help_text.push_str(" • ←/→: Scroll H");
+        }
         let help_paragraph =
             Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
         frame.render_widget(help_paragraph, help_area);
@@ -1483,7 +1631,7 @@ impl PanelTr for DisplayPanel {
         let _ = self.update_snapshot_data(dm);
 
         // Calculate max line width for horizontal scrolling
-        self.calculate_max_line_width();
+        self.calculate_max_line_width(dm);
 
         // Render based on current mode
         match self.mode {
@@ -1520,7 +1668,7 @@ impl PanelTr for DisplayPanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::Down => {
-                self.move_down();
+                self.move_down(_dm);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Left => {
@@ -1550,7 +1698,7 @@ impl PanelTr for DisplayPanel {
             }
             KeyCode::PageDown => {
                 for _ in 0..5 {
-                    self.move_down();
+                    self.move_down(_dm);
                 }
                 Ok(EventResponse::Handled)
             }
@@ -1569,9 +1717,9 @@ impl PanelTr for DisplayPanel {
                             self.calldata.len().div_ceil(32)
                         }
                     }
-                    DisplayMode::Storage => self.storage_display_lines,
-                    DisplayMode::TransientStorage => self.tstorage_display_lines,
-                    DisplayMode::Variables => self.variables.len(),
+                    DisplayMode::Storage => self.storage_display_lines.max(1),
+                    DisplayMode::TransientStorage => self.tstorage_display_lines.max(1),
+                    DisplayMode::Variables => self.calculate_variables_display_lines(_dm),
                     DisplayMode::_Breakpoints => self.breakpoints.len(),
                 };
                 self.selected_index = max_items.saturating_sub(1);
