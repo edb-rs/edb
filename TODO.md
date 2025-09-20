@@ -99,6 +99,13 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Integration with Hardhat network
   - Compatibility with Hardhat plugins
 
+- [ ] **VS Code Extension**
+  - Visual Studio Code extension for integrated debugging experience
+  - Seamless debugging workflow within the editor
+  - Source code highlighting and breakpoint management
+  - Variable inspection and watch panels
+  - Integration with existing Solidity extensions
+
 ### 🌐 Milestone 5: Multi-Chain & L2 Support
 **Goal**: Extend debugging capabilities beyond Ethereum mainnet with L2-specific features
 

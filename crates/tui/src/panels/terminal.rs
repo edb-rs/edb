@@ -611,13 +611,16 @@ impl TerminalPanel {
             cmd if cmd.starts_with("theme ") => {
                 self.handle_theme_command(&cmd[6..], dm);
             }
+            cmd if cmd.starts_with("watch") => {
+                self.handle_watch_command(cmd[5..].trim(), dm);
+            }
             cmd if cmd.starts_with('$') => {
                 // Solidity expression evaluation
                 let id = dm.execution.get_current_snapshot();
                 let expr = cmd[1..].trim();
 
                 self.pending_command = Some(PendingCommand::EvalExpr(id, expr.to_string()));
-                self.spinner.start_loading("Fetching calldata...");
+                self.spinner.start_loading("Fetching evaluation result...");
             }
             cmd => {
                 // Debug commands
@@ -810,6 +813,11 @@ impl TerminalPanel {
         self.add_output("  sload <slot>            - Show storage at slot");
         self.add_output("  tsload <slot>           - Show transient storage at slot");
         self.add_output("");
+        self.add_output("👁️ Watcher:");
+        self.add_output("  watch add $<expr>   - Add watch expression");
+        self.add_output("  watch remove <id>   - Remove watch expression");
+        self.add_output("  watch list          - List all watch expressions");
+        self.add_output("  watch clear         - Clear all watch expressions");
         self.add_output("🔴 Breakpoints:");
         self.add_output("  break <location> - Set breakpoint");
         self.add_output("");
@@ -858,6 +866,89 @@ impl TerminalPanel {
         self.add_output("Usage:");
         self.add_output("  theme <name>    Switch to theme");
         self.add_output("  theme           List available themes");
+    }
+
+    /// Handle watch command
+    fn handle_watch_command(&mut self, args: &str, dm: &mut DataManager) {
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        if parts.is_empty() {
+            self.add_output("Usage:");
+            self.add_output("  watch add $<expr>   - Add watch expression");
+            self.add_output("  watch remove <id>  - Remove watch expression");
+            self.add_output("  watch list          - List all watch expressions");
+            self.add_output("  watch clear         - Clear all watch expressions");
+            return;
+        }
+
+        match parts[0] {
+            "add" => {
+                if parts.len() < 2 {
+                    self.add_error("Usage: watch add <expr>");
+                    return;
+                }
+                let expr = args[..].trim();
+                if !expr.starts_with('$') {
+                    self.add_error("Watch expression must start with '$'");
+                    return;
+                }
+                match dm.watcher.add_expression(expr.to_string()) {
+                    Some(id) => {
+                        self.add_output(&format!("Added watch #{id}: {expr}"));
+                    }
+                    None => {
+                        self.add_output(&format!("expression already being watched: {expr}"));
+                    }
+                }
+            }
+            "remove" => {
+                if parts.len() != 2 {
+                    self.add_error("Usage: watch remove <id>");
+                    return;
+                }
+                match parts[1].parse::<usize>() {
+                    Ok(id) => match dm.watcher.remove_expression(id) {
+                        Some(expr) => {
+                            self.add_output(&format!("Removed watch #{id}: {expr}"));
+                        }
+                        None => {
+                            self.add_error(&format!("No watch found with id {id}"));
+                        }
+                    },
+                    Err(_) => {
+                        self.add_error("Invalid watch id");
+                    }
+                }
+            }
+            "list" => {
+                if parts.len() != 1 {
+                    self.add_error("Usage: watch list");
+                    return;
+                }
+                if dm.watcher.count() == 0 {
+                    self.add_output("No watch expressions set");
+                } else {
+                    self.add_output("Current watch expressions:");
+                    for (id, expr) in dm.watcher.list_expressions() {
+                        self.add_output(&format!("  #{id}: {expr}"));
+                    }
+                }
+            }
+            "clear" => {
+                if parts.len() != 1 {
+                    self.add_error("Usage: watch clear");
+                } else {
+                    dm.watcher.clear();
+                    self.add_output("Clearing all watches...");
+                }
+            }
+            _ => {
+                self.add_error("Unknown watch command");
+                self.add_output("Usage:");
+                self.add_output("  watch add <expr>    - Add watch expression");
+                self.add_output("  watch remove <id>   - Remove watch expression");
+                self.add_output("  watch clear         - Clear all watch expressions");
+            }
+        }
     }
 
     /// Handle theme switching command
@@ -1856,6 +1947,6 @@ impl PanelTr for TerminalPanel {
     }
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
+       self
     }
 }

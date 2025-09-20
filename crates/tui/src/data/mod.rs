@@ -59,13 +59,17 @@ use tokio::sync::RwLock;
 
 pub mod manager;
 pub mod theme;
-pub use theme::Theme;
+pub mod watcher;
 
 use crate::{
-    data::manager::{
-        core::{ManagerCore, ManagerTr},
-        execution::{ExecutionManager, ExecutionRequest, ExecutionState},
-        resolve::{Resolver, ResolverRequest, ResolverState},
+    data::{
+        manager::{
+            core::{ManagerCore, ManagerTr},
+            execution::{ExecutionManager, ExecutionRequest, ExecutionState},
+            resolve::{Resolver, ResolverRequest, ResolverState},
+        },
+        theme::Theme,
+        watcher::Watcher,
     },
     RpcClient,
 };
@@ -81,6 +85,8 @@ pub struct DataManager {
     pub resolver: Resolver,
     /// Theme configuration (no Arc/RwLock needed)
     pub theme: Theme,
+    /// Expression watcher (no Arc/RwLock needed)
+    pub watcher: Watcher,
 }
 
 impl DataManager {
@@ -94,6 +100,7 @@ impl DataManager {
             execution: ExecutionManager::new(exec_core).await,
             resolver: Resolver::new(resolver_core).await,
             theme: Theme::default(),
+            watcher: Watcher::default(),
         })
     }
 
