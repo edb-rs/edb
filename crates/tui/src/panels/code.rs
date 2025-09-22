@@ -592,17 +592,14 @@ impl CodePanel {
                 // Show VIM command mode prompt
                 format!(":{}", self.vim_command_buffer)
             } else if self.show_file_selector {
-                "↑/↓: Navigate • Enter: Select • F: Close".to_string()
+                "Vim-like Navigation • Enter: Select • F: Close".to_string()
             } else {
-                let mut help = String::from("↑/↓: Navigate");
-                if self.max_line_width > self.content_width {
-                    help.push_str(" • ←/→: Scroll");
-                }
-                help.push_str(" • s/S/n/N: Step/Rev/Next/Prev • c/C: Next/Prev call");
+                let mut help = String::from("Vim-like Navigation");
+                help.push_str(" • s/S/n/N/c/C: Execution");
                 if self.display_info.mode == CodeMode::Source {
                     help.push_str(" • F: Files");
                 }
-                help.push_str(" • B: Breakpoint");
+                help.push_str(" • B: Breakpoint • Space: Trace Panel • ?: Help");
                 help
             };
 

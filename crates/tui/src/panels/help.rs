@@ -184,16 +184,6 @@ impl HelpOverlay {
                     layout_specific: None,
                 },
                 HelpItem {
-                    keys: "Space",
-                    description: "Toggle between Code/Trace panels",
-                    layout_specific: Some(LayoutType::Full),
-                },
-                HelpItem {
-                    keys: "Space",
-                    description: "Cycle: Trace → Code → Display",
-                    layout_specific: Some(LayoutType::Compact),
-                },
-                HelpItem {
                     keys: "F1-F4",
                     description: "Jump to panel (Trace/Code/Display/Terminal)",
                     layout_specific: None,
@@ -232,16 +222,8 @@ impl HelpOverlay {
                 title: "Code Panel",
                 items: vec![
                     HelpItem {
-                        keys: "↑/↓", description: "Navigate lines", layout_specific: None
-                    },
-                    HelpItem {
-                        keys: "←/→",
-                        description: "Horizontal scroll",
-                        layout_specific: None,
-                    },
-                    HelpItem {
                         keys: "Vim Navigation",
-                        description: "j/k/h/l, gg/G, {/}, numeric prefixes",
+                        description: "j/k/h/l, gg/G, {/}, ↑/↓, ←/→, numeric prefixes",
                         layout_specific: None,
                     },
                     HelpItem {
@@ -270,6 +252,16 @@ impl HelpOverlay {
                         layout_specific: None,
                     },
                     HelpItem {
+                        keys: "Space",
+                        description: "Switch to Trace panel",
+                        layout_specific: Some(LayoutType::Full),
+                    },
+                    HelpItem {
+                        keys: "Space",
+                        description: "Cycle: Trace → Code → Display",
+                        layout_specific: Some(LayoutType::Compact),
+                    },
+                    HelpItem {
                         keys: ":",
                         description: "Enter Vim command mode",
                         layout_specific: None,
@@ -283,20 +275,27 @@ impl HelpOverlay {
             title: "Trace Panel",
             items: vec![
                 HelpItem {
-                    keys: "↑/↓ or j/k",
-                    description: "Navigate trace steps",
+                    keys: "Vim Navigation",
+                    description: "j/k/h/l, gg/G, {/}, ↑/↓, ←/→, numeric prefixes",
                     layout_specific: None,
                 },
-                HelpItem {
-                    keys: "←/→", description: "Horizontal scroll", layout_specific: None
-                },
+                HelpItem { keys: "c/C", description: "Goto code", layout_specific: None },
+                HelpItem { keys: "v/V", description: "View code", layout_specific: None },
                 HelpItem {
                     keys: "Enter",
                     description: "Toggle expand/collapse",
                     layout_specific: None,
                 },
-                HelpItem { keys: "c/C", description: "Goto code", layout_specific: None },
-                HelpItem { keys: "v/V", description: "View code", layout_specific: None },
+                HelpItem {
+                    keys: "Space",
+                    description: "Switch to Code panel",
+                    layout_specific: Some(LayoutType::Full),
+                },
+                HelpItem {
+                    keys: "Space",
+                    description: "Cycle: Trace → Code → Display",
+                    layout_specific: Some(LayoutType::Compact),
+                },
             ],
         });
 
@@ -319,9 +318,14 @@ impl HelpOverlay {
                     layout_specific: None,
                 },
                 HelpItem {
-                    keys: "Home/End",
-                    description: "Jump to first/last item",
+                    keys: "Enter",
+                    description: "Toggle multi-line view (Variables/Expressions)",
                     layout_specific: None,
+                },
+                HelpItem {
+                    keys: "Space",
+                    description: "Cycle: Trace → Code → Display",
+                    layout_specific: Some(LayoutType::Compact),
                 },
             ],
         });
@@ -332,12 +336,12 @@ impl HelpOverlay {
             items: vec![
                 HelpItem {
                     keys: "ESC",
-                    description: "Toggle between Vim/Insert mode",
+                    description: "Enter Vim mode (from Insert mode)",
                     layout_specific: None,
                 },
                 HelpItem {
-                    keys: "Vim Navigation",
-                    description: "j/k/h/l, gg/G, ↑/↓, ←/→ (in Vim mode)",
+                    keys: "↑/↓",
+                    description: "Command history (Insert mode)",
                     layout_specific: None,
                 },
                 HelpItem {
@@ -346,8 +350,8 @@ impl HelpOverlay {
                     layout_specific: None,
                 },
                 HelpItem {
-                    keys: "↑/↓",
-                    description: "Command history (Insert mode)",
+                    keys: "Vim Navigation",
+                    description: "j/k/h/l, gg/G, {/}, ↑/↓, ←/→, numeric prefixes (Vim mode)",
                     layout_specific: None,
                 },
                 HelpItem { keys: "Ctrl+L", description: "Clear terminal", layout_specific: None },

@@ -1804,15 +1804,11 @@ impl TerminalPanel {
 
             let help_text = match self.mode {
                 TerminalMode::Insert => {
-                    "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode".to_string()
+                    "INSERT mode: Type commands • ↑/↓: History • Esc: VIM mode • ?: Help"
+                        .to_string()
                 }
                 TerminalMode::Vim => {
-                    let mut help = String::from("VIM: j/k/↑/↓: Navigate");
-                    if self.max_line_width > self.content_width {
-                        help.push_str(" • h/l/←/→: Scroll");
-                    }
-                    help.push_str(" • {/}: Prev/Next blank • gg/G: Top/Bottom • i/Enter: INSERT");
-                    help
+                    "VIM mode: Vim-like Navigation • i/Enter: INSERT • ?: Help".to_string()
                 }
             };
 

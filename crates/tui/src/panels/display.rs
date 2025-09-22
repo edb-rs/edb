@@ -1766,17 +1766,14 @@ impl DisplayPanel {
         let help_area =
             Rect { x: area.x + 1, y: area.y + area.height - 2, width: area.width - 2, height: 1 };
 
-        let mut help_text = match self.mode {
+        let help_text = match self.mode {
             DisplayMode::Variables | DisplayMode::Expressions => {
-                "↑/↓: Navigate • s/S: Switch mode • Enter: Toggle multi-line".to_string()
+                "Vim-like Navigation • s/S: Switch mode • Enter: Toggle multi-line • ?: Help"
+                    .to_string()
             }
-            _ => "↑/↓: Navigate • s/S: Switch mode".to_string(),
+            _ => "Vim-like Navigation • s/S: Switch mode • ?: Help".to_string(),
         };
 
-        // Add horizontal scroll help if content is scrollable
-        if self.max_line_width > self.content_width {
-            help_text.push_str(" • ←/→: Scroll H");
-        }
         let help_paragraph =
             Paragraph::new(help_text).style(Style::default().fg(dm.theme.help_text_color));
         frame.render_widget(help_paragraph, help_area);

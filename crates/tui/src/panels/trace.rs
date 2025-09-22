@@ -1180,11 +1180,11 @@ impl PanelTr for TracePanel {
                 // Show VIM command mode prompt
                 format!(":{}", self.inner.vim_command_buffer)
             } else {
-                let mut help = String::from("j/k: Down/Up • G/gg: Bottom/Top");
-                if self.inner.max_line_width > self.inner.content_width {
-                    help.push_str(" • h/l: Scroll H");
-                }
-                help.push_str(" • Enter: Expand • V/C: View/Goto code");
+                let mut help = String::from("Vim-like Navigation");
+                help.push_str(" • V/C: View/Goto code");
+                help.push_str(" • Enter: Expand");
+                help.push_str(" • Space: Code Panel");
+                help.push_str(" • ?: Help");
                 help
             };
 
