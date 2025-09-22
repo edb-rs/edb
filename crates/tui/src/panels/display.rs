@@ -40,7 +40,7 @@ use ratatui::{
     Frame,
 };
 use revm::state::TransientStorage;
-use std::cmp::Ordering;
+use std::cmp::{self, Ordering};
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -90,6 +90,31 @@ struct VariableEntry {
     is_multi_line: bool,
     /// For expressions, stores the original expression text
     expression: Option<String>,
+}
+
+impl cmp::PartialOrd for VariableEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self.category, other.category) {
+            (VariableCategory::Expression, VariableCategory::Expression) => {
+                // Expressions are always equal in ordering - keep original order
+                Some(Ordering::Equal)
+            }
+            (VariableCategory::Expression, _) => Some(Ordering::Less),
+            (_, VariableCategory::Expression) => Some(Ordering::Greater),
+            _ => {
+                // Both are non-expressions - sort by name
+                let a_has_value = if self.value.is_some() { 0 } else { 1 };
+                let b_has_value = if other.value.is_some() { 0 } else { 1 };
+
+                Some(
+                    self.category
+                        .cmp(&other.category)
+                        .then(a_has_value.cmp(&b_has_value))
+                        .then(self.name.cmp(&other.name)),
+                )
+            }
+        }
+    }
 }
 
 impl DisplayMode {
@@ -312,8 +337,7 @@ impl DisplayPanel {
     /// Update data for hook snapshots
     fn update_hook_data(&mut self, hook_detail: &HookSnapshotInfoDetail) {
         // Let's include expression first
-        self.variables.clear();
-        self.variables.extend(self.expressions.clone());
+        self.variables.retain(|var| var.category == VariableCategory::Expression);
 
         // Extract local variables
         for (name, value_opt) in &hook_detail.locals {
@@ -339,23 +363,7 @@ impl DisplayPanel {
             });
         }
 
-        // Sort variables by:
-        // 1. Category: Expression (0), Local (1), and State (1)
-        // 2. Value availability (non-expr): has value (0) before None (1)
-        // 3. Name: alphabetical
-        self.variables.sort_by(|a, b| {
-            let a_has_value = if a.value.is_some() { 0 } else { 1 };
-            let b_has_value = if b.value.is_some() { 0 } else { 1 };
-
-            a.category
-                .cmp(&b.category)
-                .then(if a.category == VariableCategory::Expression {
-                    Ordering::Equal
-                } else {
-                    a_has_value.cmp(&b_has_value)
-                })
-                .then(a.name.cmp(&b.name))
-        });
+        self.variables.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     }
 
     /// Update data for opcode snapshots
@@ -750,7 +758,7 @@ impl DisplayPanel {
 
         for (expr_id, expression) in dm.watcher.list_expressions() {
             let is_multi_line = self.multi_line_expressions.contains(expression);
-            let name = format!("#{expr_id} ${expression}");
+            let name = format!("${expr_id}: {expression}");
 
             // Evaluate expression on current snapshot
             let value = match dm.resolver.eval_on_snapshot(current_snapshot, expression) {
