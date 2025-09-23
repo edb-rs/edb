@@ -254,7 +254,7 @@ impl EdbRegistry {
 
             // Use tasklist to check if process exists
             Command::new("tasklist")
-                .args(["/FI", &format!("PID eq {}", pid)])
+                .args(["/FI", &format!("PID eq {pid}")])
                 .output()
                 .map(|output| {
                     output.status.success()
