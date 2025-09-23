@@ -50,16 +50,6 @@ EDB will by default start a TUI debugger:
 
 Type `?` in the TUI to view the help page.
 
-## Sponsors
-
-<div align="center">
-  <a href="https://esp.ethereum.foundation/" target="_blank">
-    <img src="https://esp.ethereum.foundation/_next/static/media/esp-logo.96fc01cc.svg" alt="Ethereum Foundation ESP" height="60" style="margin: 20px;">
-  </a>
-</div>
-<br>
-
-<em>Love EDB? Your support keeps us building! <a href="https://github.com/sponsors/edb-rs">Buy us a coffee ☕</a> and help us dedicate more time to making Ethereum debugging better.</em>
 
 ## Why EDB?
 
@@ -83,19 +73,14 @@ By inserting strategic debugging hooks during compilation, EDB creates contracts
 - **Expression evaluation** - Evaluate arbitrary Solidity expressions against the current execution state
 - **Time-travel capabilities** - Navigate backward and forward through execution history
 
-## Key Features
+## Sponsors
 
-### 🎯 **Source-Level Step Execution**
-- Step through Solidity statements line by line
-- Navigate function calls and returns naturally
-- Jump to specific execution points in your code
-- Understand control flow without mental bytecode translation
+<br>
+<div align="center">
+  <a href="https://esp.ethereum.foundation/" target="_blank">
+    <img src="https://esp.ethereum.foundation/_next/static/media/esp-logo.96fc01cc.svg" alt="Ethereum Foundation ESP" height="60" style="margin: 20px;">
+  </a>
+</div>
+<br>
 
-### 🔍 **Local Variable Inspection**
-- Inspect values of local variables and function parameters
-- View variables exactly as they appear in your source code
-- Track variable changes throughout execution
-
-### ⚡ **Custom Expression Evaluation**
-- Evaluate any Solidity expression against the current execution state
-- Compute complex queries combining multiple variables
+<em>Love EDB? Your support keeps us building! <a href="https://github.com/sponsors/edb-rs">Buy us a coffee ☕</a> and help us dedicate more time to making Ethereum debugging better.</em>
