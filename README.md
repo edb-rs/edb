@@ -50,6 +50,18 @@ EDB will by default start a TUI debugger:
 
 Type `?` in the TUI to view the help page.
 
+## Sponsors
+
+<div align="center">
+  <a href="https://esp.ethereum.foundation/" target="_blank">
+    <img src="https://esp.ethereum.foundation/_next/static/media/esp-logo.96fc01cc.svg" alt="Ethereum Foundation ESP" height="60" style="margin: 20px;">
+  </a>
+</div>
+
+<div align="center">
+  <em>Love EDB? Your support keeps us building! <a href="https://github.com/sponsors/edb-rs">Buy us a coffee ☕</a> and help us dedicate more time to making Ethereum debugging better.</em>
+</div>
+
 ## Why EDB?
 
 Traditional Ethereum debugging tools operate at the bytecode level, making it nearly impossible to understand what's happening in your Solidity code.
