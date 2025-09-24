@@ -149,7 +149,7 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
 
     #[cfg(unix)]
     {
-        use std::os::unix::process::CommandExt;
+        use std::{env, os::unix::process::CommandExt};
 
         let mut args = vec![
             "server".to_string(), // Add the server subcommand
@@ -171,6 +171,12 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         if cli.disable_cache {
             args.push("--max-cache-items".to_string());
             args.push("0".to_string());
+        }
+
+        // If cache directory is specified, add it as well
+        if let Ok(cache_dir) = env::var("EDB_CACHE_DIR") {
+            args.push("--cache-dir".to_string());
+            args.push(cache_dir);
         }
 
         debug!(
@@ -206,6 +212,18 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         if let Some(rpc_urls) = &cli.rpc_urls {
             args.push("--rpc-urls".to_string());
             args.push(rpc_urls.clone());
+        }
+
+        // If cache is disabled, add set the max cache items to 0
+        if cli.disable_cache {
+            args.push("--max-cache-items".to_string());
+            args.push("0".to_string());
+        }
+
+        // If cache directory is specified, add it as well
+        if let Ok(cache_dir) = env::var("EDB_CACHE_DIR") {
+            args.push("--cache-dir".to_string());
+            args.push(cache_dir);
         }
 
         Command::new(&proxy_binary)

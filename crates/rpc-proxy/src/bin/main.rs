@@ -21,6 +21,8 @@
 //! network overhead for multiple debugging sessions.
 
 use clap::{Parser, Subcommand};
+use edb_common::init_file_only_logging;
+use edb_common::init_logging;
 use eyre::Result;
 use std::net::SocketAddr;
 use tracing::{info, warn};
@@ -34,6 +36,7 @@ use proxy::ProxyServerBuilder;
 #[derive(Parser, Debug)]
 #[command(name = "edb-rpc-proxy")]
 #[command(about = "EDB RPC Caching Proxy Server")]
+#[command(version)]
 struct Args {
     #[command(subcommand)]
     command: Commands,
@@ -115,9 +118,6 @@ struct MonitorArgs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    edb_common::logging::init_logging("edb-rpc-proxy", true)?;
-
     let args = Args::parse();
 
     match args.command {
@@ -128,6 +128,18 @@ async fn main() -> Result<()> {
 
 /// Run the RPC proxy server
 async fn run_server(args: ServerArgs) -> Result<()> {
+    if args.tui {
+        // Initilize file-only logging
+        let log_file_path = init_file_only_logging("edb-rpc-proxy")?;
+
+        // Print log file location to stderr (so user knows where logs are)
+        // Use stderr so it doesn't interfere with TUI if there are issues
+        eprintln!("EDB RPC-PROXY TUI logs: {}", log_file_path.display());
+    } else {
+        // Initialize logging
+        init_logging("edb-rpc-proxy", true)?;
+    }
+
     // Create the proxy server using builder pattern
     let mut builder = ProxyServerBuilder::new()
         .max_cache_items(args.max_cache_items)
@@ -199,6 +211,13 @@ async fn run_server(args: ServerArgs) -> Result<()> {
 
 /// Run the TUI monitor for an existing proxy
 async fn run_monitor(args: MonitorArgs) -> Result<()> {
+    // Initilize file-only logging
+    let log_file_path = init_file_only_logging("edb-rpc-proxy")?;
+
+    // Print log file location to stderr (so user knows where logs are)
+    // Use stderr so it doesn't interfere with TUI if there are issues
+    eprintln!("EDB RPC-PROXY TUI logs: {}", log_file_path.display());
+
     info!("Starting TUI monitor for proxy at {}", args.proxy_url);
 
     // Create a remote TUI client and run it

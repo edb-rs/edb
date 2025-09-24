@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::{
     // new_usid, AnnotationsToChange,
@@ -538,7 +538,10 @@ impl Analyzer {
         source_path: &PathBuf,
         source_unit: &SourceUnit,
     ) -> Result<SourceAnalysis, AnalysisError> {
+        debug!(path=?source_path, "start walking the AST");
         source_unit.walk(&mut self).map_err(AnalysisError::Other)?;
+        debug!(path=?source_path, "finished walking the AST");
+
         assert!(self.scope_stack.len() == 1, "scope stack should have exactly one scope");
         assert!(self.current_step.is_none(), "current step should be none");
         let version_req = if !self.version_requirements.is_empty() {

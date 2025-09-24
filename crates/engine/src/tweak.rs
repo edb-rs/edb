@@ -51,7 +51,7 @@
 //! This replaces the deployed bytecode at `contract_address` with the instrumented version,
 //! enabling advanced debugging features on the modified contract.
 
-use std::path::PathBuf;
+use std::env;
 
 use alloy_primitives::{Address, Bytes, TxHash};
 use edb_common::{
@@ -202,6 +202,7 @@ where
     ///
     /// This method first checks the local cache for the creation transaction data.
     /// If not cached, it queries Etherscan API and caches the result for future use.
+    /// Note that Etherscan Client will NOT cache the result itself.
     ///
     /// # Arguments
     ///
@@ -214,11 +215,12 @@ where
         let chain_id = self.ctx.cfg().chain_id();
 
         // Cache directory
-        let etherscan_cache_dir =
-            EdbCachePath::new(None as Option<PathBuf>).etherscan_chain_cache_dir(chain_id);
+        let etherscan_cache_dir = EdbCachePath::new(env::var("EDB_CACHE_DIR").ok())
+            .etherscan_chain_cache_dir(chain_id)
+            .map(|p| p.join("contract_creation_txs"));
 
         let cache = EdbCache::<ContractCreationData>::new(etherscan_cache_dir, None)?;
-        let label = format!("contract_creation_{addr}");
+        let label = addr.to_string();
 
         if let Some(creation_data) = cache.load_cache(&label) {
             Ok(creation_data.transaction_hash)

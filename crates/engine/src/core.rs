@@ -65,7 +65,7 @@ use revm::{
 use semver::Version;
 use std::{
     collections::{HashMap, HashSet},
-    fs,
+    env, fs,
     path::PathBuf,
     time::Duration,
 };
@@ -299,10 +299,12 @@ impl Engine {
     ) -> Result<HashMap<Address, Artifact>> {
         info!("Downloading verified source code for touched contracts");
 
-        let compiler = OnchainCompiler::new(None)?;
-
         let compiler_cache_root =
-            EdbCachePath::new(None as Option<PathBuf>).compiler_chain_cache_dir(chain_id);
+            EdbCachePath::new(env::var("EDB_CACHE_DIR").ok()).compiler_chain_cache_dir(chain_id);
+        let compiler = OnchainCompiler::new(compiler_cache_root)?;
+
+        let etherscan_cache_root =
+            EdbCachePath::new(env::var("EDB_CACHE_DIR").ok()).etherscan_chain_cache_dir(chain_id);
 
         // Create fancy progress bar with blockchain-themed styling
         // NOTE: For multi-threaded usage, wrap in Arc<ProgressBar> to share across threads
@@ -331,7 +333,7 @@ impl Engine {
             let etherscan = Client::builder()
                 .with_api_key(api_key)
                 .with_cache(
-                    compiler_cache_root.clone(),
+                    etherscan_cache_root.clone(),
                     Duration::from_secs(DEFAULT_ETHERSCAN_CACHE_TTL),
                 ) // 24 hours
                 .chain(chain_id.into())?
@@ -373,8 +375,9 @@ impl Engine {
 
         let mut analysis_result = HashMap::new();
         for (address, artifact) in artifacts {
-            debug!("Analyzing contract at address: {}", address);
+            debug!("Analyzing contract at address: {address}");
             let analysis = analyze(artifact)?;
+            debug!("Finished analyzing contract at address: {address}");
             analysis_result.insert(*address, analysis);
         }
 

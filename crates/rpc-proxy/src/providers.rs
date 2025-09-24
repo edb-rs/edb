@@ -155,7 +155,7 @@ impl ProviderManager {
         // Ensure at least one provider is healthy
         let healthy_count = providers.iter().filter(|p| p.is_healthy).count();
         if healthy_count == 0 {
-            return Err(eyre::eyre!("No healthy RPC providers available"));
+            warn!("No healthy RPC providers available, we will use cache-only mode")
         }
 
         info!("Initialized with {} healthy providers out of {}", healthy_count, providers.len());

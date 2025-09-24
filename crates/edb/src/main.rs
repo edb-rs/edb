@@ -18,6 +18,8 @@
 //!
 //! A step-by-step debugger for Ethereum transactions.
 
+use std::env;
+
 use alloy_primitives::TxHash;
 use clap::{Parser, Subcommand, ValueEnum};
 use eyre::Result;
@@ -29,7 +31,9 @@ mod utils;
 /// Command-line interface for EDB
 #[derive(Debug, Parser)]
 #[command(name = "edb")]
-#[command(about = "Ethereum Debugger - A step-by-step debugger for Ethereum transactions")]
+#[command(
+    about = "Ethereum Debugger - Source-level time-travel debugger for Ethereum smart contracts"
+)]
 #[command(version)]
 pub struct Cli {
     /// Upstream RPC URLs (comma-separated, overrides defaults if provided)
@@ -60,6 +64,10 @@ pub struct Cli {
     /// Disable cache - do not use cached RPC responses
     #[arg(long)]
     pub disable_cache: bool,
+
+    /// The cache directory
+    #[arg(long, env = "EDB_CACHE_DIR")]
+    pub cache_dir: Option<String>,
 
     /// Command to execute
     #[command(subcommand)]
@@ -102,6 +110,11 @@ async fn main() -> Result<()> {
 
     // Parse CLI arguments
     let cli = Cli::parse();
+
+    if let Some(cache_dir) = &cli.cache_dir {
+        tracing::info!("Using cache directory: {cache_dir}");
+        env::set_var("EDB_CACHE_DIR", cache_dir);
+    }
 
     // Set up RPC endpoint (proxy or direct)
     let effective_rpc_url = {

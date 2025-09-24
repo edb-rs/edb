@@ -56,7 +56,7 @@ use edb_common::types::{ExecutionFrameId, Trace};
 use eyre::Result;
 use itertools::Itertools;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::{
     analysis::{AnalysisResult, StepRef, UFID},
@@ -341,7 +341,7 @@ where
             // b) There is overrided operation (e.g., `+`)
             if is_entry(next_step) && contract.is_some() && next_contract.is_none() {
                 // This is likely an internal call to a library function
-                warn!(
+                debug!(
                     "Assuming an internal call to a library function at Snapshot {}",
                     snapshots[i].1.id()
                 );

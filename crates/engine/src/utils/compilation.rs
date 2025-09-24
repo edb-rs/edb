@@ -36,7 +36,7 @@
 //! 3. Compile the contract with all dependencies
 //! 4. Generate artifact with metadata and compilation output
 
-use std::path::PathBuf;
+use std::{env, path::PathBuf};
 
 use alloy_primitives::Address;
 use edb_common::{Cache, EdbCache};
@@ -47,7 +47,7 @@ use foundry_compilers::{
     solc::{Solc, SolcLanguage},
 };
 use itertools::Itertools;
-use tracing::{debug, trace};
+use tracing::{debug, error, info, trace};
 
 use crate::{etherscan_rate_limit_guard, Artifact};
 
@@ -76,21 +76,33 @@ impl OnchainCompiler {
         if let Some(output) = self.cache.load_cache(addr.to_string()) {
             Ok(output)
         } else {
+            if env::var("EDB_TEST_ETHERSCAN_MODE").is_ok_and(|ref v| v == "cache-only") {
+                debug!(address=?addr, "skipping on-chain compilation in cache-only mode");
+                return Ok(None);
+            }
+
             let mut meta =
                 match etherscan_rate_limit_guard!(etherscan.contract_source_code(addr).await) {
                     Ok(meta) => meta,
                     Err(EtherscanError::ContractCodeNotVerified(_)) => {
                         // We do not cache the fact that the contract is not verified, since it may be
                         // verified later.
+                        info!(address=?addr, "contract is not verified");
                         return Ok(None);
                     }
-                    Err(e) => return Err(e.into()),
+                    Err(e) => {
+                        // We do not cache since it could be caused by network issues.
+                        error!(address=?addr, "failed to query Etherscan: {e}");
+                        return Ok(None);
+                    }
                 };
             eyre::ensure!(meta.items.len() == 1, "contract not found or ill-formed");
             let meta = meta.items.remove(0);
 
             if meta.is_vyper() {
-                // We do not cache if the contract is a Vyper contract.
+                // We can safely cache since we cannot deal with vyper
+                let none = None;
+                self.cache.save_cache(addr.to_string(), &none)?;
                 return Ok(None);
             }
 

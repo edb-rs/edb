@@ -30,7 +30,7 @@ use tracing_subscriber::{
     fmt::{self, format::FmtSpan, time::LocalTime},
     layer::SubscriberExt,
     util::SubscriberInitExt,
-    EnvFilter, Layer,
+    EnvFilter,
 };
 
 /// Initialize fancy logging for EDB components
@@ -63,9 +63,9 @@ use tracing_subscriber::{
 /// }
 /// ```
 pub fn init_logging(component_name: &str, enable_file_logging: bool) -> Result<()> {
-    // Create environment filter with default INFO level
+    // Create environment filter with default WARN level
     let env_filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("info"))
+        .or_else(|_| EnvFilter::try_new(Level::WARN.as_str()))
         .expect("Failed to create environment filter");
 
     // Create beautiful console layer with colors and formatting
@@ -89,7 +89,6 @@ pub fn init_logging(component_name: &str, enable_file_logging: bool) -> Result<(
         let (non_blocking_appender, guard) = non_blocking(file_appender);
 
         // Store guard to prevent it from being dropped
-        // In a real application, you'd want to store this somewhere persistent
         std::mem::forget(guard);
 
         // Create file layer (without colors for file output)
@@ -107,8 +106,8 @@ pub fn init_logging(component_name: &str, enable_file_logging: bool) -> Result<(
         // Initialize subscriber with both console and file layers
         tracing_subscriber::registry()
             .with(env_filter)
-            .with(console_layer.with_filter(filter_for_console()))
-            .with(file_layer.with_filter(filter_for_file()))
+            .with(console_layer)
+            .with(file_layer)
             .try_init()
             .map_err(|e| eyre::eyre!("Failed to initialize tracing subscriber: {}", e))?;
 
@@ -142,19 +141,6 @@ fn create_log_directory(component_name: &str) -> Result<PathBuf> {
     fs::create_dir_all(&log_dir)?;
 
     Ok(log_dir)
-}
-
-/// Filter for console output - show everything
-fn filter_for_console() -> EnvFilter {
-    EnvFilter::from_default_env()
-        .add_directive("tower_http=warn".parse().unwrap()) // Reduce HTTP noise
-        .add_directive("hyper=warn".parse().unwrap()) // Reduce HTTP noise
-        .add_directive("reqwest=warn".parse().unwrap()) // Reduce HTTP noise
-}
-
-/// Filter for file output - be more verbose for debugging
-fn filter_for_file() -> EnvFilter {
-    EnvFilter::from_default_env()
 }
 
 /// Log useful environment and system information
@@ -205,7 +191,7 @@ fn log_environment_info(component_name: &str) {
 pub fn init_file_only_logging(component_name: &str) -> Result<PathBuf> {
     // Create environment filter with default INFO level
     let env_filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("info"))
+        .or_else(|_| EnvFilter::try_new(Level::INFO.as_str()))
         .expect("Failed to create environment filter");
 
     // Create log directory in temp folder
@@ -344,17 +330,6 @@ mod tests {
         assert!(log_dir.exists());
         assert!(log_dir.to_string_lossy().contains("edb-logs"));
         assert!(log_dir.to_string_lossy().contains("test-component"));
-    }
-
-    #[test]
-    fn test_environment_filters() {
-        // Test that filters can be created without errors
-        let console_filter = filter_for_console();
-        let file_filter = filter_for_file();
-
-        // Both should be valid filters (non-empty string representation)
-        assert!(!console_filter.to_string().is_empty());
-        assert!(!file_filter.to_string().is_empty());
     }
 
     #[test]

@@ -449,7 +449,7 @@ impl RpcHandler {
                         }
 
                         return Err(last_network_error
-                            .unwrap_or_else(|| eyre::eyre!("No healthy RPC providers available")));
+                            .unwrap_or_else(|| eyre::eyre!("No available RPC providers")));
                     }
                 };
 

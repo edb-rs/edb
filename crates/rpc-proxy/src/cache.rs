@@ -16,6 +16,7 @@
 
 //! In-memory cache manager for RPC responses with disk persistence
 
+use alloy_chains::NamedChain;
 use edb_common::{
     cache::{CachePath, EdbCachePath},
     forking,
@@ -357,11 +358,14 @@ impl CacheManager {
                 .filter_map(Result::ok)
                 .collect();
 
-        if chain_ids.len() != 1 {
+        let chain_id = if rpc_urls.is_empty() {
+            warn!("No RPC URL is provided, assume we are on mainnet and enter cache-only mode");
+            NamedChain::Mainnet.into()
+        } else if chain_ids.len() == 1 {
+            *chain_ids.iter().next().unwrap()
+        } else {
             eyre::bail!("All RPC URLs must belong to the same chain. Found: {:?}", chain_ids);
-        }
-
-        let chain_id = *chain_ids.iter().next().unwrap();
+        };
 
         let cache_path = EdbCachePath::new(cache_dir)
             .rpc_chain_cache_dir(chain_id)

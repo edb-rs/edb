@@ -57,10 +57,11 @@
 //! }
 //! ```
 
+use itertools::Itertools;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::warn;
+use tracing::debug;
 
 use crate::{
     analysis::{
@@ -172,43 +173,27 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
         .map(|(path, source_result)| {
             let source_id = source_result.id;
             let mut source_ast = source_result.ast.clone().ok_or(AnalysisError::MissingAst)?;
+
+            debug!(path=?path, "start pruning AST for analyzing source");
             let source_unit = ASTPruner::convert(&mut source_ast, false)
                 .map_err(AnalysisError::ASTConversionError)?;
+            debug!(path=?path, "finish pruning AST for analyzing source");
 
             let analyzer = Analyzer::new(source_id);
             let mut source_result = analyzer.analyze(source_id, path, &source_unit)?;
+            debug!(path=?path, "finish the core analysis");
 
             // sort steps in reverse order
             source_result.steps.sort_unstable_by_key(|step| step.read().src.start);
             source_result.steps.reverse();
-
-            // ensure we do not have overlapped steps
-            // XXX (ZZ): the check failed for the following command, need to investigate
-            //  ./target/debug/edb replay 0xd253e3b563bf7b8894da2a69db836a4e98e337157564483d8ac72117df355a9d
-            //  overlap happens on USDC (0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48)
-            for (i, step) in source_result.steps.iter().enumerate() {
-                if i > 0 {
-                    let prev = &source_result.steps[i - 1];
-                    let end = step
-                        .read()
-                        .src
-                        .start
-                        .map(|start| start + step.read().src.length.unwrap_or(0));
-
-                    if end > prev.read().src.start {
-                        warn!("Overlapping steps detected: {:?}", step);
-                        // return Err(AnalysisError::StepPartitionError(eyre::eyre!(
-                        //     "Overlapping steps detected"
-                        // )));
-                    }
-                }
-            }
+            debug!(path=?path, "sorted steps in reverse order");
 
             Ok(source_result)
         })
         .collect::<Result<Vec<_>, AnalysisError>>()?;
 
     // build lookup tables
+    debug!(contract=?artifact.meta.contract_name, "building lookup tables");
     let mut ucid_to_contract = HashMap::new();
     let mut ufid_to_function = HashMap::new();
     let mut usid_to_step = HashMap::new();
@@ -234,6 +219,22 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
         utid_to_user_defined_type,
         user_defined_types,
     })
+}
+
+// XXX (ZZ): this function, if called, will cause a very strange stack overflow during
+// runtime. We haven't investigated why, and hence leave it as dead code.
+fn _check_step_overlap(steps: &[StepRef]) -> Result<(), AnalysisError> {
+    for (prev, step) in steps.iter().tuple_windows() {
+        let end = step.read().src.start.map(|start| start + step.read().src.length.unwrap_or(0));
+        if end > prev.read().src.start {
+            return Err(AnalysisError::StepPartitionError(eyre::eyre!(
+                "Overlapping steps detected: [{:?}, {:?}]",
+                step.read(),
+                prev.read()
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

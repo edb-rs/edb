@@ -70,9 +70,15 @@ pub trait CachePath {
 }
 
 /// Cache path for edb.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EdbCachePath {
     root: Option<PathBuf>,
+}
+
+impl Default for EdbCachePath {
+    fn default() -> Self {
+        Self { root: dirs_next::home_dir().map(|p| p.join(".edb").join("cache")) }
+    }
 }
 
 impl EdbCachePath {
@@ -83,6 +89,11 @@ impl EdbCachePath {
                 .map(Into::into)
                 .or_else(|| dirs_next::home_dir().map(|p| p.join(".edb").join("cache"))),
         }
+    }
+
+    /// New empty cache path.
+    pub fn empty() -> Self {
+        Self { root: None }
     }
 }
 
