@@ -37,10 +37,6 @@ struct Args {
     #[arg(long)]
     config: Option<PathBuf>,
 
-    /// Enable debug logging
-    #[arg(long)]
-    debug: bool,
-
     /// Enable mouse support
     #[arg(long)]
     mouse: bool,
@@ -59,15 +55,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Setup file-only logging for TUI (logs go to file, not terminal)
-    let log_file_path = if args.debug {
-        // For debug mode, set RUST_LOG to debug level
-        std::env::set_var("RUST_LOG", "debug");
-        logging::init_file_only_logging("edb-tui")?
-    } else {
-        // For normal mode, use info level
-        std::env::set_var("RUST_LOG", "info");
-        logging::init_file_only_logging("edb-tui")?
-    };
+    let log_file_path = logging::init_file_only_logging("edb-tui")?;
 
     // Print log file location to stderr (so user knows where logs are)
     // Use stderr so it doesn't interfere with TUI if there are issues

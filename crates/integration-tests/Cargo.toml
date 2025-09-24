@@ -19,6 +19,7 @@ workspace = true
 # EDB internal crates
 edb-common.workspace = true
 edb-rpc-proxy.workspace = true
+edb-engine.workspace = true
 
 # Test dependencies
 tokio = { workspace = true, features = ["full"] }
@@ -26,6 +27,7 @@ serde_json.workspace = true
 chrono.workspace = true
 eyre.workspace = true
 tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 reqwest = { workspace = true, features = ["json"] }
 
 # Alloy for blockchain types

@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Add expression watcher ([#7](https://github.com/edb-rs/edb/issues/7))
+- Partially support integration tests for edb ([#6](https://github.com/edb-rs/edb/issues/6))
+
 ### Changed
 - Improved horizontal scrolling support in terminal panel vim mode
+- Update dependencies to match foundry [0867fc1](https://github.com/foundry-rs/foundry/commit/0867fc1)
+- Extend CI to Windows and MacOS
+- Improve the cache mechanism to avoid redundant downloads ([#10](https://github.com/edb-rs/edb/issues/10))
 
 ## [0.0.1] - 2024-09-19
 
@@ -76,15 +83,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Version 0.0.1
 This is the initial public release of EDB, representing months of development and testing. While marked as 0.0.1, the debugger is functional and can handle real-world debugging scenarios for most Solidity contracts.
-
-**What's Next?**
-- Enhanced variable watcher for complex types
-- Conditional breakpoints
-- Integration with popular development frameworks (Foundry, Hardhat)
-- Web-based user interface
-- Performance optimizations and memory usage improvements
-
-For the complete roadmap, see [TODO.md](TODO.md).
 
 **Feedback Welcome!**
 This is an early release and we're actively seeking feedback from the Ethereum development community. Please report issues, request features, and share your debugging experiences through GitHub Issues.
