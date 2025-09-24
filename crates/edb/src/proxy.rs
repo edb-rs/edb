@@ -196,7 +196,7 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
 
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
+        use std::{env, os::windows::process::CommandExt};
 
         let mut args = vec![
             "server".to_string(), // Add the server subcommand

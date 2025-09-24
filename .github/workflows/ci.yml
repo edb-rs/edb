@@ -22,6 +22,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and target
         uses: actions/cache@v4
@@ -31,9 +33,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-check-
             ${{ runner.os }}-cargo-
 
       - name: Run cargo check
@@ -41,7 +42,10 @@ jobs:
 
   fmt:
     name: Rustfmt
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -49,7 +53,19 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Run cargo fmt
         run: cargo fmt --all --check
@@ -67,7 +83,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and target
         uses: actions/cache@v4
@@ -77,10 +93,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-clippy-
-            ${{ runner.os }}-cargo-check-
             ${{ runner.os }}-cargo-
 
       - name: Run clippy
@@ -98,6 +112,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and target
         uses: actions/cache@v4
@@ -107,11 +123,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-build-
-            ${{ runner.os }}-cargo-clippy-
-            ${{ runner.os }}-cargo-check-
             ${{ runner.os }}-cargo-
 
       - name: Run cargo build
@@ -129,6 +142,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and target
         uses: actions/cache@v4
@@ -138,12 +153,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-test-
-            ${{ runner.os }}-cargo-build-
-            ${{ runner.os }}-cargo-clippy-
-            ${{ runner.os }}-cargo-check-
             ${{ runner.os }}-cargo-
 
       - name: Run integration tests
