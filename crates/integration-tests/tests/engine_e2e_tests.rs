@@ -30,6 +30,10 @@ mod test_transactions {
     /// Simple transaction
     pub const SIMPLE_TRANSACTION: &str =
         "0x608d79d71287ca8a0351955a92fa4dce74d2c75cbfccfa08ed331b33de0ce4c2";
+
+    /// Uniswap V3 swap transaction
+    pub const UNISWAP_V3_SWAP: &str =
+        "0x1282e09bb5118f619da81b6a24c97999e7057ee9975628562c7cecbb4aa9f5af";
 }
 
 async fn replay_transaction_and_analyze(tx_hash: &str) {
@@ -64,4 +68,12 @@ async fn test_engine_replay_simple_transaction() {
     info!("Testing engine replay with simple transaction");
 
     replay_transaction_and_analyze(test_transactions::SIMPLE_TRANSACTION).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_engine_replay_uniswap_v3_swap() {
+    init::init_test_environment();
+    info!("Testing engine replay with Uniswap V3 swap transaction");
+
+    replay_transaction_and_analyze(test_transactions::UNISWAP_V3_SWAP).await;
 }

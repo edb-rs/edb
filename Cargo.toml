@@ -37,11 +37,9 @@ rust-2018-idioms = "warn"
 unused-must-use = "warn"
 redundant-lifetimes = "warn"
 missing-docs = "warn"
-missing-crate-level-docs = "warn"
 
 [workspace.lints.rustdoc]
 all = "warn"
-missing-docs = "warn"
 missing-crate-level-docs = "warn"
 private-doc-tests = "warn"
 invalid-html-tags = "warn"
