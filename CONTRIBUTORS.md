@@ -33,6 +33,7 @@ This file recognizes the individuals who have contributed to the development of 
 ## Contributors
 
 _This section will be updated as the project receives contributions from the community._
+Contributors are sorted in alphabetical order by their GitHub ID and the order does not reflect the significance of contribution.
 
 - ret2happy (@ret2happy)
 
@@ -41,8 +42,10 @@ _This section will be updated as the project receives contributions from the com
 Contributors are automatically added to this file when they:
 - Submit merged pull requests
 - Report significant bugs or security issues
-- Contribute documentation improvements
+- Contribute significant documentation improvements.
 - Provide substantial feedback or testing
+
+_Typo fixes and AI-generated content are not considered substantial contribution._
 
 All contributors must sign our [Contributor License Agreement (CLA)](CLA.md) before their contributions can be merged.
 
