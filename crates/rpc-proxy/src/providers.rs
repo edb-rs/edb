@@ -126,31 +126,40 @@ impl ProviderManager {
     pub async fn new(rpc_urls: Vec<String>, max_failures: u32) -> Result<Self> {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).build()?;
 
-        let mut providers = Vec::new();
+        // Initialize providers with parallel health checks
+        let health_futures: Vec<_> = rpc_urls
+            .iter()
+            .map(|url| {
+                let client = client.clone();
+                let url = url.clone();
+                async move {
+                    let mut provider = ProviderInfo {
+                        url: url.clone(),
+                        is_healthy: false,
+                        last_health_check: None,
+                        response_time_ms: None,
+                        consecutive_failures: 0,
+                    };
 
-        // Initialize providers and perform initial health check
-        for url in rpc_urls {
-            let mut provider = ProviderInfo {
-                url: url.clone(),
-                is_healthy: false,
-                last_health_check: None,
-                response_time_ms: None,
-                consecutive_failures: 0,
-            };
+                    match Self::check_provider_health(&client, &url).await {
+                        Ok(response_time) => {
+                            provider.is_healthy = true;
+                            provider.response_time_ms = Some(response_time);
+                            provider.last_health_check = Some(Instant::now());
+                            info!("Provider {} is healthy ({}ms)", url, response_time);
+                        }
+                        Err(_) => {
+                            warn!("Provider {} is not responding during initialization", url);
+                            provider.consecutive_failures = 1;
+                        }
+                    }
 
-            // Perform initial health check
-            if let Ok(response_time) = Self::check_provider_health(&client, &url).await {
-                provider.is_healthy = true;
-                provider.response_time_ms = Some(response_time);
-                provider.last_health_check = Some(Instant::now());
-                info!("Provider {} is healthy ({}ms)", url, response_time);
-            } else {
-                warn!("Provider {} is not responding during initialization", url);
-                provider.consecutive_failures = 1;
-            }
+                    provider
+                }
+            })
+            .collect();
 
-            providers.push(provider);
-        }
+        let providers: Vec<ProviderInfo> = futures::future::join_all(health_futures).await;
 
         // Ensure at least one provider is healthy
         let healthy_count = providers.iter().filter(|p| p.is_healthy).count();
@@ -350,23 +359,49 @@ impl ProviderManager {
             providers.clone()
         };
 
-        for provider in providers_snapshot {
-            // Check if provider needs health check (unhealthy or stale)
-            let needs_check = !provider.is_healthy
-                || provider.last_health_check.is_none_or(|t| t.elapsed() > Duration::from_secs(60));
+        let health_futures: Vec<_> = providers_snapshot
+            .into_iter()
+            .filter_map(|provider| {
+                // Check if provider needs health check (unhealthy or stale)
+                let needs_check = !provider.is_healthy
+                    || provider
+                        .last_health_check
+                        .is_none_or(|t| t.elapsed() > Duration::from_secs(60));
 
-            if needs_check {
-                match Self::check_provider_health(&self.client, &provider.url).await {
-                    Ok(response_time) => {
-                        self.mark_provider_success(&provider.url, response_time).await;
-                        if !provider.is_healthy {
-                            debug!("Provider {} is now healthy", provider.url);
+                if needs_check {
+                    let client = self.client.clone();
+                    let url = provider.url.clone();
+                    let was_healthy = provider.is_healthy;
+
+                    Some(async move {
+                        match Self::check_provider_health(&client, &url).await {
+                            Ok(response_time) => {
+                                if !was_healthy {
+                                    debug!("Provider {} is now healthy", url);
+                                }
+                                (url, Ok(response_time))
+                            }
+                            Err(e) => {
+                                debug!("Health check failed for {}: {}", url, e);
+                                (url, Err(()))
+                            }
                         }
-                    }
-                    Err(e) => {
-                        debug!("Health check failed for {}: {}", provider.url, e);
-                        self.mark_provider_failed(&provider.url).await;
-                    }
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let results = futures::future::join_all(health_futures).await;
+
+        for (url, result) in results {
+            match result {
+                Ok(response_time) => {
+                    self.mark_provider_success(&url, response_time).await;
+                }
+                Err(()) => {
+                    self.mark_provider_failed(&url).await;
                 }
             }
         }
