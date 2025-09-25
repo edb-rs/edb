@@ -39,7 +39,7 @@ Contributors are sorted in alphabetical order by their GitHub ID and the order d
 
 ### How to Get Listed
 
-Contributors are automatically added to this file when they:
+Contributors are added by core maintainers to this file when they:
 - Submit merged pull requests
 - Report significant bugs or security issues
 - Contribute significant documentation improvements.
