@@ -6,6 +6,20 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
 
 ## Milestones
 
+### ✅ Milestone 0: Comprehensive Testing [URGENT]
+**Goal**: Ensure reliability through extensive testing
+
+- [ ] **Test Coverage Expansion**
+  - Unit tests for all core modules (target: >80% coverage)
+  - Integration tests for complete debugging workflows
+  - End-to-end tests for UI interactions
+
+- [ ] **Test Infrastructure**
+  - Automated test suite for mainnet fork testing
+  - Regression test suite for known issues
+  - Performance benchmarking suite
+  - Cross-chain compatibility testing
+
 ### 🎯 Milestone 1: Enhanced Debugging Capabilities
 **Goal**: Expand core debugging features to support more complex scenarios
 
@@ -128,15 +142,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Enable automated debugging suggestions
   - Support for debugging pattern recognition
 
-### 📚 Milestone 7: Advanced Features
-**Goal**: Provide advanced debugging capabilities for complex scenarios
-
-- [ ] **Debugger-Friendly Decompilation**
-  - Solidity decompilation for contracts without source
-  - Readable bytecode representation
-  - Source mapping reconstruction
-
-### 🔄 Milestone 8: State Manipulation & What-If Analysis
+### 🔄 Milestone 7: State Manipulation & What-If Analysis
 **Goal**: Enable users to modify state and explore alternative execution paths
 
 - [ ] **User State Modification**
@@ -150,7 +156,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Automated scenario generation for edge cases
   - State diff visualization between scenarios
 
-### 🌟 Milestone 9: Enhanced Web UI
+### 🌟 Milestone 8: Enhanced Web UI
 **Goal**: Develop a modern, feature-rich web interface
 
 - [ ] **Modern Web UI Development**
@@ -166,7 +172,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Collaborative debugging with session sharing
 
 
-### 📊 Milestone 10: Scripting & Analysis Tools
+### 📊 Milestone 9: Scripting & Analysis Tools
 **Goal**: Enable programmatic debugging and custom analysis workflows
 
 - [ ] **Python Scripting Support**
@@ -176,45 +182,6 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Export debugging data to Python-friendly formats (JSON, CSV, Parquet)
   - Integration with popular data science libraries (pandas, numpy)
   - Automated report generation
-
-### ✅ Milestone 11: Comprehensive Testing
-**Goal**: Ensure reliability through extensive testing
-
-- [ ] **Test Coverage Expansion**
-  - Unit tests for all core modules (target: >80% coverage)
-  - Integration tests for complete debugging workflows
-  - End-to-end tests for UI interactions
-
-- [ ] **Test Infrastructure**
-  - Automated test suite for mainnet fork testing
-  - Regression test suite for known issues
-  - Performance benchmarking suite
-  - Cross-chain compatibility testing
-
-## Priority Levels
-
-### High Priority
-1. Complex type variable watcher
-2. Memory optimization
-3. Foundry test debugging support
-4. Comprehensive test coverage
-
-### Medium Priority
-1. Improved snapshot system
-2. Multi-chain and L2 support
-3. Conditional breakpoints
-4. Modern Web UI development
-5. Smart contract intelligence
-
-### Future Enhancements
-1. State manipulation and what-if analysis
-2. Agent MCP support
-3. Debugger-friendly decompilation
-4. Collaborative debugging features
-
-## Contributing
-
-Contributions are welcome! Please refer to the main README for development setup and contribution guidelines.
 
 ## Notes
 
