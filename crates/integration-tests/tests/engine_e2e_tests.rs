@@ -31,6 +31,10 @@ mod test_transactions {
     pub const SIMPLE_TRANSACTION: &str =
         "0x608d79d71287ca8a0351955a92fa4dce74d2c75cbfccfa08ed331b33de0ce4c2";
 
+    /// Large transaction
+    pub const LARGE_TRANSACTION: &str =
+        "0x0886e768f9310a753e360738e1aa6647847aca57c2ce05f09ca1333e8cf81e8c";
+
     /// Uniswap V3 swap transaction
     pub const UNISWAP_V3_SWAP: &str =
         "0x1282e09bb5118f619da81b6a24c97999e7057ee9975628562c7cecbb4aa9f5af";
@@ -55,7 +59,7 @@ async fn replay_transaction_and_analyze(tx_hash: &str) {
             info!("Transaction {tx_hash} replay completed without errors");
         }
         Err(e) => {
-            panic!("Failed to replay simple transaction: {e:?}");
+            panic!("Failed to replay transaction: {e:?}");
         }
     }
 
@@ -68,6 +72,14 @@ async fn test_engine_replay_simple_transaction() {
     info!("Testing engine replay with simple transaction");
 
     replay_transaction_and_analyze(test_transactions::SIMPLE_TRANSACTION).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_engine_replay_large_transaction() {
+    init::init_test_environment();
+    info!("Testing engine replay with large transaction");
+
+    replay_transaction_and_analyze(test_transactions::LARGE_TRANSACTION).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

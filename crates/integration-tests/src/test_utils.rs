@@ -118,7 +118,7 @@ pub mod proxy {
         rpc_urls: Option<Vec<String>>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let mut proxy_builder = ProxyServerBuilder::new()
-            .max_cache_items(20000)
+            .max_cache_items(500000)
             .grace_period(grace_period)
             .heartbeat_interval(30);
 
