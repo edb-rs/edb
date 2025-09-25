@@ -34,6 +34,8 @@ This file recognizes the individuals who have contributed to the development of 
 
 _This section will be updated as the project receives contributions from the community._
 
+- ret2happy (@ret2happy)
+
 ### How to Get Listed
 
 Contributors are automatically added to this file when they:
