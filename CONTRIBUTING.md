@@ -65,10 +65,9 @@ cargo test
 
 # Run tests for a specific crate
 cargo test -p edb-common
-
-# Run integration tests (requires ETH_RPC_URL)
-ETH_RPC_URL=https://eth.llamarpc.com cargo test -p edb-common --test forking_tests -- --ignored
 ```
+
+*Note: Tests are still being finalized, so `cargo test` may currently fail.*
 
 ### Code Quality
 
@@ -80,9 +79,6 @@ cargo fmt --all
 
 # Run clippy
 cargo clippy --all-targets --all-features -- -D warnings
-
-# Check documentation
-cargo doc --no-deps --all-features
 ```
 
 ## Contribution Guidelines
