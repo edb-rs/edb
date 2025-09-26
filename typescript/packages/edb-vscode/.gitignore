@@ -1,0 +1,16 @@
+# Build outputs
+dist/
+out/
+*.tsbuildinfo
+
+# Dependencies (handled at workspace level)
+node_modules/
+
+# VS Code extension packaging
+*.vsix
+
+# Test results
+.vscode-test/
+
+# Environment variables
+.env

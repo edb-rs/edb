@@ -1,0 +1,51 @@
+{
+  "name": "@edb/client",
+  "version": "0.0.1",
+  "description": "Unified RPC client library for EDB engine communication",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "clean": "rm -rf dist .tsbuildinfo",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@edb/types": "workspace:*",
+    "ws": "^8.0.0",
+    "eventemitter3": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.0.0",
+    "typescript": "^5.0.0",
+    "eslint": "^9.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "vitest": "^1.0.0",
+    "msw": "^2.0.0"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "keywords": [
+    "ethereum",
+    "debugger",
+    "rpc-client",
+    "websocket",
+    "typescript"
+  ]
+}

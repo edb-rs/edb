@@ -1,0 +1,6 @@
+# Build outputs
+dist/
+*.tsbuildinfo
+
+# Dependencies (handled at workspace level)
+node_modules/
