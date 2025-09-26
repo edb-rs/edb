@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useEDBStore } from './store/edb-store';
+import { useAdvancedEDBStore } from './store/advanced-edb-store';
 import { useTheme } from './hooks/useTheme';
 
 export function App() {
@@ -9,14 +9,14 @@ export function App() {
     isConnecting,
     connectionError,
     serverUrl,
-    traceData,
-    snapshotCount,
-    isLoadingTrace,
     connect,
     disconnect,
     setServerUrl,
-    callRpcMethod
-  } = useEDBStore();
+    getSnapshotCount,
+    getTraceData,
+    isAnyLoading,
+    getLoadingStatus
+  } = useAdvancedEDBStore();
 
   // Auto-connect on startup
   useEffect(() => {
@@ -33,15 +33,10 @@ export function App() {
     disconnect();
   };
 
-  const handleTestRpcMethod = async (method: string) => {
-    try {
-      const result = await callRpcMethod(method);
-      console.log(`${method} result:`, result);
-      alert(`${method} executed successfully! Check console for details.`);
-    } catch (error) {
-      alert(`Failed to call ${method}: ${error}`);
-    }
-  };
+  // Get data using new non-blocking approach
+  const snapshotCount = getSnapshotCount();
+  const traceData = getTraceData();
+  const loadingStatus = getLoadingStatus();
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-600 dark:bg-gray-900 p-8 transition-colors duration-200">
@@ -127,10 +122,12 @@ export function App() {
               <div>
                 <h3 className="font-medium text-gray-700 dark:text-gray-300 dark:text-gray-300 mb-2">Snapshot Count</h3>
                 <div className="text-lg">
-                  {snapshotCount !== null ? (
+                  {snapshotCount > 0 ? (
                     <span className="font-mono text-blue-600">{snapshotCount}</span>
                   ) : (
-                    <span className="text-gray-500 dark:text-gray-400">Loading...</span>
+                    <span className="text-gray-500 dark:text-gray-400">
+                      {loadingStatus.hasAnyLoading ? 'Loading...' : 'Not loaded'}
+                    </span>
                   )}
                 </div>
               </div>
@@ -138,7 +135,7 @@ export function App() {
               <div>
                 <h3 className="font-medium text-gray-700 dark:text-gray-300 dark:text-gray-300 mb-2">Trace Status</h3>
                 <div className="text-lg">
-                  {isLoadingTrace ? (
+                  {loadingStatus.hasAnyLoading ? (
                     <span className="text-yellow-600 dark:text-yellow-400">Loading...</span>
                   ) : traceData ? (
                     <span className="text-green-600 dark:text-green-400">{traceData.inner.length} calls loaded</span>
@@ -149,33 +146,38 @@ export function App() {
               </div>
             </div>
 
-            {/* Available RPC Methods */}
-            <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
-              <h3 className="font-medium text-gray-700 dark:text-gray-300 mb-3">Available RPC Methods</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                {[
-                  'edb_getTrace',
-                  'edb_getSnapshotCount',
-                  'edb_getSnapshotInfo',
-                  'edb_getCode',
-                  'edb_getContractABI',
-                  'edb_getCallableABI',
-                  'edb_getStorage',
-                  'edb_getStorageDiff',
-                  'edb_getNextCall',
-                  'edb_getPrevCall',
-                  'edb_evalOnSnapshot'
-                ].map((method) => (
-                  <button
-                    key={method}
-                    onClick={() => handleTestRpcMethod(method)}
-                    className="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded border border-gray-200 dark:border-gray-600 text-left font-mono text-gray-800 dark:text-gray-200 transition-colors"
-                  >
-                    {method}
-                  </button>
-                ))}
+            {/* Cache Statistics */}
+            {isConnected && (
+              <div className="border-t border-gray-200 dark:border-gray-600 pt-4">
+                <h3 className="font-medium text-gray-700 dark:text-gray-300 mb-3">Background Processing Status</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div className="text-center">
+                    <div className="text-lg font-mono text-blue-600 dark:text-blue-400">
+                      {loadingStatus.snapshotInfo ? '⟳' : '✓'}
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">Snapshot Info</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-mono text-blue-600 dark:text-blue-400">
+                      {loadingStatus.code ? '⟳' : '✓'}
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">Code</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-mono text-blue-600 dark:text-blue-400">
+                      {loadingStatus.storage ? '⟳' : '✓'}
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">Storage</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-mono text-blue-600 dark:text-blue-400">
+                      {loadingStatus.navigation ? '⟳' : '✓'}
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">Navigation</div>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
