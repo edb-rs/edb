@@ -110,7 +110,7 @@ async fn test_proxy_health_endpoints() {
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     // Test edb_ping
     let ping_request = json!({
@@ -147,7 +147,7 @@ async fn test_proxy_registry_endpoints() {
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     // Test edb_register
     let register_request = json!({
@@ -186,7 +186,7 @@ async fn test_proxy_cache_stats_endpoint() {
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     // Test edb_cache_stats
     let stats_request = json!({
@@ -214,7 +214,7 @@ async fn test_proxy_active_instances_endpoint() {
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     // First, register a couple of EDB instances
     let register_request1 = json!({
@@ -227,7 +227,7 @@ async fn test_proxy_active_instances_endpoint() {
     // Mock the eth_chainId call that happens during cache path setup
     Mock::given(method("POST"))
         .and(path("/"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&json!({
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "jsonrpc": "2.0",
             "id": 1,
             "result": "0x1"
@@ -277,7 +277,7 @@ async fn test_proxy_rpc_forwarding_and_caching() {
     let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
     let proxy_addr = start_proxy_server(_proxy).await;
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     let response_data = json!({
         "jsonrpc": "2.0",
@@ -325,7 +325,7 @@ async fn test_proxy_non_cacheable_forwarding() {
     let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
     let proxy_addr = start_proxy_server(_proxy).await;
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     let response_data = json!({
         "jsonrpc": "2.0",
@@ -386,7 +386,7 @@ async fn test_proxy_non_deterministic_params_bypass_cache() {
         .await;
 
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     let rpc_request = json!({
         "jsonrpc": "2.0",
@@ -417,7 +417,7 @@ async fn test_proxy_cache_data_collection() {
     let (proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
     let proxy_addr = start_proxy_server(proxy.clone()).await;
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     let response_data = json!({
         "jsonrpc": "2.0",
@@ -480,7 +480,7 @@ async fn test_proxy_shutdown_endpoint() {
     let proxy_addr = start_proxy_server(proxy).await;
 
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     // Test edb_shutdown
     let shutdown_request = json!({
@@ -519,7 +519,7 @@ async fn test_proxy_invalid_request_handling() {
     let proxy_addr = start_proxy_server(_proxy).await;
 
     let client = Client::new();
-    let proxy_url = format!("http://{}", proxy_addr);
+    let proxy_url = format!("http://{proxy_addr}");
 
     // Test request without method
     let invalid_request = json!({

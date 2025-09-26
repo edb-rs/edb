@@ -577,14 +577,14 @@ async fn handle_rpc(
                                 serde_json::json!({
                                     "success": true,
                                     "deleted_count": deleted_count,
-                                    "message": format!("Deleted {} entries for method '{}'", deleted_count, method)
+                                    "message": format!("Deleted {deleted_count} entries for method '{method}'")
                                 })
                             }
                             Err(e) => {
                                 warn!("Failed to delete cache entries: {}", e);
                                 serde_json::json!({
                                     "success": false,
-                                    "error": format!("Failed to delete cache entries: {}", e)
+                                    "error": format!("Failed to delete cache entries: {e}")
                                 })
                             }
                         }
@@ -615,7 +615,7 @@ async fn handle_rpc(
                                 warn!("Failed to delete cache entry: {}", e);
                                 serde_json::json!({
                                     "success": false,
-                                    "error": format!("Failed to delete cache entry: {}", e)
+                                    "error": format!("Failed to delete cache entry: {e}")
                                 })
                             }
                         }
