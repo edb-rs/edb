@@ -163,14 +163,6 @@ function DebuggerLayoutInner() {
             )}
           </button>
 
-          {/* Return to Setup */}
-          <button
-            onClick={() => disconnect()}
-            className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors"
-            title="Return to connection setup"
-          >
-            Exit Debug
-          </button>
         </div>
       </div>
     </div>
