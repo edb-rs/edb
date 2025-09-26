@@ -4,20 +4,8 @@ This file recognizes the individuals who have contributed to the development of 
 
 ## Core Maintainers
 
-### Zhuo Zhang
-- **Role**: Project Co-founder and Lead Developer
-- **Contributions**:
-  - Core debugging engine and architecture design
-  - EVM integration and transaction replay system
-  - RPC proxy system with intelligent caching
-  - Terminal user interface and user experience
-  - Expression evaluation and Solidity integration
-  - Testing infrastructure and CI/CD pipeline
-  - Documentation and community guidelines
-  - Performance optimization and project direction
-- **Contact**: [GitHub](https://github.com/ZhangZhuoSJTU)
+### Zhuo Zhang [<img src="https://github.githubassets.com/favicons/favicon.svg" width="13" height="13">](https://github.com/ZhangZhuoSJTU) [<img src="https://abs.twimg.com/favicons/twitter.3.ico" width="13" height="13">](https://x.com/i2huer) [<img src="https://www.google.com/s2/favicons?domain=zzhang.xyz" width="13" height="13">](https://zzhang.xyz/)
 
-### Wuqi Zhang
 - **Role**: Project Co-founder and Lead Developer
 - **Contributions**:
   - Core debugging engine and architecture design
@@ -28,7 +16,19 @@ This file recognizes the individuals who have contributed to the development of 
   - Testing infrastructure and CI/CD pipeline
   - Documentation and community guidelines
   - Performance optimization and project direction
-- **Contact**: [GitHub](https://github.com/Troublor)
+
+### Wuqi Zhang [<img src="https://github.githubassets.com/favicons/favicon.svg" width="13" height="13">](https://github.com/Troublor) [<img src="https://abs.twimg.com/favicons/twitter.3.ico" width="13" height="13">](https://x.com/troublor) [<img src="https://www.google.com/s2/favicons?domain=troublor.xyz" width="13" height="13">](https://troublor.xyz/)
+
+- **Role**: Project Co-founder and Lead Developer
+- **Contributions**:
+  - Core debugging engine and architecture design
+  - EVM integration and transaction replay system
+  - RPC proxy system with intelligent caching
+  - Terminal user interface and user experience
+  - Expression evaluation and Solidity integration
+  - Testing infrastructure and CI/CD pipeline
+  - Documentation and community guidelines
+  - Performance optimization and project direction
 
 ## Significant Contributors
 
@@ -40,11 +40,11 @@ Significant contributors are recognized through community discussion in GitHub D
 
 _This section lists all individuals who have made [meaningful contributions](#note-on-contributions) to the project._
 
-Contributors are sorted in alphabetical order by their GitHub ID. More details about their contributions can be found at Github's [Contributors Page](https://github.com/edb-rs/edb/graphs/contributors).
+Contributors are sorted in alphabetical order by their GitHub ID. More details can be found at Github's [Contributors Page](https://github.com/edb-rs/edb/graphs/contributors).
 
 - [ret2happy](https://github.com/pcy190)
 
-### How to Get Listed
+## How to Get Listed
 
 **Contributors**: Added when your contribution is merged into the project.
 
@@ -54,20 +54,12 @@ Contributors are sorted in alphabetical order by their GitHub ID. More details a
 - Substantial documentation or testing improvements
 - Sustained community support and engagement
 
-#### Note on Contributions
+### Note on Contributions
 
 _We focus on contributions that meaningfully improve the project. While we appreciate all efforts, simple typo fixes or AI-generated content alone typically don't qualify as substantial contributions._
 
 All contributors must sign our [Contributor License Agreement (CLA)](CLA.md) before their contributions can be merged.
 
-## Recognition Guidelines
-
-We recognize different types of contributions:
-
-- **Code Contributors**: Those who submit code changes, bug fixes, or new features
-- **Documentation Contributors**: Those who improve documentation, write tutorials, or create examples
-- **Community Contributors**: Those who help with support, testing, or community building
-- **Security Contributors**: Those who responsibly report security vulnerabilities
 
 ## Special Thanks
 
