@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useAdvancedEDBStore } from './store/advanced-edb-store';
 import { useTheme } from './hooks/useTheme';
+import { MosaicDebuggerLayout } from './components/MosaicDebuggerLayout';
 
 export function App() {
   const { theme, toggleTheme } = useTheme();
@@ -38,6 +39,12 @@ export function App() {
   const traceData = getTraceData();
   const loadingStatus = getLoadingStatus();
 
+  // If connected and have trace data, show debugger interface
+  if (isConnected && traceData) {
+    return <MosaicDebuggerLayout />;
+  }
+
+  // Otherwise show connection/setup interface
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-600 dark:bg-gray-900 p-8 transition-colors duration-200">
       <div className="max-w-6xl mx-auto">
