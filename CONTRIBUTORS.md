@@ -40,7 +40,7 @@ Significant contributors are recognized through community discussion in GitHub D
 
 _This section lists all individuals who have made [meaningful contributions](#note-on-contributions) to the project._
 
-Contributors are sorted in alphabetical order by their GitHub ID.
+Contributors are sorted in alphabetical order by their GitHub ID. More details about their contributions can be found at Github's [Contributors Page](https://github.com/edb-rs/edb/graphs/contributors).
 
 - [ret2happy](https://github.com/pcy190)
 
