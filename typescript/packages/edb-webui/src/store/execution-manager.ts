@@ -8,10 +8,38 @@ import { EDB } from '@edb/types';
 
 export interface SnapshotInfo {
   id: number;
-  gasUsed: number;
-  gasLimit: number;
-  block: number;
-  // Add other snapshot fields as needed
+  frame_id: any;
+  next_id: number;
+  prev_id: number;
+  target_address: string;
+  bytecode_address: string;
+  detail: SnapshotInfoDetail;
+}
+
+export interface SnapshotInfoDetail {
+  Opcode?: OpcodeSnapshotInfoDetail;
+  Hook?: HookSnapshotInfoDetail;
+}
+
+export interface OpcodeSnapshotInfoDetail {
+  id: number;
+  frame_id: any;
+  pc: number;
+  opcode: number;
+  memory: number[];
+  stack: string[];
+  calldata: number[];
+  transient_storage: Record<string, string>;
+}
+
+export interface HookSnapshotInfoDetail {
+  id: number;
+  frame_id: any;
+  locals: Record<string, any>;
+  state_variables: Record<string, any>;
+  path: string;
+  offset: number;
+  length: number;
 }
 
 export interface Code {

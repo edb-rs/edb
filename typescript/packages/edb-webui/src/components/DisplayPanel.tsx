@@ -53,36 +53,71 @@ export function DisplayPanel() {
   }, [currentSnapshotId, previousSnapshotId]);
 
   const fetchSnapshotData = async (snapshotId: number) => {
-    // Simulate fetching storage data for common slots
-    const commonSlots = ['0x0', '0x1', '0x2', '0x3', '0x4', '0x5'];
-    const newStorageData: StorageEntry[] = [];
+    // Get real snapshot info from EDB engine
+    const snapshotInfo = getSnapshotInfo(snapshotId);
+    const prevSnapshotInfo = previousSnapshotId !== null ? getSnapshotInfo(previousSnapshotId) : null;
 
-    for (const slot of commonSlots) {
-      const value = getStorage(snapshotId, slot);
-      if (value !== null) {
-        // Check if this value changed from the previous snapshot
-        const prevValue = previousSnapshotId !== null ? getStorage(previousSnapshotId, slot) : null;
-        newStorageData.push({
-          slot,
-          value,
-          changed: prevValue !== null && prevValue !== value
-        });
+    if (!snapshotInfo) {
+      // If snapshot info is not yet loaded, clear current data
+      setStorageData([]);
+      setStackData([]);
+      return;
+    }
+
+    // Handle both Opcode and Hook snapshot types
+    let newStorageData: StorageEntry[] = [];
+    let newStackData: StackEntry[] = [];
+
+    if (snapshotInfo.detail.Opcode) {
+      const opcodeDetail = snapshotInfo.detail.Opcode;
+      const prevOpcodeDetail = prevSnapshotInfo?.detail.Opcode;
+
+      // Extract real stack data from EDB
+      newStackData = opcodeDetail.stack.map((value, index) => {
+        const prevValue = prevOpcodeDetail?.stack[index];
+        return {
+          depth: index,
+          value: value,
+          changed: prevValue !== undefined && prevValue !== value
+        };
+      });
+
+      // Extract storage data - we still need to query individual slots
+      // as storage is not included in opcode snapshots directly
+      const commonSlots = ['0x0', '0x1', '0x2', '0x3', '0x4', '0x5'];
+      for (const slot of commonSlots) {
+        const value = getStorage(snapshotId, slot);
+        if (value !== null && value !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+          const prevValue = previousSnapshotId !== null ? getStorage(previousSnapshotId, slot) : null;
+          newStorageData.push({
+            slot,
+            value,
+            changed: prevValue !== null && prevValue !== value
+          });
+        }
       }
+
+    } else if (snapshotInfo.detail.Hook) {
+      // Hook snapshots don't have raw stack/memory, but we can still get storage
+      const commonSlots = ['0x0', '0x1', '0x2', '0x3', '0x4', '0x5'];
+      for (const slot of commonSlots) {
+        const value = getStorage(snapshotId, slot);
+        if (value !== null && value !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
+          const prevValue = previousSnapshotId !== null ? getStorage(previousSnapshotId, slot) : null;
+          newStorageData.push({
+            slot,
+            value,
+            changed: prevValue !== null && prevValue !== value
+          });
+        }
+      }
+
+      // For hook snapshots, stack data isn't available at the opcode level
+      newStackData = [];
     }
 
     setStorageData(newStorageData);
-
-    // Simulate stack data (in real implementation, this would come from EDB)
-    const mockStack: StackEntry[] = [];
-    for (let i = 0; i < 8; i++) {
-      const value = `0x${Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0')}${Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0')}`;
-      mockStack.push({
-        depth: i,
-        value,
-        changed: Math.random() > 0.7 // Randomly mark some as changed
-      });
-    }
-    setStackData(mockStack);
+    setStackData(newStackData);
   };
 
   const toggleExpanded = (itemId: string) => {
@@ -97,6 +132,45 @@ export function DisplayPanel() {
 
   const formatValue = (value: any, isExpanded: boolean = false): string => {
     if (value === null || value === undefined) return 'null';
+
+    // Handle EdbSolValue structured objects
+    if (typeof value === 'object' && value.type && value.value !== undefined) {
+      switch (value.type) {
+        case 'Address':
+          return value.value;
+        case 'Uint':
+          return `${value.value}`;
+        case 'Int':
+          return `${value.value}`;
+        case 'Bool':
+          return value.value ? 'true' : 'false';
+        case 'Bytes':
+          return `0x${value.value.map((b: number) => b.toString(16).padStart(2, '0')).join('')}`;
+        case 'FixedBytes':
+          return `0x${value.value.map((b: number) => b.toString(16).padStart(2, '0')).join('')}`;
+        case 'String':
+          return `"${value.value}"`;
+        case 'Array':
+          if (isExpanded) {
+            return `[\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n]`;
+          }
+          return `[${value.value.length} items]`;
+        case 'FixedArray':
+          if (isExpanded) {
+            return `[\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n]`;
+          }
+          return `[${value.value.length} items]`;
+        case 'Tuple':
+          if (isExpanded) {
+            return `(\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n)`;
+          }
+          return `(${value.value.length} fields)`;
+        default:
+          return JSON.stringify(value.value);
+      }
+    }
+
+    // Handle plain values
     if (typeof value === 'string') return `"${value}"`;
     if (typeof value === 'object') {
       if (isExpanded) {
@@ -105,6 +179,41 @@ export function DisplayPanel() {
       return `{${Object.keys(value).length} keys}`;
     }
     return String(value);
+  };
+
+  const getValueType = (value: any): string => {
+    if (value === null || value === undefined) return 'null';
+
+    // Handle EdbSolValue structured objects
+    if (typeof value === 'object' && value.type && value.value !== undefined) {
+      switch (value.type) {
+        case 'Address':
+          return 'address';
+        case 'Uint':
+          return `uint${value.bits || 256}`;
+        case 'Int':
+          return `int${value.bits || 256}`;
+        case 'Bool':
+          return 'bool';
+        case 'Bytes':
+          return 'bytes';
+        case 'FixedBytes':
+          return `bytes${value.size || 32}`;
+        case 'String':
+          return 'string';
+        case 'Array':
+          return 'array';
+        case 'FixedArray':
+          return 'array';
+        case 'Tuple':
+          return 'tuple';
+        default:
+          return value.type.toLowerCase();
+      }
+    }
+
+    // Fallback to JavaScript type
+    return typeof value;
   };
 
   const renderVariables = () => {
@@ -116,44 +225,98 @@ export function DisplayPanel() {
       );
     }
 
-    // Generate variables based on current snapshot and storage data
-    const variables = [
-      // State variables from storage
-      ...storageData.slice(0, 3).map((storage, index) => ({
-        name: `storage${index}`,
-        type: 'uint256',
+    // Get real snapshot info from EDB engine
+    const snapshotInfo = getSnapshotInfo(currentSnapshotId);
+    const prevSnapshotInfo = previousSnapshotId !== null ? getSnapshotInfo(previousSnapshotId) : null;
+
+    if (!snapshotInfo) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          <div className="mb-2">Loading snapshot data...</div>
+          <div className="text-xs">Snapshot {currentSnapshotId}</div>
+        </div>
+      );
+    }
+
+    const variables = [];
+
+    // Add state variables from storage data
+    storageData.forEach((storage, index) => {
+      variables.push({
+        name: `storage[${storage.slot}]`,
+        type: 'bytes32',
         value: storage.value,
         scope: 'state' as const,
         changed: storage.changed || false
-      })),
-      // Mock local variables that change per snapshot
-      {
-        name: 'msg.sender',
-        type: 'address',
-        value: traceData?.inner?.[0]?.caller || '0x742d35cc6bf9f5b4e6cf7c7b6db4b7b7e8b8a8b8',
-        scope: 'local' as const,
-        changed: currentSnapshotId % 5 === 0 // Mark as changed every 5th snapshot
-      },
-      {
-        name: 'msg.value',
-        type: 'uint256',
-        value: (BigInt(currentSnapshotId || 0) * BigInt(1000000000000000000)).toString(),
-        scope: 'local' as const,
-        changed: previousSnapshotId !== null && currentSnapshotId !== previousSnapshotId
-      },
-      {
-        name: 'block.number',
-        type: 'uint256',
-        value: (18500000 + (currentSnapshotId || 0)).toString(),
-        scope: 'local' as const,
-        changed: false
+      });
+    });
+
+    // Add Hook-specific variables (locals and state variables)
+    if (snapshotInfo.detail.Hook) {
+      const hookDetail = snapshotInfo.detail.Hook;
+      const prevHookDetail = prevSnapshotInfo?.detail.Hook;
+
+      // Add local variables
+      Object.entries(hookDetail.locals).forEach(([name, value]) => {
+        const prevValue = prevHookDetail?.locals[name];
+        variables.push({
+          name,
+          type: getValueType(value),
+          value: value,
+          scope: 'local' as const,
+          changed: prevValue !== undefined && JSON.stringify(prevValue) !== JSON.stringify(value)
+        });
+      });
+
+      // Add state variables from Hook snapshot
+      Object.entries(hookDetail.state_variables).forEach(([name, value]) => {
+        const prevValue = prevHookDetail?.state_variables[name];
+        variables.push({
+          name,
+          type: getValueType(value),
+          value: value,
+          scope: 'state' as const,
+          changed: prevValue !== undefined && JSON.stringify(prevValue) !== JSON.stringify(value)
+        });
+      });
+    }
+
+    // Add some built-in EVM variables from trace data if available
+    const traceData = getTraceData();
+    if (traceData?.inner?.length > 0) {
+      const currentCall = traceData.inner.find(call => call.first_snapshot_id <= currentSnapshotId);
+      if (currentCall) {
+        variables.push({
+          name: 'msg.sender',
+          type: 'address',
+          value: currentCall.caller,
+          scope: 'builtin' as const,
+          changed: false
+        });
+
+        variables.push({
+          name: 'msg.target',
+          type: 'address',
+          value: currentCall.target,
+          scope: 'builtin' as const,
+          changed: false
+        });
       }
-    ];
+    }
+
+    if (variables.length === 0) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          <div className="mb-2">No variables available</div>
+          <div className="text-xs">Snapshot {currentSnapshotId} - {snapshotInfo.detail.Opcode ? 'Opcode' : 'Hook'} type</div>
+        </div>
+      );
+    }
 
     return (
       <div className="space-y-2">
         <div className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-          Snapshot {currentSnapshotId} Variables
+          Snapshot {currentSnapshotId} Variables ({snapshotInfo.detail.Opcode ? 'Opcode' : 'Hook'})
         </div>
         {variables.map((variable, index) => (
           <div
@@ -169,7 +332,9 @@ export function DisplayPanel() {
                 <span className={`px-2 py-1 text-xs rounded ${
                   variable.scope === 'state'
                     ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                    : 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                    : variable.scope === 'local'
+                    ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                    : 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
                 }`}>
                   {variable.scope}
                 </span>
@@ -289,54 +454,75 @@ export function DisplayPanel() {
       );
     }
 
-    // TODO: Get memory data from EDB engine via getMemory(snapshotId)
-    const mockMemory = currentSnapshotId !== null
-      ? `0x${currentSnapshotId.toString(16).padStart(64, '0')}000000000000000000000000000000000000000000000000000000000000000d48656c6c6f2c20576f726c6421000000000000000000000000000000000000`
-      : '';
+    // Get real memory data from EDB snapshot info
+    const snapshotInfo = getSnapshotInfo(currentSnapshotId);
 
-    const formatMemoryLine = (data: string, offset: number) => {
-      const hex = data.slice(0, 32);
-      const ascii = hex.match(/.{2}/g)?.map(h => {
-        const code = parseInt(h, 16);
-        return (code >= 32 && code <= 126) ? String.fromCharCode(code) : '.';
-      }).join('') || '';
+    if (!snapshotInfo) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          Loading snapshot data...
+        </div>
+      );
+    }
+
+    if (!snapshotInfo.detail.Opcode) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          <div className="mb-2">Memory not available</div>
+          <div className="text-xs">Hook snapshots don't include raw memory data</div>
+        </div>
+      );
+    }
+
+    const memoryBytes = snapshotInfo.detail.Opcode.memory;
+
+    if (!memoryBytes || memoryBytes.length === 0) {
+      return (
+        <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
+          No memory data available
+        </div>
+      );
+    }
+
+    const formatMemoryLine = (bytes: number[], offset: number) => {
+      // Take 16 bytes at a time for display
+      const lineBytes = bytes.slice(0, 16);
+      const hex = lineBytes.map(b => b.toString(16).padStart(2, '0')).join('');
+      const ascii = lineBytes.map(b =>
+        (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.'
+      ).join('');
 
       return { hex, ascii };
     };
 
     const lines = [];
-    for (let i = 0; i < mockMemory.length; i += 32) {
-      const line = formatMemoryLine(mockMemory.slice(i, i + 32), i / 2);
-      lines.push({ offset: i / 2, ...line });
+    for (let i = 0; i < memoryBytes.length; i += 16) {
+      const lineBytes = memoryBytes.slice(i, i + 16);
+      const line = formatMemoryLine(lineBytes, i);
+      lines.push({ offset: i, ...line });
     }
 
     return (
       <div className="space-y-1">
         <div className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-          Memory ({mockMemory.length / 2} bytes)
+          Memory ({memoryBytes.length} bytes)
         </div>
-        {lines.length > 0 ? (
-          lines.map((line, index) => (
-            <div
-              key={index}
-              className="flex items-center p-1 hover:bg-gray-50 dark:hover:bg-gray-700 rounded font-mono text-xs"
-            >
-              <div className="w-16 text-gray-500 dark:text-gray-400 text-right mr-3">
-                0x{line.offset.toString(16).padStart(4, '0')}
-              </div>
-              <div className="flex-1 text-gray-800 dark:text-white">
-                {line.hex}
-              </div>
-              <div className="w-20 text-gray-600 dark:text-gray-300 ml-3">
-                {line.ascii}
-              </div>
+        {lines.map((line, index) => (
+          <div
+            key={index}
+            className="flex items-center p-1 hover:bg-gray-50 dark:hover:bg-gray-700 rounded font-mono text-xs"
+          >
+            <div className="w-16 text-gray-500 dark:text-gray-400 text-right mr-3">
+              0x{line.offset.toString(16).padStart(4, '0')}
             </div>
-          ))
-        ) : (
-          <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
-            No memory data available
+            <div className="flex-1 text-gray-800 dark:text-white">
+              {line.hex}
+            </div>
+            <div className="w-20 text-gray-600 dark:text-gray-300 ml-3">
+              {line.ascii}
+            </div>
           </div>
-        )}
+        ))}
       </div>
     );
   };
@@ -350,18 +536,43 @@ export function DisplayPanel() {
       );
     }
 
-    // TODO: Get calldata from EDB engine - should come from trace data
-    const currentSnapshot = currentSnapshotId !== null ? getSnapshotInfo(currentSnapshotId) : null;
-    const traceData = getTraceData();
+    // Get real calldata from EDB snapshot info
+    const snapshotInfo = getSnapshotInfo(currentSnapshotId);
 
-    // Find the relevant call for this snapshot
-    const callForSnapshot = traceData?.inner?.find(call =>
-      call.first_snapshot_id <= currentSnapshotId
-    );
+    if (!snapshotInfo) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          Loading snapshot data...
+        </div>
+      );
+    }
 
-    const calldata = callForSnapshot?.input || '';
+    let calldataBytes: number[] = [];
 
-    if (!calldata) {
+    if (snapshotInfo.detail.Opcode) {
+      // Use real calldata from opcode snapshot
+      calldataBytes = snapshotInfo.detail.Opcode.calldata;
+    } else {
+      // For hook snapshots, fall back to trace data
+      const traceData = getTraceData();
+      const callForSnapshot = traceData?.inner?.find(call =>
+        call.first_snapshot_id <= currentSnapshotId
+      );
+
+      if (callForSnapshot?.input) {
+        const cleanCalldata = callForSnapshot.input.startsWith('0x')
+          ? callForSnapshot.input.slice(2)
+          : callForSnapshot.input;
+
+        // Convert hex string to byte array
+        calldataBytes = [];
+        for (let i = 0; i < cleanCalldata.length; i += 2) {
+          calldataBytes.push(parseInt(cleanCalldata.slice(i, i + 2), 16));
+        }
+      }
+    }
+
+    if (!calldataBytes || calldataBytes.length === 0) {
       return (
         <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-sm">
           No calldata available for this snapshot
@@ -369,34 +580,42 @@ export function DisplayPanel() {
       );
     }
 
-    const formatCalldataLine = (data: string, offset: number) => {
-      const hex = data.slice(0, 32);
-      const ascii = hex.match(/.{2}/g)?.map(h => {
-        const code = parseInt(h, 16);
-        return (code >= 32 && code <= 126) ? String.fromCharCode(code) : '.';
-      }).join('') || '';
+    const formatCalldataLine = (bytes: number[], offset: number) => {
+      // Take 16 bytes at a time for display
+      const lineBytes = bytes.slice(0, 16);
+      const hex = lineBytes.map(b => b.toString(16).padStart(2, '0')).join('');
+      const ascii = lineBytes.map(b =>
+        (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.'
+      ).join('');
 
       return { hex, ascii };
     };
 
     const lines = [];
-    const cleanCalldata = calldata.startsWith('0x') ? calldata.slice(2) : calldata;
-    for (let i = 0; i < cleanCalldata.length; i += 32) {
-      const line = formatCalldataLine(cleanCalldata.slice(i, i + 32), i / 2);
-      lines.push({ offset: i / 2, ...line });
+    for (let i = 0; i < calldataBytes.length; i += 16) {
+      const lineBytes = calldataBytes.slice(i, i + 16);
+      const line = formatCalldataLine(lineBytes, i);
+      lines.push({ offset: i, ...line });
     }
+
+    // Extract function signature (first 4 bytes)
+    const functionSig = calldataBytes.length >= 4
+      ? calldataBytes.slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join('')
+      : '';
 
     return (
       <div className="space-y-1">
         <div className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-          Calldata ({cleanCalldata.length / 2} bytes)
+          Calldata ({calldataBytes.length} bytes)
         </div>
-        <div className="mb-2 p-2 bg-gray-50 dark:bg-gray-700 rounded text-xs">
-          <div className="text-gray-600 dark:text-gray-400 mb-1">Function Signature:</div>
-          <div className="font-mono text-blue-600 dark:text-blue-400">
-            {cleanCalldata.slice(0, 8)}
+        {functionSig && (
+          <div className="mb-2 p-2 bg-gray-50 dark:bg-gray-700 rounded text-xs">
+            <div className="text-gray-600 dark:text-gray-400 mb-1">Function Signature:</div>
+            <div className="font-mono text-blue-600 dark:text-blue-400">
+              0x{functionSig}
+            </div>
           </div>
-        </div>
+        )}
         {lines.map((line, index) => (
           <div
             key={index}
@@ -426,17 +645,78 @@ export function DisplayPanel() {
       );
     }
 
-    // TODO: Get transient storage data from EDB engine
-    // For now, show placeholder as transient storage is a newer EIP feature
+    // Get real transient storage data from EDB snapshot info
+    const snapshotInfo = getSnapshotInfo(currentSnapshotId);
+
+    if (!snapshotInfo) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          Loading snapshot data...
+        </div>
+      );
+    }
+
+    if (!snapshotInfo.detail.Opcode) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
+          <div className="mb-2">⚡ Transient storage not available</div>
+          <div>Hook snapshots don't include transient storage data</div>
+        </div>
+      );
+    }
+
+    const transientStorage = snapshotInfo.detail.Opcode.transient_storage;
+
+    if (!transientStorage || Object.keys(transientStorage).length === 0) {
+      return (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
+          <div className="mb-2">⚡ Transient Storage (EIP-1153)</div>
+          <div>No transient storage entries for this snapshot</div>
+        </div>
+      );
+    }
+
+    const prevSnapshotInfo = previousSnapshotId !== null ? getSnapshotInfo(previousSnapshotId) : null;
+    const prevTransientStorage = prevSnapshotInfo?.detail.Opcode?.transient_storage || {};
+
+    const transientEntries = Object.entries(transientStorage).map(([slot, value]) => {
+      const prevValue = prevTransientStorage[slot];
+      return {
+        slot,
+        value,
+        changed: prevValue !== undefined && prevValue !== value
+      };
+    });
+
     return (
       <div className="space-y-2">
         <div className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-          Transient Storage (EIP-1153)
+          Transient Storage ({transientEntries.length} slots)
         </div>
-        <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
-          <div className="mb-2">⚡ Transient storage tracking</div>
-          <div>Available in supported EVM versions</div>
-        </div>
+        {transientEntries.map((item, index) => (
+          <div
+            key={index}
+            className={`p-2 rounded font-mono text-sm ${
+              item.changed
+                ? 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700'
+                : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-gray-500 dark:text-gray-400">
+                Slot {item.slot}
+              </span>
+              {item.changed && (
+                <span className="text-yellow-600 dark:text-yellow-400 text-xs">
+                  TSTORE
+                </span>
+              )}
+            </div>
+            <div className="text-gray-800 dark:text-white break-all">
+              {item.value}
+            </div>
+          </div>
+        ))}
       </div>
     );
   };
