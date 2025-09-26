@@ -4,11 +4,13 @@
  */
 
 import { EventEmitter } from 'eventemitter3';
-import WebSocket from 'ws';
 import { EDB, RPC, Engine, Debug } from '@edb/types';
 import { EDBClientConfig, DEFAULT_CLIENT_CONFIG } from '../index';
 import { EDBCache } from '../cache';
 import { generateRequestId, delay } from '../utils';
+
+// Use native WebSocket in browser, ws in Node.js
+const WebSocketImpl = typeof window !== 'undefined' ? WebSocket : require('ws');
 
 export interface EDBClientEvents {
   connected: () => void;
@@ -46,7 +48,7 @@ export class EDBClient extends EventEmitter<EDBClientEvents> {
 
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.config.url);
+        this.ws = new WebSocketImpl(this.config.url);
 
         const onOpen = () => {
           this.reconnectAttempts = 0;
