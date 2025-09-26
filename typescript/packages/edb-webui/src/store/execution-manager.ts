@@ -175,11 +175,17 @@ export class ExecutionManager {
    */
   getSnapshotInfo(snapshotId: number): SnapshotInfo | null {
     const cached = this.state.snapshotInfo.get(snapshotId);
-    if (cached) return cached;
+    if (cached) {
+      console.log(`Found cached snapshot info for ${snapshotId}`);
+      return cached;
+    }
 
     // Check if already pending
     const status = this.state.snapshotInfo.getStatus(snapshotId);
+    console.log(`Snapshot ${snapshotId} status: ${status}`);
+
     if (status === CacheStatus.NotRequested) {
+      console.log(`Requesting snapshot info for ${snapshotId}`);
       this.requestSnapshotInfo(snapshotId);
     }
 

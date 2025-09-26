@@ -47,18 +47,56 @@ export function DisplayPanel() {
   // React to snapshot changes and fetch relevant data
   useEffect(() => {
     if (currentSnapshotId !== null && currentSnapshotId !== previousSnapshotId) {
-      fetchSnapshotData(currentSnapshotId);
-      setPreviousSnapshotId(currentSnapshotId);
+      // Debounce rapid snapshot changes to prevent race conditions
+      const timeoutId = setTimeout(() => {
+        fetchSnapshotData(currentSnapshotId);
+        setPreviousSnapshotId(currentSnapshotId);
+      }, 10); // Small delay to batch rapid changes
+
+      return () => clearTimeout(timeoutId);
     }
   }, [currentSnapshotId, previousSnapshotId]);
 
   const fetchSnapshotData = async (snapshotId: number) => {
     // Get real snapshot info from EDB engine
-    const snapshotInfo = getSnapshotInfo(snapshotId);
+    let snapshotInfo = getSnapshotInfo(snapshotId);
     const prevSnapshotInfo = previousSnapshotId !== null ? getSnapshotInfo(previousSnapshotId) : null;
 
+    // If snapshot info is not immediately available, try to fetch it directly
     if (!snapshotInfo) {
-      // If snapshot info is not yet loaded, clear current data
+      console.log(`Snapshot info for ${snapshotId} not in cache, fetching directly...`);
+
+      try {
+        // Make direct RPC call for immediate response
+        const response = await fetch('/api', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'edb_getSnapshotInfo',
+            params: [snapshotId],
+            id: Date.now()
+          })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.result && !result.error) {
+            snapshotInfo = result.result;
+            // Also update the cache in the execution manager
+            const { executionManager } = useAdvancedEDBStore.getState();
+            if (executionManager) {
+              executionManager.updateCachedData({ type: 'GetSnapshotInfo', snapshotId }, snapshotInfo);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch snapshot info directly:', error);
+      }
+    }
+
+    if (!snapshotInfo) {
+      // If still no snapshot info, clear current data and show loading
       setStorageData([]);
       setStackData([]);
       return;
@@ -131,89 +169,114 @@ export function DisplayPanel() {
   };
 
   const formatValue = (value: any, isExpanded: boolean = false): string => {
-    if (value === null || value === undefined) return 'null';
+    try {
+      if (value === null || value === undefined) return 'null';
 
-    // Handle EdbSolValue structured objects
-    if (typeof value === 'object' && value.type && value.value !== undefined) {
-      switch (value.type) {
-        case 'Address':
-          return value.value;
-        case 'Uint':
-          return `${value.value}`;
-        case 'Int':
-          return `${value.value}`;
-        case 'Bool':
-          return value.value ? 'true' : 'false';
-        case 'Bytes':
-          return `0x${value.value.map((b: number) => b.toString(16).padStart(2, '0')).join('')}`;
-        case 'FixedBytes':
-          return `0x${value.value.map((b: number) => b.toString(16).padStart(2, '0')).join('')}`;
-        case 'String':
-          return `"${value.value}"`;
-        case 'Array':
-          if (isExpanded) {
-            return `[\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n]`;
-          }
-          return `[${value.value.length} items]`;
-        case 'FixedArray':
-          if (isExpanded) {
-            return `[\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n]`;
-          }
-          return `[${value.value.length} items]`;
-        case 'Tuple':
-          if (isExpanded) {
-            return `(\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n)`;
-          }
-          return `(${value.value.length} fields)`;
-        default:
-          return JSON.stringify(value.value);
+      // Handle EdbSolValue structured objects
+      if (typeof value === 'object' && value.type && value.value !== undefined) {
+        switch (value.type) {
+          case 'Address':
+            return String(value.value);
+          case 'Uint':
+            return `${value.value}`;
+          case 'Int':
+            return `${value.value}`;
+          case 'Bool':
+            return value.value ? 'true' : 'false';
+          case 'Bytes':
+            if (Array.isArray(value.value)) {
+              return `0x${value.value.map((b: number) => b.toString(16).padStart(2, '0')).join('')}`;
+            }
+            return String(value.value);
+          case 'FixedBytes':
+            if (Array.isArray(value.value)) {
+              return `0x${value.value.map((b: number) => b.toString(16).padStart(2, '0')).join('')}`;
+            }
+            return String(value.value);
+          case 'String':
+            return `"${value.value}"`;
+          case 'Array':
+            if (Array.isArray(value.value)) {
+              if (isExpanded) {
+                return `[\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n]`;
+              }
+              return `[${value.value.length} items]`;
+            }
+            return '[invalid array]';
+          case 'FixedArray':
+            if (Array.isArray(value.value)) {
+              if (isExpanded) {
+                return `[\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n]`;
+              }
+              return `[${value.value.length} items]`;
+            }
+            return '[invalid fixed array]';
+          case 'Tuple':
+            if (Array.isArray(value.value)) {
+              if (isExpanded) {
+                return `(\n${value.value.map((v: any) => '  ' + formatValue(v, false)).join(',\n')}\n)`;
+              }
+              return `(${value.value.length} fields)`;
+            }
+            return '(invalid tuple)';
+          default:
+            return JSON.stringify(value.value);
+        }
       }
-    }
 
-    // Handle plain values
-    if (typeof value === 'string') return `"${value}"`;
-    if (typeof value === 'object') {
-      if (isExpanded) {
-        return JSON.stringify(value, null, 2);
+      // Handle plain values
+      if (typeof value === 'string') return `"${value}"`;
+      if (typeof value === 'object') {
+        if (isExpanded) {
+          return JSON.stringify(value, null, 2);
+        }
+        return `{${Object.keys(value).length} keys}`;
       }
-      return `{${Object.keys(value).length} keys}`;
+      return String(value);
+    } catch (error) {
+      console.error('Error formatting value:', error, 'Value:', value);
+      return `[Error: ${error instanceof Error ? error.message : 'Unknown error'}]`;
     }
-    return String(value);
   };
 
   const getValueType = (value: any): string => {
-    if (value === null || value === undefined) return 'null';
+    try {
+      if (value === null || value === undefined) return 'null';
 
-    // Handle EdbSolValue structured objects
-    if (typeof value === 'object' && value.type && value.value !== undefined) {
-      switch (value.type) {
-        case 'Address':
-          return 'address';
-        case 'Uint':
-          return `uint${value.bits || 256}`;
-        case 'Int':
-          return `int${value.bits || 256}`;
-        case 'Bool':
-          return 'bool';
-        case 'Bytes':
-          return 'bytes';
-        case 'FixedBytes':
-          return `bytes${value.size || 32}`;
-        case 'String':
-          return 'string';
-        case 'Array':
-          return 'array';
-        case 'FixedArray':
-          return 'array';
-        case 'Tuple':
-          return 'tuple';
-        default:
-          return value.type.toLowerCase();
+      // Handle EdbSolValue structured objects
+      if (typeof value === 'object' && value.type && value.value !== undefined) {
+        switch (value.type) {
+          case 'Address':
+            return 'address';
+          case 'Uint':
+            return `uint${value.bits || 256}`;
+          case 'Int':
+            return `int${value.bits || 256}`;
+          case 'Bool':
+            return 'bool';
+          case 'Bytes':
+            return 'bytes';
+          case 'FixedBytes':
+            return `bytes${value.size || 32}`;
+          case 'String':
+            return 'string';
+          case 'Array':
+            return 'array';
+          case 'FixedArray':
+            return 'array';
+          case 'Tuple':
+            return 'tuple';
+          default:
+            return value.type.toLowerCase();
+        }
       }
-    }
 
-    // Fallback to JavaScript type
-    return typeof value;
+      // Fallback to JavaScript type
+      return typeof value;
+    } catch (error) {
+      console.error('Error getting value type:', error, 'Value:', value);
+      return 'unknown';
+    }
   };
 
   const renderVariables = () => {
@@ -234,6 +297,9 @@ export function DisplayPanel() {
         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <div className="mb-2">Loading snapshot data...</div>
           <div className="text-xs">Snapshot {currentSnapshotId}</div>
+          <div className="text-xs mt-2 opacity-75">
+            If this takes too long, check if EDB engine is running at localhost:3000
+          </div>
         </div>
       );
     }
@@ -257,28 +323,58 @@ export function DisplayPanel() {
       const prevHookDetail = prevSnapshotInfo?.detail.Hook;
 
       // Add local variables
-      Object.entries(hookDetail.locals).forEach(([name, value]) => {
-        const prevValue = prevHookDetail?.locals[name];
-        variables.push({
-          name,
-          type: getValueType(value),
-          value: value,
-          scope: 'local' as const,
-          changed: prevValue !== undefined && JSON.stringify(prevValue) !== JSON.stringify(value)
+      try {
+        Object.entries(hookDetail.locals).forEach(([name, value]) => {
+          try {
+            const prevValue = prevHookDetail?.locals[name];
+            variables.push({
+              name,
+              type: getValueType(value),
+              value: value,
+              scope: 'local' as const,
+              changed: prevValue !== undefined && JSON.stringify(prevValue) !== JSON.stringify(value)
+            });
+          } catch (error) {
+            console.error(`Error processing local variable ${name}:`, error);
+            variables.push({
+              name,
+              type: 'error',
+              value: '[Error processing variable]',
+              scope: 'local' as const,
+              changed: false
+            });
+          }
         });
-      });
+      } catch (error) {
+        console.error('Error processing locals:', error);
+      }
 
       // Add state variables from Hook snapshot
-      Object.entries(hookDetail.state_variables).forEach(([name, value]) => {
-        const prevValue = prevHookDetail?.state_variables[name];
-        variables.push({
-          name,
-          type: getValueType(value),
-          value: value,
-          scope: 'state' as const,
-          changed: prevValue !== undefined && JSON.stringify(prevValue) !== JSON.stringify(value)
+      try {
+        Object.entries(hookDetail.state_variables).forEach(([name, value]) => {
+          try {
+            const prevValue = prevHookDetail?.state_variables[name];
+            variables.push({
+              name,
+              type: getValueType(value),
+              value: value,
+              scope: 'state' as const,
+              changed: prevValue !== undefined && JSON.stringify(prevValue) !== JSON.stringify(value)
+            });
+          } catch (error) {
+            console.error(`Error processing state variable ${name}:`, error);
+            variables.push({
+              name,
+              type: 'error',
+              value: '[Error processing variable]',
+              scope: 'state' as const,
+              changed: false
+            });
+          }
         });
-      });
+      } catch (error) {
+        console.error('Error processing state variables:', error);
+      }
     }
 
     // Add some built-in EVM variables from trace data if available

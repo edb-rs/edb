@@ -62,7 +62,7 @@ export class RequestProcessor {
     const pendingRequests = executionManager.getPendingRequests();
     if (pendingRequests.length === 0) return;
 
-    console.log(`Processing ${pendingRequests.length} pending requests`);
+    console.log(`Processing ${pendingRequests.length} pending requests:`, pendingRequests.map(r => r.type));
 
     // Group requests by type for potential batching
     const requestGroups = this.groupRequests(pendingRequests);

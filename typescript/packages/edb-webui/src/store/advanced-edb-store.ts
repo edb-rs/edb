@@ -177,6 +177,15 @@ export const useAdvancedEDBStore = create<AdvancedEDBStore>((set, get) => ({
   // Navigation actions
   setCurrentSnapshot: (snapshotId: number) => {
     set({ currentSnapshotId: snapshotId });
+
+    // Proactively preload nearby snapshots for smoother navigation
+    const { executionManager } = get();
+    if (executionManager) {
+      // Preload current and a few nearby snapshots
+      for (let i = Math.max(0, snapshotId - 2); i <= snapshotId + 2; i++) {
+        executionManager.getSnapshotInfo(i); // This will trigger loading if not cached
+      }
+    }
   },
 
   navigateToNextCall: () => {
@@ -237,7 +246,10 @@ export const useAdvancedEDBStore = create<AdvancedEDBStore>((set, get) => ({
   _startBackgroundProcessing: () => {
     const { requestProcessor, executionManager } = get();
     if (requestProcessor && executionManager) {
+      console.log('Starting background processing with 200ms interval');
       requestProcessor.startProcessing(executionManager, 200); // 200ms interval like Rust TUI
+    } else {
+      console.warn('Cannot start background processing - missing requestProcessor or executionManager');
     }
   },
 
