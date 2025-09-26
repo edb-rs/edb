@@ -43,9 +43,16 @@ export interface HookSnapshotInfoDetail {
 }
 
 export interface Code {
-  address: string;
-  bytecode: string;
-  sourceMap?: string;
+  Source?: {
+    address: string;
+    bytecode_address: string;
+    sources: Record<string, string>; // PathBuf -> source content
+  };
+  Opcode?: {
+    address: string;
+    bytecode_address: string;
+    codes: Record<number, string>; // PC -> opcode string
+  };
 }
 
 export interface StorageSlot {
@@ -74,7 +81,7 @@ export interface TraceData {
  */
 export type ExecutionRequest =
   | { type: 'GetSnapshotInfo'; snapshotId: number }
-  | { type: 'GetCode'; address: string }
+  | { type: 'GetCode'; snapshotId: number }
   | { type: 'GetNextCall'; snapshotId: number }
   | { type: 'GetPrevCall'; snapshotId: number }
   | { type: 'GetStorage'; snapshotId: number; slot: string }
@@ -91,7 +98,8 @@ export class ExecutionState {
 
   // Cached data with intelligent fetching
   snapshotInfo = new FetchCache<number, SnapshotInfo>();
-  code = new FetchCache<string, Code>(); // Cache by address
+  code = new FetchCache<number, Code>(); // Cache by snapshot ID (for initial fetch)
+  sourceFiles = new Map<string, string>(); // Cache source files by path
   nextCall = new FetchCache<number, number>(); // snapshotId -> next call snapshotId
   prevCall = new FetchCache<number, number>(); // snapshotId -> prev call snapshotId
   storage = new FetchCache<string, string>(); // "snapshotId:slot" -> value
@@ -193,19 +201,41 @@ export class ExecutionManager {
   }
 
   /**
-   * Get code for address (immediate if cached, triggers fetch if not)
+   * Get code for snapshot ID (immediate if cached, triggers fetch if not)
    */
-  getCode(address: string): Code | null {
-    const cached = this.state.code.get(address);
-    if (cached) return cached;
+  getCode(snapshotId: number): Code | null {
+    const cached = this.state.code.get(snapshotId);
+    if (cached) {
+      // Extract and cache individual source files for faster access
+      if (cached.Source?.sources) {
+        for (const [path, content] of Object.entries(cached.Source.sources)) {
+          this.state.sourceFiles.set(path, content);
+        }
+      }
+      return cached;
+    }
 
     // Check if already pending
-    const status = this.state.code.getStatus(address);
+    const status = this.state.code.getStatus(snapshotId);
     if (status === CacheStatus.NotRequested) {
-      this.requestCode(address);
+      this.requestCode(snapshotId);
     }
 
     return null;
+  }
+
+  /**
+   * Get source file content by path (immediate if cached)
+   */
+  getSourceFile(path: string): string | null {
+    return this.state.sourceFiles.get(path) || null;
+  }
+
+  /**
+   * Get all available source files
+   */
+  getAvailableSourceFiles(): string[] {
+    return Array.from(this.state.sourceFiles.keys());
   }
 
   /**
@@ -286,8 +316,8 @@ export class ExecutionManager {
       requests.push({ type: 'GetSnapshotInfo', snapshotId });
     }
 
-    for (const address of this.state.code.getPendingKeys()) {
-      requests.push({ type: 'GetCode', address });
+    for (const snapshotId of this.state.code.getPendingKeys()) {
+      requests.push({ type: 'GetCode', snapshotId });
     }
 
     for (const snapshotId of this.state.nextCall.getPendingKeys()) {
@@ -324,7 +354,7 @@ export class ExecutionManager {
         this.state.snapshotInfo.set(request.snapshotId, data);
         break;
       case 'GetCode':
-        this.state.code.set(request.address, data);
+        this.state.code.set(request.snapshotId, data);
         break;
       case 'GetNextCall':
         this.state.nextCall.set(request.snapshotId, data);
@@ -356,7 +386,7 @@ export class ExecutionManager {
         this.state.snapshotInfo.setError(request.snapshotId, error);
         break;
       case 'GetCode':
-        this.state.code.setError(request.address, error);
+        this.state.code.setError(request.snapshotId, error);
         break;
       case 'GetStorage':
         this.state.storage.setError(`${request.snapshotId}:${request.slot}`, error);
@@ -370,8 +400,8 @@ export class ExecutionManager {
     this.state.snapshotInfo.setPending(snapshotId);
   }
 
-  private requestCode(address: string): void {
-    this.state.code.setPending(address);
+  private requestCode(snapshotId: number): void {
+    this.state.code.setPending(snapshotId);
   }
 
   private requestStorage(snapshotId: number, slot: string): void {
@@ -393,6 +423,7 @@ export class ExecutionManager {
   clearCache(): void {
     this.state.snapshotInfo.clear();
     this.state.code.clear();
+    this.state.sourceFiles.clear();
     this.state.nextCall.clear();
     this.state.prevCall.clear();
     this.state.storage.clear();
@@ -405,6 +436,13 @@ export class ExecutionManager {
    * Get cache statistics for debugging
    */
   getCacheStats() {
-    return this.state.getCacheStats();
+    const baseStats = this.state.getCacheStats();
+    return {
+      ...baseStats,
+      sourceFiles: {
+        cached: this.state.sourceFiles.size,
+        paths: Array.from(this.state.sourceFiles.keys())
+      }
+    };
   }
 }

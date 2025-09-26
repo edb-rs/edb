@@ -34,7 +34,9 @@ interface AdvancedEDBStore {
   getSnapshotCount: () => number;
   getTraceData: () => TraceData | null;
   getSnapshotInfo: (snapshotId: number) => SnapshotInfo | null;
-  getCode: (address: string) => Code | null;
+  getCode: (snapshotId: number) => Code | null;
+  getSourceFile: (path: string) => string | null;
+  getAvailableSourceFiles: () => string[];
   getStorage: (snapshotId: number, slot: string) => string | null;
   getNextCall: (snapshotId: number) => number | null;
   getPrevCall: (snapshotId: number) => number | null;
@@ -154,9 +156,19 @@ export const useAdvancedEDBStore = create<AdvancedEDBStore>((set, get) => ({
     return executionManager?.getSnapshotInfo(snapshotId) || null;
   },
 
-  getCode: (address: string) => {
+  getCode: (snapshotId: number) => {
     const { executionManager } = get();
-    return executionManager?.getCode(address) || null;
+    return executionManager?.getCode(snapshotId) || null;
+  },
+
+  getSourceFile: (path: string) => {
+    const { executionManager } = get();
+    return executionManager?.getSourceFile(path) || null;
+  },
+
+  getAvailableSourceFiles: () => {
+    const { executionManager } = get();
+    return executionManager?.getAvailableSourceFiles() || [];
   },
 
   getStorage: (snapshotId: number, slot: string) => {

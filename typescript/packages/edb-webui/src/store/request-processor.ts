@@ -144,7 +144,7 @@ export class RequestProcessor {
         return { method: 'edb_getSnapshotInfo', params: [request.snapshotId] };
 
       case 'GetCode':
-        return { method: 'edb_getCode', params: [request.address] };
+        return { method: 'edb_getCode', params: [request.snapshotId] };
 
       case 'GetNextCall':
         return { method: 'edb_getNextCall', params: [request.snapshotId] };
@@ -250,7 +250,7 @@ export class RequestDeduplicator {
         return `${request.type}:${request.snapshotId}`;
 
       case 'GetCode':
-        return `${request.type}:${request.address}`;
+        return `${request.type}:${request.snapshotId}`;
 
       case 'GetStorage':
         return `${request.type}:${request.snapshotId}:${request.slot}`;

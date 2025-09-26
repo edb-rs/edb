@@ -117,6 +117,60 @@
   @apply bg-green-500/20 border-l-2 border-green-500;
 }
 
+/* Monaco Editor debugging styles */
+.current-debug-line {
+  background-color: rgba(255, 255, 0, 0.2) !important;
+  border-left: 3px solid #ffd700 !important;
+}
+
+.current-debug-line-glyph {
+  background-color: #ffd700 !important;
+  color: #000 !important;
+}
+
+.current-debug-line-glyph::after {
+  content: "▶";
+  color: #000;
+  font-weight: bold;
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.breakpoint-glyph {
+  background-color: #ff4444 !important;
+  border-radius: 50%;
+  margin: 2px;
+}
+
+.breakpoint-glyph::after {
+  content: "●";
+  color: #fff;
+  font-weight: bold;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Monaco editor theme adjustments */
+.monaco-editor {
+  @apply bg-gray-900;
+}
+
+.monaco-editor .margin {
+  @apply bg-gray-800;
+}
+
+.monaco-editor .current-line {
+  border: none !important;
+}
+
+.monaco-editor .line-numbers {
+  @apply text-gray-400;
+}
+
 /* Call trace styling */
 .call-trace-internal {
   @apply text-blue-400;

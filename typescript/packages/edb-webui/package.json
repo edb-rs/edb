@@ -15,7 +15,7 @@
   "dependencies": {
     "@edb/client": "workspace:*",
     "@edb/types": "workspace:*",
-    "@monaco-editor/react": "^4.6.0",
+    "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-dialog": "^1.0.0",
     "@radix-ui/react-dropdown-menu": "^2.0.0",
     "@radix-ui/react-popover": "^1.0.0",
@@ -28,6 +28,7 @@
     "clsx": "^2.0.0",
     "immer": "^10.0.0",
     "lucide-react": "^0.291.0",
+    "monaco-editor": "^0.53.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
     "react-hot-toast": "^2.4.0",
