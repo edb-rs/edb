@@ -5,7 +5,7 @@ This file recognizes the individuals who have contributed to the development of 
 ## Core Maintainers
 
 ### Zhuo Zhang
-- **Role**: Co-creator and Lead Developer
+- **Role**: Project Co-founder and Lead Developer
 - **Contributions**:
   - Core debugging engine and architecture design
   - EVM integration and transaction replay system
@@ -18,7 +18,7 @@ This file recognizes the individuals who have contributed to the development of 
 - **Contact**: [GitHub](https://github.com/ZhangZhuoSJTU)
 
 ### Wuqi Zhang
-- **Role**: Co-creator and Lead Developer
+- **Role**: Project Co-founder and Lead Developer
 - **Contributions**:
   - Core debugging engine and architecture design
   - EVM integration and transaction replay system
@@ -30,22 +30,33 @@ This file recognizes the individuals who have contributed to the development of 
   - Performance optimization and project direction
 - **Contact**: [GitHub](https://github.com/Troublor)
 
+## Significant Contributors
+
+_This section will be updated as contributors demonstrate sustained impact on the project._
+
+Significant contributors are recognized through community discussion in GitHub Discussions.
+
 ## Contributors
 
-_This section will be updated as the project receives contributions from the community._
-Contributors are sorted in alphabetical order by their GitHub ID and the order does not reflect the significance of contribution.
+_This section lists all individuals who have made [meaningful contributions](#note-on-contributions) to the project._
 
-- ret2happy (@ret2happy)
+Contributors are sorted in alphabetical order by their GitHub ID.
+
+- [ret2happy](https://github.com/pcy190)
 
 ### How to Get Listed
 
-Contributors are added by core maintainers to this file when they:
-- Submit merged pull requests
-- Report significant bugs or security issues
-- Contribute significant documentation improvements.
-- Provide substantial feedback or testing
+**Contributors**: Added when your contribution is merged into the project.
 
-_Typo fixes and AI-generated content are not considered substantial contribution._
+**Significant Contributors**: Recognition is based on sustained impact and contribution quality, discussed and decided by the community and maintainers. This includes but is not limited to:
+- Major feature implementations
+- Critical bug fixes and optimizations
+- Substantial documentation or testing improvements
+- Sustained community support and engagement
+
+#### Note on Contributions
+
+_We focus on contributions that meaningfully improve the project. While we appreciate all efforts, simple typo fixes or AI-generated content alone typically don't qualify as substantial contributions._
 
 All contributors must sign our [Contributor License Agreement (CLA)](CLA.md) before their contributions can be merged.
 
