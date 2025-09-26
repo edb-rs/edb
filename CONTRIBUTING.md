@@ -163,7 +163,7 @@ Look for issues labeled `good first issue` - these are ideal for newcomers.
 - **Documentation**: Tutorials, API docs, examples
 - **Testing**: Unit tests, integration tests, fuzzing
 - **Performance**: Optimization, benchmarking
-- **UI/UX**: TUI improvements, Web UI enhancements
+- **UI/UX**: TUI improvements, future Web UI development
 
 ### Testing
 
