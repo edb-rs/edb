@@ -93,4 +93,3 @@ pub fn find_proxy_binary() -> Result<PathBuf> {
 pub fn find_tui_binary() -> Result<PathBuf> {
     find_binary("edb-tui")
 }
-
