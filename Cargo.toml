@@ -2,7 +2,6 @@
 members = [
     "crates/engine/",
     "crates/tui/",
-    "crates/webui/",
     "crates/edb/",
     "crates/rpc-proxy/",
     "crates/common/",
@@ -81,7 +80,6 @@ codegen-units = 1
 [workspace.dependencies]
 # workspace crates
 edb-engine = { version = "0.0.1", path = "crates/engine" }
-edb-webui = { version = "0.0.1", path = "crates/webui" }
 edb-common = { version = "0.0.1", path = "crates/common" }
 edb-rpc-proxy = { version = "0.0.1", path = "crates/rpc-proxy" }
 edb-integration-tests = { version = "0.0.1", path = "crates/integration-tests" }

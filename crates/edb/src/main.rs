@@ -79,8 +79,6 @@ pub struct Cli {
 pub enum UiMode {
     /// Terminal User Interface
     Tui,
-    /// Web User Interface
-    Web,
 }
 
 /// Available commands
@@ -149,53 +147,29 @@ async fn main() -> Result<()> {
         rpc_server_handle.addr
     );
 
-    // Launch the selected UI concurrently with the RPC server
-    let ui_handle = match cli.ui {
-        UiMode::Tui => {
-            tracing::info!("Launching Terminal UI...");
+    // Launch Terminal UI
+    tracing::info!("Launching Terminal UI...");
 
-            // Find the edb-tui binary
-            let tui_binary = utils::find_tui_binary()?;
-            tracing::debug!("Found TUI binary at: {:?}", tui_binary);
+    // Find the edb-tui binary
+    let tui_binary = utils::find_tui_binary()?;
+    tracing::debug!("Found TUI binary at: {:?}", tui_binary);
 
-            // Spawn TUI as a child process with inherited stdio
-            let mut child = std::process::Command::new(&tui_binary)
-                .arg("--url")
-                .arg(format!("http://{}", rpc_server_handle.addr))
-                .stdin(std::process::Stdio::inherit())
-                .stdout(std::process::Stdio::inherit())
-                .stderr(std::process::Stdio::inherit())
-                .spawn()
-                .map_err(|e| eyre::eyre!("Failed to spawn TUI: {}", e))?;
+    // Spawn TUI as a child process with inherited stdio
+    let mut child = std::process::Command::new(&tui_binary)
+        .arg("--url")
+        .arg(format!("http://{}", rpc_server_handle.addr))
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| eyre::eyre!("Failed to spawn TUI: {}", e))?;
 
-            // Wait for TUI to exit
-            let status = child.wait()?;
-            tracing::info!("TUI exited with status: {:?}", status);
+    // Wait for TUI to exit
+    let status = child.wait()?;
+    tracing::info!("TUI exited with status: {:?}", status);
 
-            // Return a dummy handle since we're waiting synchronously
-            tokio::spawn(async {})
-        }
-        UiMode::Web => {
-            tracing::info!("Launching Web UI...");
-            let webui_config = edb_webui::WebUiConfig {
-                port: 3000,
-                engine_rpc_url: format!("http://{}", rpc_server_handle.addr),
-            };
-
-            // Open browser
-            if let Err(e) = webbrowser::open(&format!("http://localhost:{}", webui_config.port)) {
-                tracing::warn!("Failed to open browser: {}", e);
-                println!("Please open http://localhost:{} in your browser", webui_config.port);
-            }
-
-            // Spawn Web UI in a separate task
-            tokio::spawn(async move {
-                if let Err(e) = edb_webui::api::start_webui(webui_config).await {
-                    tracing::error!("Web UI failed: {}", e);
-                }
-            })
-        }
-    };
+    // Return a dummy handle since we're waiting synchronously
+    let ui_handle = tokio::spawn(async {});
 
     tracing::info!("Both RPC server and UI are running. Press Ctrl+C to exit.");
 
@@ -222,25 +196,4 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Helper module for browser opening
-mod webbrowser {
-    use std::process::Command;
-
-    pub fn open(url: &str) -> std::io::Result<()> {
-        #[cfg(target_os = "macos")]
-        {
-            Command::new("open").arg(url).spawn()?;
-        }
-        #[cfg(target_os = "linux")]
-        {
-            Command::new("xdg-open").arg(url).spawn()?;
-        }
-        #[cfg(target_os = "windows")]
-        {
-            Command::new("cmd").args(["/C", "start", url]).spawn()?;
-        }
-        Ok(())
-    }
 }

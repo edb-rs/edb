@@ -22,7 +22,6 @@ workspace = true
 # workspace crates
 edb-common.workspace = true
 edb-engine.workspace = true
-edb-webui.workspace = true
 edb-tui.workspace = true
 
 # alloy - using individual crates like Foundry does

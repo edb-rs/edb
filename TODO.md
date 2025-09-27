@@ -162,7 +162,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
 - [ ] **Modern Web UI Development**
   - React/Vue-based responsive interface
   - Real-time debugging with WebSocket connections
-  - Drag-and-drop transaction analysis
+  - Direct JSON-RPC communication with engine
   - Multi-tab support for parallel debugging sessions
 
 - [ ] **Advanced UI Features**

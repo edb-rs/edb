@@ -9,15 +9,14 @@ EDB (Ethereum Debugger) is a sophisticated time-travel debugger for Ethereum tra
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         User Interface                      │
-├─────────────────────────┬───────────────────────────────────┤
-│      Terminal UI        │           Web UI                  │
-│       (TUI Crate)       │        (WebUI Crate)              │
-└───────────┬─────────────┴──────────────┬────────────────────┘
-            │                            │
-            │      JSON-RPC API          │
-            └────────────┬───────────────┘
-                         │
-┌────────────────────────▼────────────────────────────────────┐
+├─────────────────────────────────────────────────────────────┤
+│                         Terminal UI                         │
+│                         (TUI Crate)                         │
+└───────────────────────────────┬─────────────────────────────┘
+                                │
+                                │      JSON-RPC API
+                                │
+┌───────────────────────────────▼─────────────────────────────┐
 │                    Engine Module                            │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │                 Core Engine (core.rs)               │    │
@@ -70,7 +69,7 @@ The main orchestrator that coordinates the entire debugging workflow:
 - **CLI Interface**: Command-line argument parsing and validation
 - **Proxy Management**: Ensures RPC proxy is running for optimal performance
 - **Workflow Orchestration**: Coordinates forking, engine preparation, and UI launch
-- **UI Selection**: Launches appropriate interface (TUI or Web) based on user preference
+- **UI Launch**: Launches the Terminal UI interface
 
 **Key Files:**
 - `main.rs`: Entry point and CLI handling
@@ -197,14 +196,6 @@ Rich terminal-based debugging interface:
 - **Keyboard Navigation**: Vi-like keybindings
 - **Resource Management**: Efficient terminal rendering
 
-### 6. WebUI Module (`crates/webui`)
-
-Browser-based debugging interface (in development):
-
-- **Axum Server**: Modern async web framework
-- **REST API**: HTTP interface to engine
-- **WebSocket**: Real-time debugging updates
-- **React Frontend**: (Planned) Interactive web application
 
 ## Debugging Workflow
 
@@ -233,7 +224,7 @@ Browser-based debugging interface (in development):
 ### Phase 4: Interactive Debugging
 
 1. **Start RPC Server**: Launch debugging API
-2. **Launch UI**: Start TUI or Web interface
+2. **Launch UI**: Start Terminal UI interface
 3. **Connect to Engine**: Establish RPC connection
 4. **Debug Session**: Step through execution interactively
 
@@ -315,7 +306,7 @@ Browser-based debugging interface (in development):
 ## Future Enhancements
 
 ### Near Term
-- **Complete Web UI**: Full-featured browser interface
+- **Web UI**: Full-featured browser interface with direct JSON-RPC communication
 - **Foundry Integration**: Direct test debugging support
 - **Breakpoint Conditions**: Conditional breakpoints
 - **Watch Expressions**: Monitor specific variables

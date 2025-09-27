@@ -175,11 +175,6 @@ EDB/
 │   │   ├── tests/
 │   │   └── Cargo.toml
 │   │
-│   ├── webui/                 # Web UI (experimental)
-│   │   ├── src/
-│   │   │   └── lib.rs         # Axum server skeleton
-│   │   ├── tests/
-│   │   └── Cargo.toml
 │   │
 │   └── integration-tests/     # End-to-end integration tests
 │       ├── tests/
