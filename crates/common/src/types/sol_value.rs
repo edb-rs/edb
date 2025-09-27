@@ -252,14 +252,14 @@ impl SolValueFormatter for DynSolValue {
                 if let Some(label) = ctx.resolve_address.as_ref().and_then(|f| f(*addr)) {
                     label
                 } else {
+                    let full_lower = format!("0x{}", hex::encode(addr.as_slice()));
                     let addr_str = if !ctx.shorten_long {
-                        addr.to_checksum(None)
+                        full_lower
                     } else if *addr == Address::ZERO {
                         "0x0000000000000000".to_string()
                     } else {
-                        let addr_str = addr.to_checksum(None);
                         // Show more characters for better identification: 8 chars + ... + 6 chars
-                        format!("{}...{}", &addr_str[..8], &addr_str[addr_str.len() - 6..])
+                        format!("{}...{}", &full_lower[..8], &full_lower[full_lower.len() - 6..])
                     };
 
                     if ctx.with_ty {
