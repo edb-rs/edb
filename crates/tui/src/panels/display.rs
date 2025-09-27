@@ -932,7 +932,7 @@ impl DisplayPanel {
     }
 
     /// Calculate the maximum width for breakpoints display
-    fn calculate_breakpoints_max_width(&self, _dm: &mut DataManager) -> usize {
+    fn calculate_breakpoints_max_width(&self, dm: &mut DataManager) -> usize {
         let mut max_width = 0;
 
         for entry in &self.breakpoints {
@@ -952,14 +952,15 @@ impl DisplayPanel {
 
             // Location display
             if let Some(loc) = &entry.breakpoint.loc {
-                width += loc.display().len();
+                width +=
+                    loc.display(dm.resolver.resolve_address_label(loc.bytecode_address())).len();
             } else {
                 width += 12; // "no location"
             }
 
             // Condition display (if present)
             if let Some(condition) = &entry.breakpoint.condition {
-                width += format!(" if {}", condition).len();
+                width += format!(" if {condition}").len();
             }
 
             max_width = max_width.max(width);
@@ -972,36 +973,62 @@ impl DisplayPanel {
     fn format_breakpoint_entry(
         &self,
         entry: &BreakpointEntry,
-        _dm: &mut DataManager,
+        dm: &mut DataManager,
     ) -> Vec<Span<'static>> {
         let mut spans = Vec::new();
 
-        // Status indicator (enabled/disabled)
-        let status_indicator = if entry.enabled {
-            "🔵 " // Blue circle for enabled
+        // Determine base style for the entire entry based on state
+        let base_style = if entry.is_hit {
+            Style::default().fg(dm.theme.warning_color).add_modifier(Modifier::BOLD)
+        } else if !entry.enabled {
+            Style::default().fg(dm.theme.comment_color).add_modifier(Modifier::DIM)
         } else {
-            "🔴 " // Red circle for disabled
+            Style::default()
         };
-        spans.push(Span::raw(status_indicator.to_string()));
 
-        // Hit indicator (if this breakpoint is currently hit)
-        if entry.is_hit {
-            spans.push(Span::raw("🎯 ".to_string())); // Target emoji for hit breakpoints
-        }
+        // Breakpoint status indicator (3 states)
+        let status_indicator = match (entry.enabled, entry.is_hit) {
+            (true, true) => "🎯 ",  // Enabled and hit (red circle with hole)
+            (true, false) => "🔵 ", // Enabled but not hit (filled circle)
+            (false, _) => "🔴 ",    // Disabled (empty circle)
+        };
+        spans.push(Span::styled(status_indicator.to_string(), base_style));
 
-        // Breakpoint ID
-        spans.push(Span::raw(format!("#{} ", entry.id)));
+        // Breakpoint ID (use base style)
+        spans.push(Span::styled(format!("#{} ", entry.id), base_style));
 
-        // Location
-        if let Some(loc) = &entry.breakpoint.loc {
-            spans.push(Span::raw(loc.display()));
+        // Location (use info color unless hit or disabled)
+        let location_style = if entry.is_hit {
+            Style::default().fg(dm.theme.warning_color).add_modifier(Modifier::BOLD)
+        } else if !entry.enabled {
+            Style::default().fg(dm.theme.comment_color).add_modifier(Modifier::DIM)
         } else {
-            spans.push(Span::raw("no location".to_string()));
+            Style::default().fg(dm.theme.info_color)
+        };
+
+        if let Some(loc) = &entry.breakpoint.loc {
+            spans.push(Span::styled(
+                loc.display(dm.resolver.resolve_address_label(loc.bytecode_address())),
+                location_style,
+            ));
+        } else {
+            spans.push(Span::styled("no location".to_string(), location_style));
         }
 
         // Condition (if present)
         if let Some(condition) = &entry.breakpoint.condition {
-            spans.push(Span::raw(format!(" if {}", condition)));
+            spans.push(Span::styled(" if ", base_style));
+
+            // Condition value gets success color unless hit or disabled
+            let condition_style = if entry.is_hit {
+                Style::default().fg(dm.theme.warning_color).add_modifier(Modifier::BOLD)
+            } else if !entry.enabled {
+                Style::default().fg(dm.theme.comment_color).add_modifier(Modifier::DIM)
+            } else {
+                Style::default().fg(dm.theme.success_color)
+            };
+
+            spans.push(Span::styled(condition.to_string(), condition_style));
         }
 
         spans
@@ -1839,22 +1866,13 @@ impl DisplayPanel {
                 let line = Line::from(formatted_spans);
                 let formatted_line = self.apply_horizontal_offset(line);
 
-                // Apply styling based on breakpoint state and selection
-                let mut style = if is_selected && self.focused {
-                    Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
+                // Apply background styling for selection only
+                // Don't apply foreground colors here to preserve span-specific colors
+                let style = if is_selected && self.focused {
+                    Style::default().bg(dm.theme.selection_bg)
                 } else {
                     Style::default()
                 };
-
-                // Add special styling for hit breakpoints
-                if entry.is_hit && (!is_selected || !self.focused) {
-                    style = style.fg(dm.theme.warning_color).add_modifier(Modifier::BOLD);
-                }
-
-                // Add dim styling for disabled breakpoints
-                if !entry.enabled && (!is_selected || !self.focused) {
-                    style = style.fg(dm.theme.comment_color).add_modifier(Modifier::DIM);
-                }
 
                 ListItem::new(formatted_line).style(style)
             })

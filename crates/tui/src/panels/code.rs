@@ -855,7 +855,7 @@ impl CodePanel {
                 let execution_line = self
                     .opcodes
                     .iter()
-                    .position(|(pc, _)| Some(*pc as usize) == exec_opcode_pc)
+                    .position(|(pc, _)| Some(*pc) == exec_opcode_pc)
                     .map(|idx| idx + 1) // 1-based
                     .unwrap_or_default();
                 self.move_to(execution_line);
@@ -939,7 +939,7 @@ impl CodePanel {
                 let execution_line = self
                     .opcodes
                     .iter()
-                    .position(|(pc, _)| *pc as usize == opcode_info.pc)
+                    .position(|(pc, _)| *pc == opcode_info.pc)
                     .map(|idx| idx + 1) // 1-based
                     .unwrap_or_default();
                 self.current_execution_line = Some(execution_line);

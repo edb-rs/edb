@@ -35,7 +35,7 @@ pub struct Breakpoint {
 impl Display for Breakpoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(loc) = &self.loc {
-            write!(f, "@{}", loc.display())?;
+            write!(f, "@{}", loc.display(None))?;
         }
         if let Some(cond) = &self.condition {
             if self.loc.is_some() {
@@ -75,7 +75,11 @@ impl FromStr for Breakpoint {
                 // Has both location and condition
                 let loc_str = &loc_str[..if_pos].trim();
                 loc = Some(BreakpointLocation::from_str(loc_str)?);
-                condition = Some(normalize_expression(trimmed[if_pos + 4..].trim()));
+                let condition_str = trimmed[if_pos + 4..].trim();
+                if !condition_str.starts_with("$") {
+                    bail!("Condition expression does not start with $");
+                }
+                condition = Some(normalize_expression(condition_str[1..].trim()));
             } else {
                 // Only has location
                 let loc_str = loc_str.trim();
@@ -83,7 +87,11 @@ impl FromStr for Breakpoint {
             }
         } else if let Some(condition_str) = trimmed.strip_prefix("if ") {
             // Only has condition
-            condition = Some(normalize_expression(condition_str.trim()));
+            let condition_str = condition_str.trim();
+            if !condition_str.starts_with("$") {
+                bail!("Condition expression does not start with $");
+            }
+            condition = Some(normalize_expression(condition_str[1..].trim()));
         } else {
             bail!("Invalid breakpoint format. Expected [@<location>] [if <condition>], got: {s}");
         }
@@ -167,13 +175,16 @@ impl BreakpointLocation {
     }
 
     /// Formats the breakpoint location as a string.
-    pub fn display(&self) -> String {
+    pub fn display(&self, addr_label: Option<String>) -> String {
+        let bytecode_address = self.bytecode_address();
+        let addr_str = addr_label.unwrap_or_else(|| format!("{bytecode_address}"));
+
         match self {
-            Self::Opcode { bytecode_address, pc } => {
-                format!("{bytecode_address}:{pc}")
+            Self::Opcode { pc, .. } => {
+                format!("{addr_str}:{pc}")
             }
-            Self::Source { bytecode_address, file_path, line_number } => {
-                format!("{}:{}:{}", bytecode_address, file_path.display(), line_number)
+            Self::Source { file_path, line_number, .. } => {
+                format!("{addr_str}:{}:{line_number}", file_path.display())
             }
         }
     }
@@ -183,6 +194,11 @@ impl Breakpoint {
     /// Creates a new breakpoint with the given location and optional condition.
     pub fn new(loc: Option<BreakpointLocation>, condition: Option<String>) -> Self {
         Self { loc, condition }
+    }
+
+    /// Update the condition of the breakpoint.
+    pub fn set_condition(&mut self, condition: &str) {
+        self.condition = Some(normalize_expression(condition));
     }
 }
 
@@ -253,7 +269,8 @@ mod tests {
             bytecode_address: address!("1234567890123456789012345678901234567890"),
             pc: 42,
         };
-        assert_eq!(loc.display(), "0x1234567890123456789012345678901234567890:42");
+        assert_eq!(loc.display(None), "0x1234567890123456789012345678901234567890:42");
+        assert_eq!(loc.display(Some("<addr>".to_string())), "<addr>:42");
 
         // Test source breakpoint formatting
         let loc = BreakpointLocation::Source {
@@ -261,7 +278,8 @@ mod tests {
             file_path: PathBuf::from("src/main.rs"),
             line_number: 100,
         };
-        assert_eq!(loc.display(), "0x1234567890123456789012345678901234567890:src/main.rs:100");
+        assert_eq!(loc.display(None), "0x1234567890123456789012345678901234567890:src/main.rs:100");
+        assert_eq!(loc.display(Some("<addr>".to_string())), "<addr>:src/main.rs:100");
     }
 
     #[test]
@@ -269,11 +287,11 @@ mod tests {
         // Test that parsing and formatting are inverse operations
         let original_opcode = "0x1234567890123456789012345678901234567890:42";
         let loc = BreakpointLocation::from_str(original_opcode).unwrap();
-        assert_eq!(loc.display(), original_opcode);
+        assert_eq!(loc.display(None), original_opcode);
 
         let original_source = "0x1234567890123456789012345678901234567890:src/main.rs:100";
         let loc = BreakpointLocation::from_str(original_source).unwrap();
-        assert_eq!(loc.display(), original_source);
+        assert_eq!(loc.display(None), original_source);
     }
 
     #[test]
@@ -309,7 +327,7 @@ mod tests {
     #[test]
     fn test_breakpoint_from_str_condition_only() {
         // Just condition, no location
-        let bp = Breakpoint::from_str("if x > 10").unwrap();
+        let bp = Breakpoint::from_str("if $x > 10").unwrap();
 
         assert!(bp.loc.is_none());
         assert_eq!(bp.condition, Some("x > 10".to_string()));
@@ -319,7 +337,7 @@ mod tests {
     fn test_breakpoint_from_str_location_and_condition() {
         // Both location and condition
         let bp = Breakpoint::from_str(
-            "@0x1234567890123456789012345678901234567890:src/main.rs:100 if balance == 0",
+            "@0x1234567890123456789012345678901234567890:src/main.rs:100 if $ balance == 0",
         )
         .unwrap();
 
@@ -348,9 +366,10 @@ mod tests {
     #[test]
     fn test_breakpoint_from_str_with_spaces() {
         // Test with extra spaces
-        let bp =
-            Breakpoint::from_str("  @0x1234567890123456789012345678901234567890:42  if  x > 10  ")
-                .unwrap();
+        let bp = Breakpoint::from_str(
+            "  @0x1234567890123456789012345678901234567890:42  if $  x > 10  ",
+        )
+        .unwrap();
 
         assert!(bp.loc.is_some());
         assert_eq!(bp.condition, Some("x > 10".to_string()));
@@ -359,13 +378,13 @@ mod tests {
     #[test]
     fn test_breakpoint_from_str_complex_conditions() {
         // Test with complex condition expressions
-        let bp = Breakpoint::from_str("if msg.sender == 0x1234 && balance > 100").unwrap();
+        let bp = Breakpoint::from_str("if $ msg.sender == 0x1234 && balance > 100").unwrap();
         assert!(bp.loc.is_none());
         assert_eq!(bp.condition, Some("msg.sender == 0x1234 && balance > 100".to_string()));
 
         // With location and complex condition
         let bp = Breakpoint::from_str(
-            "@0x1234567890123456789012345678901234567890:100 if (x > 10 || y < 5) && z == true",
+            "@0x1234567890123456789012345678901234567890:100 if $ (x > 10 || y < 5) && z == true",
         )
         .unwrap();
         assert!(bp.loc.is_some());

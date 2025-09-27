@@ -728,10 +728,18 @@ impl TerminalPanel {
             }
             "break" => {
                 if parts.len() < 2 {
-                    self.add_error("Usage: break <subcommand> [args]");
+                    self.add_output("Usage:");
+                    self.add_output("  break add [@<loc>] [if $<expr>] - Add breakpoint");
+                    self.add_output("        <loc> := <addr>:<path>:<line> (source)");
+                    self.add_output("               | <addr>:<pc>          (opcode)");
+                    self.add_output("  break remove <id>               - Remove breakpoint");
+                    self.add_output("  break enable <id>               - Enable breakpoint");
+                    self.add_output("  break disable <id>              - Disable breakpoint");
                     self.add_output(
-                        "Subcommands: add, remove, enable, disable, add_expr, list, clear",
+                        "  break add_expr <id> $<expr>     - Add condition to breakpoint",
                     );
+                    self.add_output("  break list                      - List all breakpoints");
+                    self.add_output("  break clear                     - Clear all breakpoints");
                     return Ok(());
                 }
 
@@ -767,7 +775,7 @@ impl TerminalPanel {
                                     let Some(Code::Source(info)) =
                                         dm.execution.get_code(current_id)
                                     else {
-                                        self.add_error("Failed to get code for current snapshot");
+                                        self.add_error("Failed to get code for current step");
                                         return Ok(());
                                     };
 
@@ -855,23 +863,28 @@ impl TerminalPanel {
                     }
                     "add_expr" => {
                         if parts.len() < 4 {
-                            self.add_error("Usage: break add_expr <id> <expr>");
+                            self.add_error("Usage: break add_expr <id> $<expr>");
                             return Ok(());
                         }
 
                         match parts[2].parse::<usize>() {
                             Ok(id) => {
-                                let expr = parts[3..].join(" ");
-                                match dm
-                                    .execution
-                                    .update_breakpoint_condition(id, normalize_expression(&expr))
-                                {
-                                    Ok(()) => self.add_output(&format!(
-                                        "Breakpoint #{id} condition updated: {expr}"
-                                    )),
-                                    Err(e) => {
-                                        self.add_error(&format!("Failed to update condition: {e}"))
+                                if let Some(expr) = parts[3..].join(" ").strip_prefix("$") {
+                                    match dm
+                                        .execution
+                                        .update_breakpoint_condition(id, normalize_expression(expr))
+                                    {
+                                        Ok(()) => self.add_output(&format!(
+                                            "Breakpoint #{id} condition updated: {expr}"
+                                        )),
+                                        Err(e) => self
+                                            .add_error(&format!("Failed to update condition: {e}")),
                                     }
+                                } else {
+                                    self.add_error(&format!(
+                                        "Expression does not start with $: {}",
+                                        parts[3..].join(" ")
+                                    ))
                                 }
                             }
                             Err(_) => self.add_error("Invalid breakpoint id"),
@@ -888,13 +901,21 @@ impl TerminalPanel {
                                 let loc_desc = bp
                                     .loc
                                     .as_ref()
-                                    .map(|loc| loc.display())
+                                    .map(|loc| {
+                                        loc.display(
+                                            dm.resolver
+                                                .resolve_address_label(loc.bytecode_address()),
+                                        )
+                                    })
                                     .unwrap_or_else(|| "no location".to_string());
 
-                                self.add_output(&format!("  #{id} [{status}] {loc_desc}"));
-                                if let Some(cond) = &bp.condition {
-                                    self.add_output(&format!("      Condition: {cond}"));
+                                let mut line_str = format!("  #{id}: {loc_desc}");
+                                if let Some(code) = &bp.condition {
+                                    line_str.push_str(&format!(" if {code}"));
                                 }
+                                line_str.push_str(&format!(" [{status}]"));
+
+                                self.add_output(&line_str);
                             }
                         }
                     }
@@ -904,7 +925,20 @@ impl TerminalPanel {
                     },
                     _ => {
                         self.add_error(&format!("Unknown break subcommand: {}", parts[1]));
-                        self.add_output("Available subcommands: add, remove, enable, disable, add_expr, list, clear");
+                        self.add_output("Usage:");
+                        self.add_output("  break add [@<loc>] [if $<expr>] - Add breakpoint");
+                        self.add_output("        <loc> := <addr>:<path>:<line> (source)");
+                        self.add_output("               | <addr>:<pc>          (opcode)");
+                        self.add_output("  break remove <id>               - Remove breakpoint");
+                        self.add_output("  break enable <id>               - Enable breakpoint");
+                        self.add_output("  break disable <id>              - Disable breakpoint");
+                        self.add_output(
+                            "  break add_expr <id> $<expr>     - Add condition to breakpoint",
+                        );
+                        self.add_output("  break list                      - List all breakpoints");
+                        self.add_output(
+                            "  break clear                     - Clear all breakpoints",
+                        );
                     }
                 }
             }
@@ -999,18 +1033,16 @@ impl TerminalPanel {
         self.add_output("👁️ Watcher:");
         self.add_output("  watch add $<expr>   - Add watch expression");
         self.add_output("  watch remove <id>   - Remove watch expression");
-        self.add_output("  watch list          - List all watch expressions");
-        self.add_output("  watch clear         - Clear all watch expressions");
         self.add_output("🔴 Breakpoints:");
-        self.add_output("  break add [@<loc>] [if <expr>] - Add breakpoint");
-        self.add_output("      <loc> := <addr>:<path>:<line> (source)|");
-        self.add_output("               <addr>:<pc>          (opcode)");
-        self.add_output("  break remove <id>              - Remove breakpoint");
-        self.add_output("  break enable <id>              - Enable breakpoint");
-        self.add_output("  break disable <id>             - Disable breakpoint");
-        self.add_output("  break add_expr <id> <expr>     - Add condition expression");
-        self.add_output("  break list                     - List all breakpoints");
-        self.add_output("  break clear                    - Clear all breakpoints");
+        self.add_output("  break add [@<loc>] [if $<expr>] - Add breakpoint");
+        self.add_output("        <loc> := <addr>:<path>:<line> (source)");
+        self.add_output("               | <addr>:<pc>          (opcode)");
+        self.add_output("  break remove <id>               - Remove breakpoint");
+        self.add_output("  break enable <id>               - Enable breakpoint");
+        self.add_output("  break disable <id>              - Disable breakpoint");
+        self.add_output("  break add_expr <id> $<expr>     - Add condition expression");
+        self.add_output("  break list                      - List all breakpoints");
+        self.add_output("  break clear                     - Clear all breakpoints");
         self.add_output("");
         self.add_output("💻 Solidity expressions (prefix with $):");
         self.add_output("  $<expr>          - Evaluate expression");
@@ -1074,7 +1106,7 @@ impl TerminalPanel {
         match parts[0] {
             "add" => {
                 if parts.len() < 2 {
-                    self.add_error("Usage: watch add <expr>");
+                    self.add_error("Usage: watch add $<expr>");
                     return;
                 }
                 let expr = args[3..].trim();
@@ -1135,7 +1167,7 @@ impl TerminalPanel {
             _ => {
                 self.add_error("Unknown watch command");
                 self.add_output("Usage:");
-                self.add_output("  watch add <expr>    - Add watch expression");
+                self.add_output("  watch add $<expr>    - Add watch expression");
                 self.add_output("  watch remove <id>   - Remove watch expression");
                 self.add_output("  watch list          - List all watch expressions");
                 self.add_output("  watch clear         - Clear all watch expressions");

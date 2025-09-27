@@ -32,7 +32,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, error};
 
 use edb_common::types::{Breakpoint, BreakpointLocation, Code, SnapshotInfo, Trace};
 
@@ -437,8 +437,7 @@ impl ExecutionManager {
         };
 
         let Some(bytecode_address) = self.get_trace().get(entry_id).map(|e| e.code_address) else {
-            debug!("Code not found in cache, fetching...");
-            self.new_fetching_request(ExecutionRequest::Code(id));
+            error!("Invalid trace entry id {entry_id}");
             return None;
         };
 
@@ -690,6 +689,7 @@ impl ExecutionManager {
                     if path.ends_with(bp_path) {
                         let lines: Vec<&str> = source.lines().collect();
                         if *line_number <= lines.len() {
+                            // Valid line number
                             codes.insert(path.clone());
                         }
                     }
@@ -722,9 +722,7 @@ impl ExecutionManager {
             bail!("Cannot add breakpoint while there is a pending request");
         }
 
-        let Some(bp) = self.validate_breakpoint(bp) else {
-            bail!("Invalid breakpoint");
-        };
+        let bp = self.validate_breakpoint(bp).ok_or_else(|| eyre::eyre!("Invalid breakpoint"))?;
 
         if self.breakpoint_set.insert(bp.clone()) {
             self.breakpoints.push((bp, true));
@@ -745,7 +743,11 @@ impl ExecutionManager {
             bail!("Breakpoint id {id} out of bounds");
         }
 
-        self.breakpoints[id - 1].0.condition = Some(expr);
+        // TODO: remove the locations pointing to the old breakpoint
+
+        self.breakpoints[id - 1].0.set_condition(&expr);
+
+        // TODO: try to fetch the location
         Ok(())
     }
 
