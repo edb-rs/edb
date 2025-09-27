@@ -107,6 +107,7 @@ where
         match method {
             "edb_getTrace" => trace::get_trace(&self.context),
             "edb_getCode" => artifact::get_code(&self.context, params),
+            "edb_getCodeByAddress" => artifact::get_code_by_address(&self.context, params),
             "edb_getConstructorArgs" => artifact::get_constructor_args(&self.context, params),
             "edb_getSnapshotCount" => snapshot::get_snapshot_count(&self.context),
             "edb_getSnapshotInfo" => snapshot::get_snapshot_info(&self.context, params),

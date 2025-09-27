@@ -34,7 +34,7 @@ use std::{
 use tokio::sync::RwLock;
 use tracing::debug;
 
-use edb_common::types::{Breakpoint, Code, SnapshotInfo, Trace};
+use edb_common::types::{Breakpoint, BreakpointLocation, Code, SnapshotInfo, Trace};
 
 use crate::{
     data::manager::core::{
@@ -102,6 +102,7 @@ impl ManagerStateTr for ExecutionState {
 pub enum ExecutionRequest {
     SnapshotInfo(usize),
     Code(usize),
+    CodeByAddress(Address),
     NextCall(usize),
     PrevCall(usize),
     Storage(usize, U256),
@@ -160,6 +161,14 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
 
                 let code = rpc_client.get_code(id).await?;
                 state.code.insert(bytecode_address, Some(code));
+            }
+            Self::CodeByAddress(address) => {
+                if state.code.contains_key(&address) {
+                    return Ok(());
+                }
+
+                let code = rpc_client.get_code_by_address(address).await?;
+                state.code.insert(address, Some(code));
             }
             Self::NextCall(id) => {
                 if state.next_call.contains_key(&id) {
@@ -445,6 +454,21 @@ impl ExecutionManager {
         }
     }
 
+    pub fn get_code_by_bytecode_address(&mut self, address: Address) -> Option<&Code> {
+        let _ = self.pull_from_core();
+
+        if !self.state.code.contains_key(&address) {
+            debug!("Code not found in cache, fetching...");
+            self.new_fetching_request(ExecutionRequest::CodeByAddress(address));
+            return None;
+        }
+
+        match self.state.code.get(&address) {
+            Some(code) => code.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn get_current_snapshot(&mut self) -> usize {
         let _ = self.check_pending_request();
         self.current_snapshot
@@ -633,6 +657,60 @@ impl ExecutionManager {
     // Breakpoint management
     /////////////////////////////////////////////
 
+    fn validate_breakpoint(&mut self, mut bp: Breakpoint) -> Option<Breakpoint> {
+        if bp.loc.is_none() && bp.condition.is_none() {
+            // Invalid breakpoint with no location and no condition
+            return None;
+        }
+
+        let loc = bp.loc.as_ref()?;
+        let bytecode_address = loc.bytecode_address();
+        let code = self.get_code_by_bytecode_address(bytecode_address)?;
+
+        match (loc, code) {
+            (BreakpointLocation::Opcode { pc, .. }, Code::Opcode(info)) => {
+                let _ = info.codes.get(pc)?;
+                Some(bp)
+            }
+            (
+                BreakpointLocation::Source { file_path: bp_path, line_number, .. },
+                Code::Source(info),
+            ) => {
+                // line_number is 1-based
+                if *line_number == 0 {
+                    // Invalid line number
+                    return None;
+                }
+
+                // We allow users to simple specify the file name instead of full path
+                // We will match the first file that ends with the given path
+                let mut codes = HashSet::new();
+
+                for (path, source) in &info.sources {
+                    if path.ends_with(bp_path) {
+                        let lines: Vec<&str> = source.lines().collect();
+                        if *line_number <= lines.len() {
+                            codes.insert(path.clone());
+                        }
+                    }
+                }
+
+                if codes.len() == 1 {
+                    bp.loc = Some(BreakpointLocation::Source {
+                        bytecode_address,
+                        file_path: codes.into_iter().next().unwrap(),
+                        line_number: *line_number,
+                    });
+                    Some(bp)
+                } else {
+                    // Ambiguous or not found
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     pub fn list_breakpoints(&self) -> impl Iterator<Item = (usize, &Breakpoint, bool)> {
         self.breakpoints.iter().enumerate().map(|(i, (bp, enabled))| (i + 1, bp, *enabled))
     }
@@ -643,6 +721,10 @@ impl ExecutionManager {
             // There is a pending request, we should not update breakpoints
             bail!("Cannot add breakpoint while there is a pending request");
         }
+
+        let Some(bp) = self.validate_breakpoint(bp) else {
+            bail!("Invalid breakpoint");
+        };
 
         if self.breakpoint_set.insert(bp.clone()) {
             self.breakpoints.push((bp, true));
@@ -699,6 +781,12 @@ impl ExecutionManager {
         self.breakpoints.clear();
         self.breakpoint_set.clear();
         Ok(())
+    }
+
+    /// Return the breakpoints that are hit at the current snapshot
+    pub fn get_hit_breakpoints(&mut self, _snaphost_id: usize) -> Vec<usize> {
+        // TODO
+        vec![]
     }
 }
 

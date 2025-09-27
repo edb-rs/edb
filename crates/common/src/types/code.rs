@@ -30,14 +30,6 @@ pub enum Code {
 }
 
 impl Code {
-    /// Returns the contract address associated with this code information
-    pub fn address(&self) -> Address {
-        match self {
-            Self::Opcode(info) => info.address,
-            Self::Source(info) => info.address,
-        }
-    }
-
     /// Returns the bytecode address, which may differ from the contract address in proxy patterns
     pub fn bytecode_address(&self) -> Address {
         match self {
@@ -50,19 +42,15 @@ impl Code {
 /// Information about disassembled bytecode with opcode mappings for debugging at the EVM level
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpcodeInfo {
-    /// The contract address where this bytecode is deployed
-    pub address: Address,
     /// The address where the actual bytecode is stored (may differ from address in proxy patterns)
     pub bytecode_address: Address,
     /// Mapping from program counter to disassembled opcode strings for step-by-step debugging
-    pub codes: HashMap<u64, String>, // pc -> opcode
+    pub codes: HashMap<usize, String>, // pc -> opcode
 }
 
 /// Information about original Solidity source code for high-level debugging with source mappings
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourceInfo {
-    /// The contract address where this source code is deployed
-    pub address: Address,
     /// The address where the actual bytecode is stored (may differ from address in proxy patterns)
     pub bytecode_address: Address,
     /// Mapping from source file paths to their content for source-level debugging

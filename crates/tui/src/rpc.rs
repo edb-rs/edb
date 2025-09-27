@@ -273,6 +273,19 @@ impl RpcClient {
         serde_json::from_value(value).map_err(|e| eyre::eyre!("Failed to parse code: {}", e))
     }
 
+    /// Get code by address
+    pub async fn get_code_by_address(&self, address: Address) -> Result<Code> {
+        let value = self
+            .request_with_spinner(
+                "edb_getCodeByAddress",
+                rpc_params!(address),
+                &format!("Getting code for address {address}"),
+            )
+            .await?;
+
+        serde_json::from_value(value).map_err(|e| eyre::eyre!("Failed to parse code: {}", e))
+    }
+
     /// Get next call
     pub async fn get_next_call(&self, snapshot_id: usize) -> Result<usize> {
         let value = self

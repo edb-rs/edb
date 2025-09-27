@@ -28,7 +28,7 @@ use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_primitives::{Address, Bytes, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use edb_common::types::{
-    EdbSolValue, HookSnapshotInfoDetail, OpcodeSnapshotInfoDetail, SnapshotInfoDetail,
+    Breakpoint, EdbSolValue, HookSnapshotInfoDetail, OpcodeSnapshotInfoDetail, SnapshotInfoDetail,
     SolValueFormatterContext,
 };
 use eyre::Result;
@@ -67,8 +67,8 @@ pub enum DisplayMode {
     Variables,
     /// Show expression watches (for both opcode and hooked snapshots)
     Expressions,
-    /// Show breakpoints (for hooked snapshots)
-    _Breakpoints,
+    /// Show breakpoints (for both opcode and hooked snapshots)
+    Breakpoints,
     /// Show current stack (for opcode snapshots)
     Stack,
     /// Show memory contents (for opcode snapshots)
@@ -90,6 +90,15 @@ struct VariableEntry {
     is_multi_line: bool,
     /// For expressions, stores the original expression text
     expression: Option<String>,
+}
+
+/// Represents a breakpoint entry for display
+#[derive(Debug, Clone, PartialEq)]
+struct BreakpointEntry {
+    id: usize,
+    breakpoint: Breakpoint,
+    enabled: bool,
+    is_hit: bool,
 }
 
 impl cmp::PartialOrd for VariableEntry {
@@ -123,7 +132,7 @@ impl DisplayMode {
         match self {
             Self::Variables => "Variables",
             Self::Expressions => "Expressions",
-            Self::_Breakpoints => "Breakpoints",
+            Self::Breakpoints => "Breakpoints",
             Self::Stack => "Stack",
             Self::Memory => "Memory",
             Self::CallData => "Call Data",
@@ -215,8 +224,10 @@ pub struct DisplayPanel {
     prev_opcode: Option<u8>,
     /// Previous stack for SSTORE/TSTORE slot extraction
     prev_stack: Option<Vec<U256>>,
-    /// Mock breakpoints for hooked snapshots
-    breakpoints: Vec<String>,
+    /// Breakpoint entries from execution manager
+    breakpoints: Vec<BreakpointEntry>,
+    /// Hit breakpoint IDs for current snapshot
+    hit_breakpoints: Vec<usize>,
     /// All variable entries (local and state) from hook snapshots
     variables: Vec<VariableEntry>,
     /// Variables that are toggled to multi-line (persisted by name)
@@ -260,11 +271,8 @@ impl DisplayPanel {
             multi_line_variables: HashSet::new(),
             expressions: Vec::new(),
             multi_line_expressions: HashSet::new(),
-            // Mocked data for breakpoints
-            breakpoints: vec![
-                "Line 42: Transfer.sol - require(balance >= amount)".to_string(),
-                "Line 58: Token.sol - emit Transfer(from, to, amount)".to_string(),
-            ],
+            breakpoints: Vec::new(),
+            hit_breakpoints: Vec::new(),
             storage_display_lines: 0,
             tstorage_display_lines: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
@@ -280,6 +288,9 @@ impl DisplayPanel {
             self.variables.retain(|var| var.category != VariableCategory::Expression);
             self.variables.splice(0..0, self.expressions.iter().cloned());
         }
+
+        // Update breakpoints data
+        self.update_breakpoints_data(dm, current_snapshot);
 
         // Check if snapshot changed
         if self.current_execution_snapshot == Some(current_snapshot) {
@@ -300,6 +311,7 @@ impl DisplayPanel {
                     DisplayMode::Storage,
                     DisplayMode::TransientStorage,
                     DisplayMode::Expressions,
+                    DisplayMode::Breakpoints,
                 ];
 
                 // Update opcode-specific data
@@ -314,7 +326,7 @@ impl DisplayPanel {
             }
             SnapshotInfoDetail::Hook(hook_detail) => {
                 self.is_opcode_snapshot = false;
-                self.available_modes = vec![DisplayMode::Variables];
+                self.available_modes = vec![DisplayMode::Variables, DisplayMode::Breakpoints];
 
                 // Update hook-specific data
                 self.update_hook_data(hook_detail);
@@ -581,9 +593,7 @@ impl DisplayPanel {
                 // Calculate actual max width for expressions by formatting each entry
                 self.calculate_expressions_max_width(dm)
             }
-            DisplayMode::_Breakpoints => {
-                self.breakpoints.iter().map(|s| s.len()).max().unwrap_or(0)
-            }
+            DisplayMode::Breakpoints => self.calculate_breakpoints_max_width(dm),
         };
     }
 
@@ -779,6 +789,28 @@ impl DisplayPanel {
             || self.expressions.iter().zip(old_values.iter()).any(|(a, b)| a != b)
     }
 
+    /// Update breakpoints data from execution manager
+    fn update_breakpoints_data(&mut self, dm: &mut DataManager, current_snapshot: usize) {
+        // Get hit breakpoints for current snapshot
+        self.hit_breakpoints = dm.execution.get_hit_breakpoints(current_snapshot);
+
+        // Get all breakpoints from execution manager
+        let breakpoint_data: Vec<(usize, &Breakpoint, bool)> =
+            dm.execution.list_breakpoints().collect();
+
+        // Update breakpoint entries
+        self.breakpoints.clear();
+        for (id, breakpoint, enabled) in breakpoint_data {
+            let is_hit = self.hit_breakpoints.contains(&id);
+            self.breakpoints.push(BreakpointEntry {
+                id,
+                breakpoint: breakpoint.clone(),
+                enabled,
+                is_hit,
+            });
+        }
+    }
+
     /// Calculate the maximum width for variables display
     fn calculate_variables_max_width(&self, dm: &mut DataManager) -> usize {
         let mut max_width = 0;
@@ -899,6 +931,82 @@ impl DisplayPanel {
         total_lines.max(1)
     }
 
+    /// Calculate the maximum width for breakpoints display
+    fn calculate_breakpoints_max_width(&self, _dm: &mut DataManager) -> usize {
+        let mut max_width = 0;
+
+        for entry in &self.breakpoints {
+            // Calculate width for the formatted breakpoint entry
+            let mut width = 0;
+
+            // Status indicator: 🔵/🔴 + space = ~4 chars
+            width += 4;
+
+            // Hit indicator: 🎯 + space = ~4 chars (if hit)
+            if entry.is_hit {
+                width += 4;
+            }
+
+            // ID: #1 + space = variable
+            width += format!("#{} ", entry.id).len();
+
+            // Location display
+            if let Some(loc) = &entry.breakpoint.loc {
+                width += loc.display().len();
+            } else {
+                width += 12; // "no location"
+            }
+
+            // Condition display (if present)
+            if let Some(condition) = &entry.breakpoint.condition {
+                width += format!(" if {}", condition).len();
+            }
+
+            max_width = max_width.max(width);
+        }
+
+        max_width.max(50) // Minimum width
+    }
+
+    /// Format a breakpoint entry for display with visual indicators
+    fn format_breakpoint_entry(
+        &self,
+        entry: &BreakpointEntry,
+        _dm: &mut DataManager,
+    ) -> Vec<Span<'static>> {
+        let mut spans = Vec::new();
+
+        // Status indicator (enabled/disabled)
+        let status_indicator = if entry.enabled {
+            "🔵 " // Blue circle for enabled
+        } else {
+            "🔴 " // Red circle for disabled
+        };
+        spans.push(Span::raw(status_indicator.to_string()));
+
+        // Hit indicator (if this breakpoint is currently hit)
+        if entry.is_hit {
+            spans.push(Span::raw("🎯 ".to_string())); // Target emoji for hit breakpoints
+        }
+
+        // Breakpoint ID
+        spans.push(Span::raw(format!("#{} ", entry.id)));
+
+        // Location
+        if let Some(loc) = &entry.breakpoint.loc {
+            spans.push(Span::raw(loc.display()));
+        } else {
+            spans.push(Span::raw("no location".to_string()));
+        }
+
+        // Condition (if present)
+        if let Some(condition) = &entry.breakpoint.condition {
+            spans.push(Span::raw(format!(" if {}", condition)));
+        }
+
+        spans
+    }
+
     /// Apply horizontal offset to a line for horizontal scrolling
     fn apply_horizontal_offset<'a>(&self, line: Line<'a>) -> Line<'a> {
         if self.horizontal_offset == 0 {
@@ -964,6 +1072,35 @@ impl DisplayPanel {
         }
     }
 
+    /// Toggle enable/disable state for the currently selected breakpoint
+    fn toggle_breakpoint(&mut self, dm: &mut DataManager) {
+        if let Some(entry) = self.breakpoints.get(self.selected_index) {
+            let breakpoint_id = entry.id;
+
+            if entry.enabled {
+                // Disable the breakpoint
+                if let Err(e) = dm.execution.disable_breakpoint(breakpoint_id) {
+                    debug!("Failed to disable breakpoint {}: {}", breakpoint_id, e);
+                } else {
+                    debug!("Disabled breakpoint #{}", breakpoint_id);
+                }
+            } else {
+                // Enable the breakpoint
+                if let Err(e) = dm.execution.enable_breakpoint(breakpoint_id) {
+                    debug!("Failed to enable breakpoint {}: {}", breakpoint_id, e);
+                } else {
+                    debug!("Enabled breakpoint #{}", breakpoint_id);
+                }
+            }
+
+            // Update the local breakpoint data to reflect the change immediately
+            // This will be properly updated on the next data refresh
+            if let Some(entry) = self.breakpoints.get_mut(self.selected_index) {
+                entry.enabled = !entry.enabled;
+            }
+        }
+    }
+
     /// Move selection up with auto-scrolling
     fn move_up(&mut self) {
         if self.selected_index > 0 {
@@ -991,7 +1128,7 @@ impl DisplayPanel {
             DisplayMode::TransientStorage => self.tstorage_display_lines.max(1),
             DisplayMode::Variables => self.calculate_variables_display_lines(dm),
             DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
-            DisplayMode::_Breakpoints => self.breakpoints.len(),
+            DisplayMode::Breakpoints => self.breakpoints.len(),
         };
 
         if self.selected_index < max_items.saturating_sub(1) {
@@ -1672,22 +1809,53 @@ impl DisplayPanel {
         self.render_status_and_help(frame, area, dm);
     }
 
-    /// Render breakpoints display (for hooked snapshots)
+    /// Render breakpoints display (for both opcode and hooked snapshots)
     fn render_breakpoints(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
+        if self.breakpoints.is_empty() {
+            let empty_msg = "No breakpoints set";
+            let paragraph = Paragraph::new(empty_msg).block(BorderPresets::display(
+                self.focused,
+                self.title(dm),
+                dm.theme.focused_border,
+                dm.theme.unfocused_border,
+            ));
+            frame.render_widget(paragraph, area);
+            return;
+        }
+
         let items: Vec<ListItem<'_>> = self
             .breakpoints
             .iter()
             .enumerate()
             .skip(self.scroll_offset)
             .take(self.context_height)
-            .map(|(display_idx, bp)| {
+            .map(|(display_idx, entry)| {
                 let is_selected = display_idx == self.selected_index;
-                let style = if is_selected && self.focused {
+
+                // Format the breakpoint entry with visual indicators
+                let formatted_spans = self.format_breakpoint_entry(entry, dm);
+
+                // Create a line from the spans
+                let line = Line::from(formatted_spans);
+                let formatted_line = self.apply_horizontal_offset(line);
+
+                // Apply styling based on breakpoint state and selection
+                let mut style = if is_selected && self.focused {
                     Style::default().bg(dm.theme.selection_bg).fg(dm.theme.selection_fg)
                 } else {
                     Style::default()
                 };
-                let formatted_line = self.apply_horizontal_offset(Line::from(bp.clone()));
+
+                // Add special styling for hit breakpoints
+                if entry.is_hit && (!is_selected || !self.focused) {
+                    style = style.fg(dm.theme.warning_color).add_modifier(Modifier::BOLD);
+                }
+
+                // Add dim styling for disabled breakpoints
+                if !entry.enabled && (!is_selected || !self.focused) {
+                    style = style.fg(dm.theme.comment_color).add_modifier(Modifier::DIM);
+                }
+
                 ListItem::new(formatted_line).style(style)
             })
             .collect();
@@ -1721,7 +1889,7 @@ impl DisplayPanel {
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.calculate_variables_display_lines(dm),
             DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
-            DisplayMode::_Breakpoints => self.breakpoints.len(),
+            DisplayMode::Breakpoints => self.breakpoints.len(),
         };
 
         let status_bar = StatusBar::new()
@@ -1771,6 +1939,10 @@ impl DisplayPanel {
                 "Vim-like Navigation • s/S: Switch mode • Enter: Toggle multi-line • ?: Help"
                     .to_string()
             }
+            DisplayMode::Breakpoints => {
+                "Vim-like Navigation • s/S: Switch mode • Enter: Toggle enable/disable • ?: Help"
+                    .to_string()
+            }
             _ => "Vim-like Navigation • s/S: Switch mode • ?: Help".to_string(),
         };
 
@@ -1800,7 +1972,7 @@ impl PanelTr for DisplayPanel {
             DisplayMode::TransientStorage => self.tstorage_display_lines,
             DisplayMode::Variables => self.variables.len(),
             DisplayMode::Expressions => self.expressions.len(),
-            DisplayMode::_Breakpoints => self.breakpoints.len(),
+            DisplayMode::Breakpoints => self.breakpoints.len(),
         };
 
         let snapshot_type = if self.is_opcode_snapshot { "Opcode" } else { "Hook" };
@@ -1831,7 +2003,7 @@ impl PanelTr for DisplayPanel {
             DisplayMode::TransientStorage => self.render_transient_storage(frame, area, dm),
             DisplayMode::Variables => self.render_variables(frame, area, dm),
             DisplayMode::Expressions => self.render_expressions(frame, area, dm),
-            DisplayMode::_Breakpoints => self.render_breakpoints(frame, area, dm),
+            DisplayMode::Breakpoints => self.render_breakpoints(frame, area, dm),
         }
     }
 
@@ -1907,16 +2079,20 @@ impl PanelTr for DisplayPanel {
                     DisplayMode::TransientStorage => self.tstorage_display_lines.max(1),
                     DisplayMode::Variables => self.calculate_variables_display_lines(dm),
                     DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
-                    DisplayMode::_Breakpoints => self.breakpoints.len(),
+                    DisplayMode::Breakpoints => self.breakpoints.len(),
                 };
                 self.selected_index = max_items.saturating_sub(1);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Enter => {
-                // Toggle multi-line display for variables and expressions
+                // Toggle multi-line display for variables and expressions, or toggle breakpoint enable/disable
                 match self.mode {
                     DisplayMode::Variables | DisplayMode::Expressions => {
                         self.toggle_multiline(dm);
+                        Ok(EventResponse::Handled)
+                    }
+                    DisplayMode::Breakpoints => {
+                        self.toggle_breakpoint(dm);
                         Ok(EventResponse::Handled)
                     }
                     _ => Ok(EventResponse::NotHandled),

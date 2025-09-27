@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, Bytes};
 use edb_common::types::{Code, OpcodeInfo, SourceInfo};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
@@ -74,7 +74,6 @@ where
         data: None,
     })?;
 
-    let address = trace_entry.target;
     let bytecode_address = trace_entry.code_address;
 
     let code = match snapshot.detail() {
@@ -87,22 +86,9 @@ where
                 data: None,
             })?;
 
-            let disasm_result = disassemble(bytecode);
+            let codes = get_disassembled_code(bytecode);
 
-            let mut codes = HashMap::new();
-            for instruction in disasm_result.instructions {
-                let pc = instruction.pc as u64;
-                let opcode_str = if instruction.is_push() && !instruction.push_data.is_empty() {
-                    // Format PUSH instructions with their data
-                    let data_hex = hex::encode(&instruction.push_data);
-                    format!("{} 0x{}", instruction.opcode, data_hex)
-                } else {
-                    instruction.opcode.to_string()
-                };
-                codes.insert(pc, opcode_str);
-            }
-
-            Code::Opcode(OpcodeInfo { address, bytecode_address, codes })
+            Code::Opcode(OpcodeInfo { bytecode_address, codes })
         }
         SnapshotDetail::Hook(..) => {
             // Get the artifact for this address
@@ -118,7 +104,7 @@ where
                 sources.insert(path.clone(), source.content.to_string());
             }
 
-            Code::Source(SourceInfo { address, bytecode_address, sources })
+            Code::Source(SourceInfo { bytecode_address, sources })
         }
     };
 
@@ -133,6 +119,85 @@ where
     Ok(json_value)
 }
 
+/// Get code for a specific address
+///
+/// This method retrieves the code (either opcode or source) associated with a given
+/// contract address, if available in the artifact metadata.
+///
+/// # Parameters
+/// - `address`: The contract address
+///
+/// # Returns
+/// - For opcode snapshots: Disassembled bytecode with PC mappings
+/// - For hook snapshots: Source code files from the artifact
+pub fn get_code_by_address<DB>(
+    context: &Arc<EngineContext<DB>>,
+    params: Option<Value>,
+) -> Result<serde_json::Value, RpcError>
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    // Parse the address as the first argument
+    let address: Address = params
+        .as_ref()
+        .and_then(|p| p.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or_else(|| RpcError {
+            code: error_codes::INVALID_PARAMS,
+            message: "Invalid params: expected [address]".to_string(),
+            data: None,
+        })?;
+
+    let code = match context.artifacts.get(&address) {
+        Some(artifact) => {
+            // Extract sources from the SolcInput
+            let mut sources = HashMap::new();
+            for (path, source) in &artifact.input.sources {
+                sources.insert(path.clone(), source.content.to_string());
+            }
+            Code::Source(SourceInfo { bytecode_address: address, sources })
+        }
+        None => context
+            .trace
+            .iter()
+            .find_map(|entry| {
+                if entry.code_address == address {
+                    let bytecode = entry.bytecode.as_ref()?;
+                    let codes = get_disassembled_code(bytecode);
+                    Some(Code::Opcode(OpcodeInfo { bytecode_address: address, codes }))
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| RpcError {
+                code: error_codes::CODE_NOT_FOUND,
+                message: format!("No code found for address {address}"),
+                data: None,
+            })?,
+    };
+
+    let json_value = serde_json::to_value(code).map_err(|e| RpcError {
+        code: error_codes::INTERNAL_ERROR,
+        message: format!("Failed to serialize code: {e}"),
+        data: None,
+    })?;
+    debug!("Retrieved code for address {}", address);
+    Ok(json_value)
+}
+
+/// Get constructor arguments for a contract at a specific address
+///
+/// This method retrieves the constructor arguments used during the deployment
+/// of a contract, if available in the artifact metadata.
+///
+/// # Parameters
+/// - `address`: The contract address
+///    
+/// # Returns
+/// - The constructor arguments as a JSON value, or null if not available
 pub fn get_constructor_args<DB>(
     context: &Arc<EngineContext<DB>>,
     params: Option<Value>,
@@ -165,4 +230,22 @@ where
 
     debug!("Retrieved contract ABI for address {}", address);
     Ok(json_value)
+}
+
+fn get_disassembled_code(bytecode: &Bytes) -> HashMap<usize, String> {
+    let disasm_result = disassemble(bytecode);
+
+    let mut codes = HashMap::new();
+    for instruction in disasm_result.instructions {
+        let pc = instruction.pc;
+        let opcode_str = if instruction.is_push() && !instruction.push_data.is_empty() {
+            // Format PUSH instructions with their data
+            let data_hex = hex::encode(&instruction.push_data);
+            format!("{} 0x{}", instruction.opcode, data_hex)
+        } else {
+            instruction.opcode.to_string()
+        };
+        codes.insert(pc, opcode_str);
+    }
+    codes
 }

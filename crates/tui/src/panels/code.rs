@@ -136,7 +136,7 @@ pub struct CodePanel {
     /// Available source code
     sources: HashMap<String, String>,
     /// Avaiable opcode
-    opcodes: Vec<(u64, String)>,
+    opcodes: Vec<(usize, String)>,
     /// Currently selected source path index
     selected_path_index: usize,
 }
