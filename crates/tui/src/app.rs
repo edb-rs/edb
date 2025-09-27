@@ -27,6 +27,10 @@ use crate::panels::{
 use crate::rpc::RpcClient;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
 use eyre::Result;
+use ratatui::layout::Alignment;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     Frame,
@@ -156,6 +160,8 @@ pub struct App {
     help_overlay: HelpOverlay,
     /// Whether to show help overlay
     show_help: bool,
+    /// Error popup message
+    error_popup: Option<String>,
 }
 
 impl App {
@@ -185,6 +191,7 @@ impl App {
             horizontal_split: 50, // 50% top panels height
             help_overlay: HelpOverlay::new(),
             show_help: false,
+            error_popup: None,
         })
     }
 
@@ -203,6 +210,11 @@ impl App {
         // Render help overlay if active
         if self.show_help {
             self.help_overlay.render(frame, self.layout_manager.layout_type(), data_manager);
+        }
+
+        // Render error popup if active
+        if let Some(ref error_msg) = self.error_popup {
+            self.render_error_popup(frame, area, error_msg, data_manager);
         }
     }
 
@@ -431,6 +443,84 @@ impl App {
         frame.render_widget(status_paragraph, area);
     }
 
+    /// Render compact error popup overlay
+    fn render_error_popup(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        error_msg: &str,
+        data_manager: &mut DataManager,
+    ) {
+        // Calculate popup size based on error message length
+        let lines: Vec<&str> = error_msg.lines().collect();
+        let max_line_width = lines.iter().map(|line| line.len()).max().unwrap_or(0);
+
+        // Popup dimensions
+        let popup_width = (max_line_width + 8).min(area.width.saturating_sub(4) as usize) as u16; // +8 for padding and borders
+        let popup_height = (lines.len() + 4).min(area.height.saturating_sub(2) as usize) as u16; // +4 for borders and instructions
+
+        // Center the popup
+        let popup_area = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length((area.height.saturating_sub(popup_height)) / 2),
+                Constraint::Length(popup_height),
+                Constraint::Min(0),
+            ])
+            .split(area)[1];
+
+        let popup_area = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length((area.width.saturating_sub(popup_width)) / 2),
+                Constraint::Length(popup_width),
+                Constraint::Min(0),
+            ])
+            .split(popup_area)[1];
+
+        // Clear the background
+        frame.render_widget(Clear, popup_area);
+
+        // Create error content
+        let mut error_lines = vec![
+            Line::from(vec![Span::styled(
+                "❌ Error",
+                Style::default().fg(data_manager.theme.error_color),
+            )]),
+            Line::from(""),
+        ];
+
+        // Add error message lines
+        for line in lines {
+            error_lines.push(Line::from(line.to_string()));
+        }
+
+        error_lines.push(Line::from(""));
+        error_lines.push(Line::from(vec![
+            Span::styled("Press ", Style::default().fg(data_manager.theme.comment_color)),
+            Span::styled("Esc", Style::default().fg(data_manager.theme.accent_color)),
+            Span::styled(", ", Style::default().fg(data_manager.theme.comment_color)),
+            Span::styled("Enter", Style::default().fg(data_manager.theme.accent_color)),
+            Span::styled(", or ", Style::default().fg(data_manager.theme.comment_color)),
+            Span::styled("Space", Style::default().fg(data_manager.theme.accent_color)),
+            Span::styled(" to dismiss", Style::default().fg(data_manager.theme.comment_color)),
+        ]));
+
+        // Create popup block
+        let popup_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(data_manager.theme.error_color))
+            .style(Style::default());
+
+        // Create popup paragraph
+        let popup_paragraph = Paragraph::new(error_lines)
+            .block(popup_block)
+            .wrap(Wrap { trim: false })
+            .alignment(Alignment::Left);
+
+        frame.render_widget(popup_paragraph, popup_area);
+    }
+
     /// Update panel focus states
     fn update_panel_focus(&mut self) {
         for (panel_type, panel) in &mut self.panels {
@@ -454,6 +544,17 @@ impl App {
         }
 
         debug!("Key pressed: {:?}", key);
+
+        // If error popup is showing, handle error-specific keys
+        if self.error_popup.is_some() {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') => {
+                    self.error_popup = None;
+                    return Ok(EventResponse::Handled);
+                }
+                _ => return Ok(EventResponse::Handled), // Consume all other keys when error is shown
+            }
+        }
 
         // If help is showing, handle help-specific keys
         if self.show_help {
@@ -502,7 +603,13 @@ impl App {
                 if self.current_panel == PanelType::Terminal {
                     // If we're in terminal, let the terminal handle ESC (INSERT -> VIM mode)
                     if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-                        return panel.handle_key_event(key, data_manager);
+                        return match panel.handle_key_event(key, data_manager) {
+                            Ok(response) => Ok(response),
+                            Err(e) => {
+                                self.error_popup = Some(format!("{}", e));
+                                Ok(EventResponse::Handled)
+                            }
+                        };
                     }
                 } else {
                     // If we're in other panels, ESC returns to terminal
@@ -528,7 +635,13 @@ impl App {
                         } else {
                             // Forward to current panel if not on Code/Trace
                             if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                                return panel.handle_key_event(key, data_manager);
+                                return match panel.handle_key_event(key, data_manager) {
+                                    Ok(response) => Ok(response),
+                                    Err(e) => {
+                                        self.error_popup = Some(format!("{}", e));
+                                        Ok(EventResponse::Handled)
+                                    }
+                                };
                             }
                             Ok(EventResponse::NotHandled)
                         }
@@ -547,7 +660,13 @@ impl App {
                         } else {
                             // Forward to terminal if focused on terminal
                             if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-                                return panel.handle_key_event(key, data_manager);
+                                return match panel.handle_key_event(key, data_manager) {
+                                    Ok(response) => Ok(response),
+                                    Err(e) => {
+                                        self.error_popup = Some(format!("{}", e));
+                                        Ok(EventResponse::Handled)
+                                    }
+                                };
                             }
                             Ok(EventResponse::NotHandled)
                         }
@@ -555,7 +674,13 @@ impl App {
                     _ => {
                         // In mobile mode, forward to current panel
                         if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                            return panel.handle_key_event(key, data_manager);
+                            return match panel.handle_key_event(key, data_manager) {
+                                Ok(response) => Ok(response),
+                                Err(e) => {
+                                    self.error_popup = Some(format!("{}", e));
+                                    Ok(EventResponse::Handled)
+                                }
+                            };
                         }
                         Ok(EventResponse::NotHandled)
                     }
@@ -605,7 +730,13 @@ impl App {
                 if self.current_panel == PanelType::Terminal {
                     // Forward to terminal to handle double-press logic
                     if let Some(panel) = self.panels.get_mut(&PanelType::Terminal) {
-                        panel.handle_key_event(key, data_manager)
+                        match panel.handle_key_event(key, data_manager) {
+                            Ok(response) => Ok(response),
+                            Err(e) => {
+                                self.error_popup = Some(format!("{}", e));
+                                Ok(EventResponse::Handled)
+                            }
+                        }
                     } else {
                         Ok(EventResponse::NotHandled)
                     }
@@ -671,9 +802,17 @@ impl App {
             _ => {
                 // Forward to the current panel
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    return panel.handle_key_event(key, data_manager);
+                    match panel.handle_key_event(key, data_manager) {
+                        Ok(response) => Ok(response),
+                        Err(e) => {
+                            // Store error for popup display
+                            self.error_popup = Some(format!("{}", e));
+                            Ok(EventResponse::Handled) // Don't crash, just show error
+                        }
+                    }
+                } else {
+                    Ok(EventResponse::NotHandled)
                 }
-                Ok(EventResponse::NotHandled)
             }
         }
     }

@@ -10,12 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Add expression watcher ([#7](https://github.com/edb-rs/edb/issues/7))
 - Partially support integration tests for edb ([#6](https://github.com/edb-rs/edb/issues/6))
+- Add a popup window when errors occur in TUI
 
 ### Changed
 - Improved horizontal scrolling support in terminal panel vim mode
 - Update dependencies to match foundry [0867fc1](https://github.com/foundry-rs/foundry/commit/0867fc1)
 - Extend CI to Windows and MacOS
 - Improve the cache mechanism to avoid redundant downloads ([#10](https://github.com/edb-rs/edb/issues/10))
+- Speed up health check in rpc proxy ([#11](https://github.com/edb-rs/edb/pull/11))
+- Remove Web UI code and dependencies ([#15](https://github.com/edb-rs/edb/pull/15))
 
 ## [0.0.1] - 2024-09-19
 

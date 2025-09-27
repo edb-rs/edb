@@ -27,7 +27,7 @@ use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{hex, Bytes};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use edb_common::types::{CallResult, CallType, Trace, TraceEntry};
-use eyre::Result;
+use eyre::{bail, Result};
 use ratatui::{
     layout::Rect,
     style::Style,
@@ -41,7 +41,7 @@ use revm::{
 };
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
-use tracing::{debug, error};
+use tracing::debug;
 
 /// Represents different types of trace lines for multi-line display
 #[derive(Debug, Clone)]
@@ -1341,10 +1341,10 @@ impl PanelTr for TracePanel {
                             debug!("Jumping to snapshot: {}", snapshot_id);
                             dm.execution.goto(snapshot_id)?;
                         } else {
-                            error!("No snapshot available for trace entry");
+                            bail!("The selected trace entry has no associated snapshot (likely a state variable view function). We cannot change execution to this entry.");
                         }
                     } else {
-                        error!("No trace entry selected");
+                        bail!("Internal Error: No trace entry selected. Please report this issue to https://github.com/edb-rs/edb/issues.");
                     }
                     Ok(EventResponse::ChangeFocus(PanelType::Code))
                 }
@@ -1357,10 +1357,10 @@ impl PanelTr for TracePanel {
                             debug!("Jumping to snapshot: {}", snapshot_id);
                             dm.execution.display(snapshot_id)?;
                         } else {
-                            error!("No snapshot available for trace entry");
+                            bail!("The selected trace entry has no associated snapshot (likely a state variable view function). We cannot display code view.");
                         }
                     } else {
-                        error!("No trace entry selected");
+                        bail!("Internal Error: No trace entry selected. Please report this issue to https://github.com/edb-rs/edb/issues.");
                     }
                     Ok(EventResponse::ChangeFocus(PanelType::Code))
                 }

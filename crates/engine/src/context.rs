@@ -74,7 +74,7 @@ use revm::{
     MainnetEvm,
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::{analysis::AnalysisResult, Artifact, SnapshotDetail, Snapshots};
 
@@ -202,6 +202,12 @@ where
                     entry.first_snapshot_id = Some(snapshot_id);
                     break;
                 }
+            }
+        }
+
+        for entry in &self.trace {
+            if entry.first_snapshot_id.is_none() {
+                debug!("Trace entry {} has no associated snapshot", entry.id);
             }
         }
 
