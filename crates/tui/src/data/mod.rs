@@ -59,6 +59,7 @@ use tokio::sync::RwLock;
 
 pub mod manager;
 pub mod theme;
+mod utils;
 pub mod watcher;
 
 use crate::{

@@ -14,23 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-mod abi;
-pub use abi::*;
-
-mod breakpoint;
-pub use breakpoint::*;
-
-mod code;
-pub use code::*;
-
-mod snapshot;
-pub use snapshot::*;
-
-mod trace;
-pub use trace::*;
-
-mod execution_frame;
-pub use execution_frame::*;
-
-mod sol_value;
-pub use sol_value::*;
+/// Normalize an expression by removing all whitespace characters
+pub fn normalize_expression(expr: &str) -> String {
+    expr.chars().filter(|&c| !c.is_whitespace()).collect()
+}

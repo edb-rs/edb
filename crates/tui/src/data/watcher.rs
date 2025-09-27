@@ -16,6 +16,8 @@
 
 use std::collections::HashSet;
 
+use crate::data::utils::normalize_expression;
+
 /// Watcher for monitoring user-defined expressions
 #[derive(Debug, Clone, Default)]
 pub struct Watcher {
@@ -23,10 +25,6 @@ pub struct Watcher {
     expressions: Vec<String>,
     /// Keys of the expressions in the current state
     expression_keys: HashSet<String>,
-}
-
-fn normalize_expression(expr: &str) -> String {
-    expr.chars().filter(|&c| !c.is_whitespace()).collect()
 }
 
 impl Watcher {

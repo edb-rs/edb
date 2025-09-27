@@ -723,7 +723,178 @@ impl TerminalPanel {
                 }
             }
             "break" => {
-                self.add_error("Breakpoint command not yet implemented");
+                if parts.len() < 2 {
+                    self.add_error("Usage: break <subcommand> [args]");
+                    self.add_output(
+                        "Subcommands: add, remove, enable, disable, add_expr, list, clear",
+                    );
+                    return Ok(());
+                }
+
+                match parts[1] {
+                    "add" => {
+                        use edb_common::types::{
+                            Breakpoint, BreakpointLocation, SnapshotInfoDetail,
+                        };
+
+                        // Parse: break add [@<loc>] [if <expr>]
+                        let breakpoint = if parts.len() > 2 {
+                            // Join the remaining parts after "break add" into a single string
+                            let bp_spec = parts[2..].join(" ");
+                            match Breakpoint::from_str(&bp_spec) {
+                                Ok(bp) => bp,
+                                Err(e) => {
+                                    self.add_error(&format!("Failed to parse breakpoint: {}", e));
+                                    return Ok(());
+                                }
+                            }
+                        } else {
+                            // No arguments provided, create breakpoint at current location
+                            let current_id = dm.execution.get_current_snapshot();
+                            let snapshot_info = dm.execution.get_snapshot_info(current_id);
+
+                            if let Some(info) = snapshot_info {
+                                let loc = match info.detail() {
+                                    SnapshotInfoDetail::Opcode(detail) => {
+                                        Some(BreakpointLocation::Opcode {
+                                            bytecode_address: info.bytecode_address,
+                                            pc: detail.pc,
+                                        })
+                                    }
+                                    SnapshotInfoDetail::Hook(detail) => {
+                                        // For source breakpoints, we need line number not offset
+                                        // This is a simplification - in a real implementation we'd need
+                                        // to convert offset to line number
+                                        Some(BreakpointLocation::Source {
+                                            bytecode_address: info.bytecode_address,
+                                            file_path: detail.path.clone(),
+                                            line_number: 1, // This would need proper calculation
+                                        })
+                                    }
+                                };
+
+                                Breakpoint::new(loc, None)
+                            } else {
+                                self.add_error("Failed to get current snapshot info");
+                                return Ok(());
+                            }
+                        };
+
+                        match dm.execution.add_breakpoint(breakpoint.clone()) {
+                            Ok(true) => {
+                                let bp_count = dm.execution.list_breakpoints().count();
+                                self.add_output(&format!("Breakpoint #{} added", bp_count));
+                                if let Some(cond) = &breakpoint.condition {
+                                    self.add_output(&format!("  Condition: {}", cond));
+                                }
+                            }
+                            Ok(false) => {
+                                self.add_output("Breakpoint already exists at this location");
+                            }
+                            Err(e) => {
+                                self.add_error(&format!("Failed to add breakpoint: {}", e));
+                            }
+                        }
+                    }
+                    "remove" => {
+                        if parts.len() != 3 {
+                            self.add_error("Usage: break remove <id>");
+                            return Ok(());
+                        }
+
+                        match parts[2].parse::<usize>() {
+                            Ok(id) => match dm.execution.remove_breakpoint(id) {
+                                Ok(()) => self.add_output(&format!("Breakpoint #{} removed", id)),
+                                Err(e) => {
+                                    self.add_error(&format!("Failed to remove breakpoint: {}", e))
+                                }
+                            },
+                            Err(_) => self.add_error("Invalid breakpoint id"),
+                        }
+                    }
+                    "enable" => {
+                        if parts.len() != 3 {
+                            self.add_error("Usage: break enable <id>");
+                            return Ok(());
+                        }
+
+                        match parts[2].parse::<usize>() {
+                            Ok(id) => match dm.execution.enable_breakpoint(id) {
+                                Ok(()) => self.add_output(&format!("Breakpoint #{} enabled", id)),
+                                Err(e) => {
+                                    self.add_error(&format!("Failed to enable breakpoint: {}", e))
+                                }
+                            },
+                            Err(_) => self.add_error("Invalid breakpoint id"),
+                        }
+                    }
+                    "disable" => {
+                        if parts.len() != 3 {
+                            self.add_error("Usage: break disable <id>");
+                            return Ok(());
+                        }
+
+                        match parts[2].parse::<usize>() {
+                            Ok(id) => match dm.execution.disable_breakpoint(id) {
+                                Ok(()) => self.add_output(&format!("Breakpoint #{} disabled", id)),
+                                Err(e) => {
+                                    self.add_error(&format!("Failed to disable breakpoint: {}", e))
+                                }
+                            },
+                            Err(_) => self.add_error("Invalid breakpoint id"),
+                        }
+                    }
+                    "add_expr" => {
+                        if parts.len() < 4 {
+                            self.add_error("Usage: break add_expr <id> <expr>");
+                            return Ok(());
+                        }
+
+                        match parts[2].parse::<usize>() {
+                            Ok(id) => {
+                                let expr = parts[3..].join(" ");
+                                match dm.execution.update_breakpoint_condition(id, expr.clone()) {
+                                    Ok(()) => self.add_output(&format!(
+                                        "Breakpoint #{} condition updated: {}",
+                                        id, expr
+                                    )),
+                                    Err(e) => self
+                                        .add_error(&format!("Failed to update condition: {}", e)),
+                                }
+                            }
+                            Err(_) => self.add_error("Invalid breakpoint id"),
+                        }
+                    }
+                    "list" => {
+                        let breakpoints: Vec<_> = dm.execution.list_breakpoints().collect();
+                        if breakpoints.is_empty() {
+                            self.add_output("No breakpoints set");
+                        } else {
+                            self.add_output("Breakpoints:");
+                            for (id, bp, enabled) in breakpoints {
+                                let status = if enabled { "enabled" } else { "disabled" };
+                                let loc_desc = bp
+                                    .loc
+                                    .as_ref()
+                                    .map(|loc| loc.to_string())
+                                    .unwrap_or_else(|| "no location".to_string());
+
+                                self.add_output(&format!("  #{} [{}] {}", id, status, loc_desc));
+                                if let Some(cond) = &bp.condition {
+                                    self.add_output(&format!("      Condition: {}", cond));
+                                }
+                            }
+                        }
+                    }
+                    "clear" => match dm.execution.clear_breakpoints() {
+                        Ok(()) => self.add_output("All breakpoints cleared"),
+                        Err(e) => self.add_error(&format!("Failed to clear breakpoints: {}", e)),
+                    },
+                    _ => {
+                        self.add_error(&format!("Unknown break subcommand: {}", parts[1]));
+                        self.add_output("Available subcommands: add, remove, enable, disable, add_expr, list, clear");
+                    }
+                }
             }
             "address" => {
                 let id = dm.execution.get_current_snapshot();
@@ -819,7 +990,15 @@ impl TerminalPanel {
         self.add_output("  watch list          - List all watch expressions");
         self.add_output("  watch clear         - Clear all watch expressions");
         self.add_output("🔴 Breakpoints:");
-        self.add_output("  break <location> - Set breakpoint");
+        self.add_output("  break add [@<loc>] [if <expr>] - Add breakpoint");
+        self.add_output("      <loc> := <addr>:<path>:<line> (source)|");
+        self.add_output("               <addr>:<pc>          (opcode)");
+        self.add_output("  break remove <id>              - Remove breakpoint");
+        self.add_output("  break enable <id>              - Enable breakpoint");
+        self.add_output("  break disable <id>             - Disable breakpoint");
+        self.add_output("  break add_expr <id> <expr>     - Add condition expression");
+        self.add_output("  break list                     - List all breakpoints");
+        self.add_output("  break clear                    - Clear all breakpoints");
         self.add_output("");
         self.add_output("💻 Solidity expressions (prefix with $):");
         self.add_output("  $<expr>          - Evaluate expression");

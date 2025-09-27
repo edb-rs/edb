@@ -25,7 +25,7 @@
 //! on RPC calls or complex trace processing.
 
 use alloy_primitives::{Address, U256};
-use eyre::Result;
+use eyre::{bail, Result};
 use std::{
     collections::{HashMap, HashSet},
     ops::Deref,
@@ -34,7 +34,7 @@ use std::{
 use tokio::sync::RwLock;
 use tracing::debug;
 
-use edb_common::types::{Code, SnapshotInfo, Trace};
+use edb_common::types::{Breakpoint, Code, SnapshotInfo, Trace};
 
 use crate::{
     data::manager::core::{
@@ -244,10 +244,16 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
 /// ```
 #[derive(Debug, Clone)]
 pub struct ExecutionManager {
+    // Execution status
+    execution_status: ExecutionStatus,
+
     // User-controlled data
     current_snapshot: usize,
     display_snapshot: usize,
-    execution_status: ExecutionStatus,
+
+    // Breakpoints
+    breakpoint_set: HashSet<Breakpoint>,
+    breakpoints: Vec<(Breakpoint, bool)>, // bool indicates enabled/disabled
 
     /// State
     state: ExecutionState,
@@ -282,6 +288,8 @@ impl ExecutionManager {
             core,
             current_snapshot: 0,
             display_snapshot: 0,
+            breakpoints: Vec::new(),
+            breakpoint_set: HashSet::new(),
         };
 
         let _ = mgr.goto_snapshot(0);
@@ -618,6 +626,78 @@ impl ExecutionManager {
             self.execution_status = ExecutionStatus::WaitPrevCall(self.current_snapshot);
         }
 
+        Ok(())
+    }
+
+    /////////////////////////////////////////////
+    // Breakpoint management
+    /////////////////////////////////////////////
+
+    pub fn list_breakpoints(&self) -> impl Iterator<Item = (usize, &Breakpoint, bool)> {
+        self.breakpoints.iter().enumerate().map(|(i, (bp, enabled))| (i + 1, bp, *enabled))
+    }
+
+    pub fn add_breakpoint(&mut self, bp: Breakpoint) -> Result<bool> {
+        // When we try to add a breakpoint, we check whether there is a pending request
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot add breakpoint while there is a pending request");
+        }
+
+        if self.breakpoint_set.insert(bp.clone()) {
+            self.breakpoints.push((bp, true));
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn update_breakpoint_condition(&mut self, id: usize, expr: String) -> Result<()> {
+        // When we try to add a breakpoint, we check whether there is a pending request
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot update breakpoint condition while there is a pending request");
+        }
+
+        if id == 0 || id > self.breakpoints.len() {
+            bail!("Breakpoint id {id} out of bounds");
+        }
+
+        self.breakpoints[id - 1].0.condition = Some(expr);
+        Ok(())
+    }
+
+    pub fn enable_breakpoint(&mut self, id: usize) -> Result<()> {
+        if id == 0 || id > self.breakpoints.len() {
+            bail!("Breakpoint id {id} out of bounds");
+        }
+
+        self.breakpoints[id - 1].1 = true;
+        Ok(())
+    }
+
+    pub fn disable_breakpoint(&mut self, id: usize) -> Result<()> {
+        if id == 0 || id > self.breakpoints.len() {
+            bail!("Breakpoint id {id} out of bounds");
+        }
+
+        self.breakpoints[id - 1].1 = false;
+        Ok(())
+    }
+
+    pub fn remove_breakpoint(&mut self, id: usize) -> Result<()> {
+        if id == 0 || id > self.breakpoints.len() {
+            bail!("Breakpoint id {id} out of bounds");
+        }
+
+        let (bp, _) = self.breakpoints.remove(id - 1);
+        self.breakpoint_set.remove(&bp);
+        Ok(())
+    }
+
+    pub fn clear_breakpoints(&mut self) -> Result<()> {
+        self.breakpoints.clear();
+        self.breakpoint_set.clear();
         Ok(())
     }
 }
