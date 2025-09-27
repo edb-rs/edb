@@ -451,13 +451,48 @@ impl App {
         error_msg: &str,
         data_manager: &mut DataManager,
     ) {
-        // Calculate popup size based on error message length
-        let lines: Vec<&str> = error_msg.lines().collect();
-        let max_line_width = lines.iter().map(|line| line.len()).max().unwrap_or(0);
+        // Calculate available width for popup (leave some margin)
+        let max_popup_width = area.width.saturating_sub(4); // 2 chars margin on each side
+        let max_popup_height = area.height.saturating_sub(2); // 1 line margin on top and bottom
 
-        // Popup dimensions
-        let popup_width = (max_line_width + 8).min(area.width.saturating_sub(4) as usize) as u16; // +8 for padding and borders
-        let popup_height = (lines.len() + 4).min(area.height.saturating_sub(2) as usize) as u16; // +4 for borders and instructions
+        // Calculate optimal popup width (minimum 30 chars, maximum 1/3 of available width)
+        let min_width = 30;
+        let max_width = (max_popup_width / 3).max(min_width); // Use 1/3 of available width
+        let content_width = (max_width.saturating_sub(4) as usize).max(min_width as usize); // -4 for borders and padding
+
+        // Split error message into lines and wrap long lines
+        let lines: Vec<&str> = error_msg.lines().collect();
+        let mut wrapped_lines = Vec::new();
+
+        for line in lines {
+            if line.len() <= content_width {
+                wrapped_lines.push(line.to_string());
+            } else {
+                // Break long lines into multiple lines
+                let mut remaining = line;
+                while !remaining.is_empty() {
+                    if remaining.len() <= content_width {
+                        wrapped_lines.push(remaining.to_string());
+                        break;
+                    } else {
+                        // Find a good break point (prefer breaking at spaces)
+                        let mut break_point = content_width;
+                        if let Some(space_pos) = remaining[..content_width].rfind(' ') {
+                            if space_pos > content_width / 2 {
+                                break_point = space_pos;
+                            }
+                        }
+
+                        wrapped_lines.push(remaining[..break_point].to_string());
+                        remaining = remaining[break_point..].trim_start();
+                    }
+                }
+            }
+        }
+
+        // Calculate popup dimensions based on wrapped content
+        let popup_width = (content_width + 4).min(max_popup_width as usize) as u16; // +4 for borders and padding
+        let popup_height = (wrapped_lines.len() + 4).min(max_popup_height as usize) as u16; // +4 for title, empty line, and instructions
 
         // Center the popup
         let popup_area = Layout::default()
@@ -490,9 +525,9 @@ impl App {
             Line::from(""),
         ];
 
-        // Add error message lines
-        for line in lines {
-            error_lines.push(Line::from(line.to_string()));
+        // Add wrapped error message lines
+        for line in wrapped_lines {
+            error_lines.push(Line::from(line));
         }
 
         error_lines.push(Line::from(""));
@@ -606,7 +641,7 @@ impl App {
                         return match panel.handle_key_event(key, data_manager) {
                             Ok(response) => Ok(response),
                             Err(e) => {
-                                self.error_popup = Some(format!("{}", e));
+                                self.error_popup = Some(format!("{e}"));
                                 Ok(EventResponse::Handled)
                             }
                         };
@@ -638,7 +673,7 @@ impl App {
                                 return match panel.handle_key_event(key, data_manager) {
                                     Ok(response) => Ok(response),
                                     Err(e) => {
-                                        self.error_popup = Some(format!("{}", e));
+                                        self.error_popup = Some(format!("{e}"));
                                         Ok(EventResponse::Handled)
                                     }
                                 };
@@ -663,7 +698,7 @@ impl App {
                                 return match panel.handle_key_event(key, data_manager) {
                                     Ok(response) => Ok(response),
                                     Err(e) => {
-                                        self.error_popup = Some(format!("{}", e));
+                                        self.error_popup = Some(format!("{e}"));
                                         Ok(EventResponse::Handled)
                                     }
                                 };
@@ -677,7 +712,7 @@ impl App {
                             return match panel.handle_key_event(key, data_manager) {
                                 Ok(response) => Ok(response),
                                 Err(e) => {
-                                    self.error_popup = Some(format!("{}", e));
+                                    self.error_popup = Some(format!("{e}"));
                                     Ok(EventResponse::Handled)
                                 }
                             };
@@ -733,7 +768,7 @@ impl App {
                         match panel.handle_key_event(key, data_manager) {
                             Ok(response) => Ok(response),
                             Err(e) => {
-                                self.error_popup = Some(format!("{}", e));
+                                self.error_popup = Some(format!("{e}"));
                                 Ok(EventResponse::Handled)
                             }
                         }
@@ -806,7 +841,7 @@ impl App {
                         Ok(response) => Ok(response),
                         Err(e) => {
                             // Store error for popup display
-                            self.error_popup = Some(format!("{}", e));
+                            self.error_popup = Some(format!("{e}"));
                             Ok(EventResponse::Handled) // Don't crash, just show error
                         }
                     }

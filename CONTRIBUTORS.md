@@ -42,6 +42,7 @@ _This section lists all individuals who have made [meaningful contributions](#no
 
 Contributors are sorted in alphabetical order by their GitHub ID. More details can be found at Github's [Contributors Page](https://github.com/edb-rs/edb/graphs/contributors).
 
+- [JosepBove](https://github.com/JosepBove)
 - [ret2happy](https://github.com/pcy190)
 
 ## How to Get Listed
