@@ -740,6 +740,12 @@ impl TerminalPanel {
                     );
                     self.add_output("  break list                      - List all breakpoints");
                     self.add_output("  break clear                     - Clear all breakpoints");
+                    self.add_output("");
+                    self.add_output("Breakpoint types:");
+                    self.add_output("  • Location only: Stops when execution reaches the location");
+                    self.add_output("  • Condition only: Data breakpoint - stops when expression is true");
+                    self.add_output("  • Both: Stops when location is reached AND condition is true");
+                    self.add_output("  • Neither: Invalid - breakpoint must have location or condition");
                     return Ok(());
                 }
 
@@ -939,6 +945,12 @@ impl TerminalPanel {
                         self.add_output(
                             "  break clear                     - Clear all breakpoints",
                         );
+                        self.add_output("");
+                        self.add_output("Breakpoint types:");
+                        self.add_output("  • Location only: Stops when execution reaches the location");
+                        self.add_output("  • Condition only: Data breakpoint - stops when expression is true");
+                        self.add_output("  • Both: Stops when location is reached AND condition is true");
+                        self.add_output("  • Neither: Invalid - breakpoint must have location or condition");
                     }
                 }
             }
@@ -1043,6 +1055,11 @@ impl TerminalPanel {
         self.add_output("  break add_expr <id> $<expr>     - Add condition expression");
         self.add_output("  break list                      - List all breakpoints");
         self.add_output("  break clear                     - Clear all breakpoints");
+        self.add_output("");
+        self.add_output("  Types: - Location-only (stops at location)");
+        self.add_output("         - Condition-only (data breakpoint)");
+        self.add_output("         - Both (location AND condition)");
+        self.add_output("         - Neither (invalid)");
         self.add_output("");
         self.add_output("💻 Solidity expressions (prefix with $):");
         self.add_output("  $<expr>          - Evaluate expression");
