@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-/// Normalize an expression by removing all whitespace characters
+/// Normalize an expression by replacing any contiguous whitespace with a single space
 pub fn normalize_expression(expr: &str) -> String {
-    expr.chars().filter(|&c| !c.is_whitespace()).collect()
+    expr.split_whitespace().collect::<Vec<_>>().join(" ")
 }

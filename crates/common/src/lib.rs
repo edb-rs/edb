@@ -28,6 +28,8 @@ pub mod types;
 pub mod cache;
 /// Execution context management for EDB, including environment setup and configuration
 pub mod context;
+/// Expression normalization utilities for consistent handling of user-defined expressions
+pub mod expression;
 /// Chain forking utilities for creating and managing forked blockchain states
 pub mod forking;
 /// Logging setup and utilities for consistent logging across EDB components
@@ -39,6 +41,7 @@ pub mod spec_id;
 
 pub use cache::*;
 pub use context::*;
+pub use expression::*;
 pub use forking::*;
 pub use logging::*;
 pub use opcode::*;

@@ -29,7 +29,10 @@ use crate::{Spinner, SpinnerStyles};
 use alloy_dyn_abi::DynSolValue;
 use alloy_primitives::{Address, U256};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use edb_common::types::{SnapshotInfoDetail, SolValueFormatterContext};
+use edb_common::normalize_expression;
+use edb_common::types::{
+    Breakpoint, BreakpointLocation, Code, SnapshotInfoDetail, SolValueFormatterContext,
+};
 use eyre::{bail, eyre, Result};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -39,6 +42,7 @@ use ratatui::{
     Frame,
 };
 use std::collections::VecDeque;
+use std::str::FromStr;
 use std::time::Instant;
 use tracing::debug;
 
@@ -625,7 +629,7 @@ impl TerminalPanel {
             cmd => {
                 // Debug commands
                 if let Err(e) = self.handle_debug_command(cmd, dm) {
-                    let error_msg = format!("Error: {e}");
+                    let error_msg = format!("Internal Error: {e}");
                     self.add_output(&error_msg);
                 }
             }
@@ -733,10 +737,6 @@ impl TerminalPanel {
 
                 match parts[1] {
                     "add" => {
-                        use edb_common::types::{
-                            Breakpoint, BreakpointLocation, SnapshotInfoDetail,
-                        };
-
                         // Parse: break add [@<loc>] [if <expr>]
                         let breakpoint = if parts.len() > 2 {
                             // Join the remaining parts after "break add" into a single string
@@ -744,55 +744,64 @@ impl TerminalPanel {
                             match Breakpoint::from_str(&bp_spec) {
                                 Ok(bp) => bp,
                                 Err(e) => {
-                                    self.add_error(&format!("Failed to parse breakpoint: {}", e));
+                                    self.add_error(&format!("Failed to parse breakpoint: {e}"));
                                     return Ok(());
                                 }
                             }
                         } else {
                             // No arguments provided, create breakpoint at current location
                             let current_id = dm.execution.get_current_snapshot();
-                            let snapshot_info = dm.execution.get_snapshot_info(current_id);
-
-                            if let Some(info) = snapshot_info {
-                                let loc = match info.detail() {
-                                    SnapshotInfoDetail::Opcode(detail) => {
-                                        Some(BreakpointLocation::Opcode {
-                                            bytecode_address: info.bytecode_address,
-                                            pc: detail.pc,
-                                        })
-                                    }
-                                    SnapshotInfoDetail::Hook(detail) => {
-                                        // For source breakpoints, we need line number not offset
-                                        // This is a simplification - in a real implementation we'd need
-                                        // to convert offset to line number
-                                        Some(BreakpointLocation::Source {
-                                            bytecode_address: info.bytecode_address,
-                                            file_path: detail.path.clone(),
-                                            line_number: 1, // This would need proper calculation
-                                        })
-                                    }
-                                };
-
-                                Breakpoint::new(loc, None)
-                            } else {
-                                self.add_error("Failed to get current snapshot info");
+                            let Some(info) = dm.execution.get_snapshot_info(current_id) else {
+                                self.add_error("Failed to get current step info");
                                 return Ok(());
-                            }
+                            };
+
+                            let loc = match info.detail().clone() {
+                                SnapshotInfoDetail::Opcode(detail) => {
+                                    Some(BreakpointLocation::Opcode {
+                                        bytecode_address: info.bytecode_address,
+                                        pc: detail.pc,
+                                    })
+                                }
+                                SnapshotInfoDetail::Hook(detail) => {
+                                    let Some(Code::Source(info)) =
+                                        dm.execution.get_code(current_id)
+                                    else {
+                                        self.add_error("Failed to get code for current snapshot");
+                                        return Ok(());
+                                    };
+
+                                    let line_number = info
+                                        .sources
+                                        .get(&detail.path)
+                                        .map(|code| code[..detail.offset + 1].lines().count())
+                                        .ok_or(eyre!(
+                                            "Failed to determine line number for breakpoint"
+                                        ))?;
+
+                                    Some(BreakpointLocation::Source {
+                                        bytecode_address: info.bytecode_address,
+                                        file_path: detail.path,
+                                        line_number,
+                                    })
+                                }
+                            };
+
+                            Breakpoint::new(loc, None)
                         };
 
                         match dm.execution.add_breakpoint(breakpoint.clone()) {
                             Ok(true) => {
                                 let bp_count = dm.execution.list_breakpoints().count();
-                                self.add_output(&format!("Breakpoint #{} added", bp_count));
-                                if let Some(cond) = &breakpoint.condition {
-                                    self.add_output(&format!("  Condition: {}", cond));
-                                }
+                                self.add_output(&format!(
+                                    "Breakpoint #{bp_count} added: {breakpoint}"
+                                ));
                             }
                             Ok(false) => {
                                 self.add_output("Breakpoint already exists at this location");
                             }
                             Err(e) => {
-                                self.add_error(&format!("Failed to add breakpoint: {}", e));
+                                self.add_error(&format!("Failed to add breakpoint: {e}"));
                             }
                         }
                     }
@@ -804,9 +813,9 @@ impl TerminalPanel {
 
                         match parts[2].parse::<usize>() {
                             Ok(id) => match dm.execution.remove_breakpoint(id) {
-                                Ok(()) => self.add_output(&format!("Breakpoint #{} removed", id)),
+                                Ok(()) => self.add_output(&format!("Breakpoint #{id} removed")),
                                 Err(e) => {
-                                    self.add_error(&format!("Failed to remove breakpoint: {}", e))
+                                    self.add_error(&format!("Failed to remove breakpoint: {e}"))
                                 }
                             },
                             Err(_) => self.add_error("Invalid breakpoint id"),
@@ -820,9 +829,9 @@ impl TerminalPanel {
 
                         match parts[2].parse::<usize>() {
                             Ok(id) => match dm.execution.enable_breakpoint(id) {
-                                Ok(()) => self.add_output(&format!("Breakpoint #{} enabled", id)),
+                                Ok(()) => self.add_output(&format!("Breakpoint #{id} enabled")),
                                 Err(e) => {
-                                    self.add_error(&format!("Failed to enable breakpoint: {}", e))
+                                    self.add_error(&format!("Failed to enable breakpoint: {e}"))
                                 }
                             },
                             Err(_) => self.add_error("Invalid breakpoint id"),
@@ -836,9 +845,9 @@ impl TerminalPanel {
 
                         match parts[2].parse::<usize>() {
                             Ok(id) => match dm.execution.disable_breakpoint(id) {
-                                Ok(()) => self.add_output(&format!("Breakpoint #{} disabled", id)),
+                                Ok(()) => self.add_output(&format!("Breakpoint #{id} disabled")),
                                 Err(e) => {
-                                    self.add_error(&format!("Failed to disable breakpoint: {}", e))
+                                    self.add_error(&format!("Failed to disable breakpoint: {e}"))
                                 }
                             },
                             Err(_) => self.add_error("Invalid breakpoint id"),
@@ -853,13 +862,16 @@ impl TerminalPanel {
                         match parts[2].parse::<usize>() {
                             Ok(id) => {
                                 let expr = parts[3..].join(" ");
-                                match dm.execution.update_breakpoint_condition(id, expr.clone()) {
+                                match dm
+                                    .execution
+                                    .update_breakpoint_condition(id, normalize_expression(&expr))
+                                {
                                     Ok(()) => self.add_output(&format!(
-                                        "Breakpoint #{} condition updated: {}",
-                                        id, expr
+                                        "Breakpoint #{id} condition updated: {expr}"
                                     )),
-                                    Err(e) => self
-                                        .add_error(&format!("Failed to update condition: {}", e)),
+                                    Err(e) => {
+                                        self.add_error(&format!("Failed to update condition: {e}"))
+                                    }
                                 }
                             }
                             Err(_) => self.add_error("Invalid breakpoint id"),
@@ -876,19 +888,19 @@ impl TerminalPanel {
                                 let loc_desc = bp
                                     .loc
                                     .as_ref()
-                                    .map(|loc| loc.to_string())
+                                    .map(|loc| loc.display())
                                     .unwrap_or_else(|| "no location".to_string());
 
-                                self.add_output(&format!("  #{} [{}] {}", id, status, loc_desc));
+                                self.add_output(&format!("  #{id} [{status}] {loc_desc}"));
                                 if let Some(cond) = &bp.condition {
-                                    self.add_output(&format!("      Condition: {}", cond));
+                                    self.add_output(&format!("      Condition: {cond}"));
                                 }
                             }
                         }
                     }
                     "clear" => match dm.execution.clear_breakpoints() {
                         Ok(()) => self.add_output("All breakpoints cleared"),
-                        Err(e) => self.add_error(&format!("Failed to clear breakpoints: {}", e)),
+                        Err(e) => self.add_error(&format!("Failed to clear breakpoints: {e}")),
                     },
                     _ => {
                         self.add_error(&format!("Unknown break subcommand: {}", parts[1]));

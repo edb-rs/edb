@@ -14,10 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::path::PathBuf;
+use std::{fmt::Display, path::PathBuf, str::FromStr};
 
 use alloy_primitives::Address;
+use eyre::{bail, eyre, Error, Result};
 use serde::{Deserialize, Serialize};
+
+use crate::normalize_expression;
 
 /// Represents a breakpoint in the debugger with optional location and condition.
 /// A breakpoint can be set at specific code locations and optionally have conditions that must be met to trigger.
@@ -27,6 +30,66 @@ pub struct Breakpoint {
     pub loc: Option<BreakpointLocation>,
     /// Optional condition expression that must evaluate to true for the breakpoint to trigger.
     pub condition: Option<String>,
+}
+
+impl Display for Breakpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(loc) = &self.loc {
+            write!(f, "@{}", loc.display())?;
+        }
+        if let Some(cond) = &self.condition {
+            if self.loc.is_some() {
+                write!(f, " if {cond}")
+            } else {
+                write!(f, "if {cond}")
+            }
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl FromStr for Breakpoint {
+    type Err = Error;
+
+    /// Parses a breakpoint from a string.
+    /// Format: `[@<location>] [if <condition>]`
+    /// Examples:
+    /// - `@0x1234:42` - Breakpoint at opcode
+    /// - `@0x1234:src/main.rs:100` - Breakpoint at source location
+    /// - `if x > 10` - Data-watching breakpoint
+    /// - `@0x1234:42 if balance == 0` - Breakpoint with condition
+    fn from_str(s: &str) -> Result<Self> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Ok(Self { loc: None, condition: None });
+        }
+
+        let mut loc = None;
+        let mut condition = None;
+
+        // Check if string starts with @ (has location)
+        if let Some(loc_str) = trimmed.strip_prefix('@') {
+            // Find where location ends (either at "if" or end of string)
+            if let Some(if_pos) = trimmed.find(" if ") {
+                // Has both location and condition
+                let loc_str = &loc_str[..if_pos].trim();
+                loc = Some(BreakpointLocation::from_str(loc_str)?);
+                condition = Some(normalize_expression(trimmed[if_pos + 4..].trim()));
+            } else {
+                // Only has location
+                let loc_str = loc_str.trim();
+                loc = Some(BreakpointLocation::from_str(loc_str)?);
+            }
+        } else if let Some(condition_str) = trimmed.strip_prefix("if ") {
+            // Only has condition
+            condition = Some(normalize_expression(condition_str.trim()));
+        } else {
+            bail!("Invalid breakpoint format. Expected [@<location>] [if <condition>], got: {s}");
+        }
+
+        Ok(Self { loc, condition })
+    }
 }
 
 /// Specifies the location of a breakpoint, either in source code or at a specific opcode.
@@ -51,36 +114,38 @@ pub enum BreakpointLocation {
     },
 }
 
-impl BreakpointLocation {
+impl FromStr for BreakpointLocation {
+    type Err = Error;
+
     /// Parses a breakpoint location from a string in the format:
     /// - `<addr>:<pc>` for opcode breakpoints
     /// - `<addr>:<path>:<line>` for source breakpoints
-    pub fn from_str(s: &str) -> Result<Self, String> {
+    fn from_str(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.split(':').collect();
 
         if parts.len() == 2 {
             // Opcode breakpoint: <addr>:<pc>
-            let addr =
-                parts[0].parse::<Address>().map_err(|e| format!("Invalid address: {}", e))?;
-            let pc = parts[1].parse::<usize>().map_err(|e| format!("Invalid PC: {}", e))?;
+            let addr = parts[0].parse::<Address>().map_err(|e| eyre!("Invalid address: {e}"))?;
+            let pc = parts[1].parse::<usize>().map_err(|e| eyre!("Invalid PC: {e}"))?;
 
             Ok(Self::Opcode { bytecode_address: addr, pc })
         } else if parts.len() == 3 {
             // Source breakpoint: <addr>:<path>:<line>
-            let addr =
-                parts[0].parse::<Address>().map_err(|e| format!("Invalid address: {}", e))?;
+            let addr = parts[0].parse::<Address>().map_err(|e| eyre!("Invalid address: {e}"))?;
             let path = PathBuf::from(parts[1]);
             let line_number =
-                parts[2].parse::<usize>().map_err(|e| format!("Invalid line number: {}", e))?;
+                parts[2].parse::<usize>().map_err(|e| eyre!("Invalid line number: {e}"))?;
 
             Ok(Self::Source { bytecode_address: addr, file_path: path, line_number })
         } else {
-            Err(format!(
+            bail!(
                 "Invalid breakpoint location format. Expected: <addr>:<pc> or <addr>:<path>:<line>"
-            ))
+            )
         }
     }
+}
 
+impl BreakpointLocation {
     /// Creates a breakpoint location from an opcode line number.
     /// Returns None if the line number is invalid or out of bounds.
     pub fn from_opcode_line(
@@ -102,10 +167,10 @@ impl BreakpointLocation {
     }
 
     /// Formats the breakpoint location as a string.
-    pub fn to_string(&self) -> String {
+    pub fn display(&self) -> String {
         match self {
             Self::Opcode { bytecode_address, pc } => {
-                format!("{}:{}", bytecode_address, pc)
+                format!("{bytecode_address}:{pc}")
             }
             Self::Source { bytecode_address, file_path, line_number } => {
                 format!("{}:{}:{}", bytecode_address, file_path.display(), line_number)
@@ -118,48 +183,6 @@ impl Breakpoint {
     /// Creates a new breakpoint with the given location and optional condition.
     pub fn new(loc: Option<BreakpointLocation>, condition: Option<String>) -> Self {
         Self { loc, condition }
-    }
-
-    /// Parses a breakpoint from a string.
-    /// Format: `[@<location>] [if <condition>]`
-    /// Examples:
-    /// - `@0x1234:42` - Breakpoint at opcode
-    /// - `@0x1234:src/main.rs:100` - Breakpoint at source location
-    /// - `if x > 10` - Data-watching breakpoint
-    /// - `@0x1234:42 if balance == 0` - Breakpoint with condition
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        let trimmed = s.trim();
-        if trimmed.is_empty() {
-            return Ok(Self { loc: None, condition: None });
-        }
-
-        let mut loc = None;
-        let mut condition = None;
-
-        // Check if string starts with @ (has location)
-        if trimmed.starts_with('@') {
-            // Find where location ends (either at "if" or end of string)
-            if let Some(if_pos) = trimmed.find(" if ") {
-                // Has both location and condition
-                let loc_str = &trimmed[1..if_pos].trim();
-                loc = Some(BreakpointLocation::from_str(loc_str)?);
-                condition = Some(trimmed[if_pos + 4..].trim().to_string());
-            } else {
-                // Only has location
-                let loc_str = &trimmed[1..].trim();
-                loc = Some(BreakpointLocation::from_str(loc_str)?);
-            }
-        } else if trimmed.starts_with("if ") {
-            // Only has condition
-            condition = Some(trimmed[3..].trim().to_string());
-        } else {
-            return Err(format!(
-                "Invalid breakpoint format. Expected [@<location>] [if <condition>], got: {}",
-                s
-            ));
-        }
-
-        Ok(Self { loc, condition })
     }
 }
 
@@ -230,7 +253,7 @@ mod tests {
             bytecode_address: address!("1234567890123456789012345678901234567890"),
             pc: 42,
         };
-        assert_eq!(loc.to_string(), "0x1234567890123456789012345678901234567890:42");
+        assert_eq!(loc.display(), "0x1234567890123456789012345678901234567890:42");
 
         // Test source breakpoint formatting
         let loc = BreakpointLocation::Source {
@@ -238,7 +261,7 @@ mod tests {
             file_path: PathBuf::from("src/main.rs"),
             line_number: 100,
         };
-        assert_eq!(loc.to_string(), "0x1234567890123456789012345678901234567890:src/main.rs:100");
+        assert_eq!(loc.display(), "0x1234567890123456789012345678901234567890:src/main.rs:100");
     }
 
     #[test]
@@ -246,11 +269,11 @@ mod tests {
         // Test that parsing and formatting are inverse operations
         let original_opcode = "0x1234567890123456789012345678901234567890:42";
         let loc = BreakpointLocation::from_str(original_opcode).unwrap();
-        assert_eq!(loc.to_string(), original_opcode);
+        assert_eq!(loc.display(), original_opcode);
 
         let original_source = "0x1234567890123456789012345678901234567890:src/main.rs:100";
         let loc = BreakpointLocation::from_str(original_source).unwrap();
-        assert_eq!(loc.to_string(), original_source);
+        assert_eq!(loc.display(), original_source);
     }
 
     #[test]

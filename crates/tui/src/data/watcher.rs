@@ -16,7 +16,7 @@
 
 use std::collections::HashSet;
 
-use crate::data::utils::normalize_expression;
+use edb_common::normalize_expression;
 
 /// Watcher for monitoring user-defined expressions
 #[derive(Debug, Clone, Default)]
