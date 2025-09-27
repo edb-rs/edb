@@ -785,6 +785,28 @@ impl ExecutionManager {
         Ok(())
     }
 
+    /// Find breakpoints matching the given criteria
+    /// Returns a vector of breakpoint IDs (1-indexed) that match
+    pub fn find_breakpoints(&self, bp: &Breakpoint, location_only: bool) -> Vec<(usize, bool)> {
+        let mut matching_ids = Vec::new();
+
+        for (idx, (existing_bp, enabled)) in self.breakpoints.iter().enumerate() {
+            if location_only {
+                // Only check location match, ignore condition
+                if bp.loc == existing_bp.loc && bp.loc.is_some() {
+                    matching_ids.push((idx + 1, *enabled)); // 1-indexed
+                }
+            } else {
+                // Check exact match (both location and condition)
+                if bp == existing_bp {
+                    matching_ids.push((idx + 1, *enabled)); // 1-indexed
+                }
+            }
+        }
+
+        matching_ids
+    }
+
     /// Return the breakpoints that are hit at the current snapshot
     pub fn get_hit_breakpoints(&mut self, _snaphost_id: usize) -> Vec<usize> {
         // TODO

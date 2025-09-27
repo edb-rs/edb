@@ -25,7 +25,7 @@ use crate::ui::status::{FileStatus, StatusBar};
 use crate::ui::syntax::{SyntaxHighlighter, SyntaxType};
 use alloy_primitives::Address;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use edb_common::types::{Code, SnapshotInfoDetail};
+use edb_common::types::{Breakpoint, BreakpointLocation, Code, SnapshotInfoDetail};
 use eyre::Result;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -199,8 +199,8 @@ impl CodePanel {
 
         let max_line_num = lines.len();
         let line_num_width = max_line_num.to_string().len().max(3);
-        // Line number + space + breakpoint + cursor + " │ " separator
-        let prefix_width = line_num_width + 1 + 1 + 1 + 3;
+        // Line number + space + status indicator + " │ " separator
+        let prefix_width = line_num_width + 1 + 1 + 3;
 
         self.max_line_width = lines.iter().map(|line| prefix_width + line.len()).max().unwrap_or(0);
     }
@@ -452,32 +452,26 @@ impl CodePanel {
                 let line_num = line_idx + 1;
                 let is_execution = self.current_execution_line == Some(line_num);
                 let is_user_cursor = self.user_cursor_line == Some(line_num);
-                let has_breakpoint = false; // TODO
+                let has_breakpoint = self.line_has_breakpoint(line_num, dm);
 
                 // Start with syntax-highlighted line
                 let highlighted_line = self.highlight_line(line, line_num, max_line_num, dm);
 
-                // Add cursor and breakpoint indicators
-                let cursor_indicator = if is_execution && is_user_cursor {
-                    "◉" // Both cursors on same line
-                } else if is_execution {
-                    "►" // Execution cursor
-                } else if is_user_cursor {
-                    "◯" // User cursor
-                } else {
-                    " " // No cursor
+                // Combined status indicator (cursor + breakpoint)
+                let status_indicator = match (is_execution, is_user_cursor, has_breakpoint) {
+                    (true, true, true) => "⬢",    // Execution + User + Breakpoint
+                    (true, false, true) => "◆",   // Execution + Breakpoint
+                    (false, true, true) => "⬡",   // User + Breakpoint
+                    (true, true, false) => "◉",   // Execution + User
+                    (true, false, false) => "►",  // Execution only
+                    (false, true, false) => "◯",  // User only
+                    (false, false, true) => "●",  // Breakpoint only
+                    (false, false, false) => " ", // Nothing
                 };
 
-                let breakpoint_indicator = if has_breakpoint {
-                    Span::styled("●", Style::default().fg(dm.theme.error_color))
-                } else {
-                    Span::raw(" ")
-                };
-
-                // Insert breakpoint and cursor indicators after line number
+                // Insert status indicator after line number
                 let mut new_spans = vec![highlighted_line.spans[0].clone()]; // Line number
-                new_spans.push(breakpoint_indicator);
-                new_spans.push(Span::raw(format!("{cursor_indicator} │ ")));
+                new_spans.push(Span::raw(format!(" {status_indicator} │ ")));
 
                 // Add the syntax highlighted content (skip the line number span)
                 if highlighted_line.spans.len() > 1 {
@@ -948,6 +942,90 @@ impl CodePanel {
 
         Some(())
     }
+
+    /// Get breakpoint location for a given line number
+    fn get_breakpoint_location_for_line(&self, line: usize) -> Option<BreakpointLocation> {
+        // Get the bytecode address from current location
+        let bytecode_address = match &self.display_info.location {
+            DisplayLocation::Opcode(addr) | DisplayLocation::Hook(addr, _) => *addr,
+            DisplayLocation::Unknown => return None,
+        };
+
+        // Create breakpoint location based on display mode
+        match self.display_info.mode {
+            CodeMode::Opcodes => {
+                // For opcodes, get the PC from the line
+                let opcode_lines = &self.opcode_lines;
+                if line > 0 && line <= opcode_lines.len() {
+                    // Parse PC from the opcode line (format: "PC: ...")
+                    let opcode_line = &opcode_lines[line - 1];
+                    opcode_line
+                        .split_whitespace()
+                        .next()
+                        .and_then(|pc_str| pc_str.strip_suffix(':'))
+                        .and_then(|pc_str| pc_str.parse::<usize>().ok())
+                        .map(|pc| BreakpointLocation::Opcode { bytecode_address, pc })
+                } else {
+                    None
+                }
+            }
+            CodeMode::Source => {
+                // For source, use the file path and line number
+                let file_path =
+                    self.display_info.available_files.get(self.selected_path_index)?.into();
+                Some(BreakpointLocation::Source { bytecode_address, file_path, line_number: line })
+            }
+        }
+    }
+
+    /// Toggle breakpoint at the current user cursor line
+    fn toggle_breakpoint_at_cursor(&mut self, dm: &mut DataManager) -> Result<()> {
+        let Some(line) = self.user_cursor_line else {
+            debug!("No user cursor position for breakpoint");
+            return Ok(());
+        };
+
+        let Some(location) = self.get_breakpoint_location_for_line(line) else {
+            debug!("Cannot determine breakpoint location for line {}", line);
+            return Ok(());
+        };
+
+        // Create a location-only breakpoint
+        let breakpoint = Breakpoint::new(Some(location), None);
+
+        // Check if this breakpoint already exists (location-only check)
+        let existing_ids = dm.execution.find_breakpoints(&breakpoint, true);
+
+        if existing_ids.is_empty() {
+            // No breakpoint exists, add one
+            dm.execution.add_breakpoint(breakpoint)?;
+            debug!("Added breakpoint at line {}", line);
+        } else if existing_ids.iter().any(|(_, enable)| !*enable) {
+            // Breakpoint exists but there is a disabled one, enable it
+            for (id, _) in existing_ids {
+                dm.execution.enable_breakpoint(id)?;
+                debug!("Enabled breakpoint #{} at line {}", id, line);
+            }
+        } else {
+            // Breakpoint exists and all are enabled, disable them
+            for (id, _) in existing_ids {
+                dm.execution.disable_breakpoint(id)?;
+                debug!("Disabled breakpoint #{} at line {}", id, line);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check if a line has a breakpoint
+    fn line_has_breakpoint(&self, line: usize, dm: &DataManager) -> bool {
+        if let Some(location) = self.get_breakpoint_location_for_line(line) {
+            let test_bp = Breakpoint::new(Some(location), None);
+            dm.execution.find_breakpoints(&test_bp, true).iter().any(|(_, enabled)| *enabled)
+        } else {
+            false
+        }
+    }
 }
 
 impl PanelTr for CodePanel {
@@ -1088,18 +1166,7 @@ impl PanelTr for CodePanel {
                         }
                         // Allow breakpoints to work in file selector mode
                         KeyCode::Char('b') | KeyCode::Char('B') => {
-                            if let Some(line) = self.user_cursor_line {
-                                // TODO
-                                let added = false;
-                                if added {
-                                    debug!("Added breakpoint at line {}", line);
-                                } else {
-                                    debug!("Removed breakpoint at line {}", line);
-                                }
-                            }
-                            {
-                                debug!("No user cursor position for breakpoint");
-                            }
+                            self.toggle_breakpoint_at_cursor(dm)?;
                             Ok(EventResponse::Handled)
                         }
                         _ => Ok(EventResponse::NotHandled),
@@ -1187,17 +1254,7 @@ impl PanelTr for CodePanel {
                 }
                 KeyCode::Char('b') | KeyCode::Char('B') => {
                     // Toggle breakpoint at user cursor position
-                    if let Some(line) = self.user_cursor_line {
-                        // TODO
-                        let added = false;
-                        if added {
-                            debug!("Added breakpoint at line {}", line);
-                        } else {
-                            debug!("Removed breakpoint at line {}", line);
-                        }
-                    } else {
-                        debug!("No user cursor position for breakpoint");
-                    }
+                    self.toggle_breakpoint_at_cursor(dm)?;
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Char('s') => {

@@ -743,9 +743,15 @@ impl TerminalPanel {
                     self.add_output("");
                     self.add_output("Breakpoint types:");
                     self.add_output("  • Location only: Stops when execution reaches the location");
-                    self.add_output("  • Condition only: Data breakpoint - stops when expression is true");
-                    self.add_output("  • Both: Stops when location is reached AND condition is true");
-                    self.add_output("  • Neither: Invalid - breakpoint must have location or condition");
+                    self.add_output(
+                        "  • Condition only: Data breakpoint - stops when expression is true",
+                    );
+                    self.add_output(
+                        "  • Both: Stops when location is reached AND condition is true",
+                    );
+                    self.add_output(
+                        "  • Neither: Invalid - breakpoint must have location or condition",
+                    );
                     return Ok(());
                 }
 
@@ -947,10 +953,18 @@ impl TerminalPanel {
                         );
                         self.add_output("");
                         self.add_output("Breakpoint types:");
-                        self.add_output("  • Location only: Stops when execution reaches the location");
-                        self.add_output("  • Condition only: Data breakpoint - stops when expression is true");
-                        self.add_output("  • Both: Stops when location is reached AND condition is true");
-                        self.add_output("  • Neither: Invalid - breakpoint must have location or condition");
+                        self.add_output(
+                            "  • Location only: Stops when execution reaches the location",
+                        );
+                        self.add_output(
+                            "  • Condition only: Data breakpoint - stops when expression is true",
+                        );
+                        self.add_output(
+                            "  • Both: Stops when location is reached AND condition is true",
+                        );
+                        self.add_output(
+                            "  • Neither: Invalid - breakpoint must have location or condition",
+                        );
                     }
                 }
             }
