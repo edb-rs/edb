@@ -19,7 +19,7 @@
 //! This module implements RPC methods for navigating through snapshots.
 
 use crate::rpc::types::RpcError;
-use crate::{error_codes, EngineContext, Snapshot, SnapshotDetail};
+use crate::{error_codes, ContextQueryTr, EngineContext, Snapshot, SnapshotDetail};
 use edb_common::types::ExecutionFrameId;
 use edb_common::OpcodeTr;
 use revm::bytecode::OpCode;

@@ -51,27 +51,29 @@
 //! multiple debugging clients through Arc wrapping. All database operations
 //! use read-only snapshots to ensure debugging session integrity.
 
+mod query;
+pub use query::*;
+
+mod evm;
+pub use evm::*;
+
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 
-use alloy_dyn_abi::{DynSolValue, FunctionExt, JsonAbiExt};
-use alloy_json_abi::Function;
-use alloy_primitives::{Address, Bytes, TxHash, U256};
+use alloy_primitives::{Address, TxHash};
 use edb_common::{
-    disable_nonce_check, relax_evm_context_constraints, relax_evm_tx_constraints,
     types::{parse_callable_abi_entries, Trace},
-    DerivedContext, ForkInfo,
+    ForkInfo,
 };
 use eyre::{eyre, Result};
 use indicatif::ProgressBar;
 use once_cell::sync::OnceCell;
 use revm::{
-    context::{result::ExecutionResult, tx::TxEnvBuilder, BlockEnv, CfgEnv, TxEnv},
+    context::{BlockEnv, CfgEnv, TxEnv},
     database::CacheDB,
-    Context, Database, DatabaseCommit, DatabaseRef, ExecuteEvm, MainBuilder, MainContext,
-    MainnetEvm,
+    Database, DatabaseCommit, DatabaseRef,
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
@@ -288,182 +290,5 @@ where
         ));
 
         Ok(())
-    }
-}
-
-// Context query methods for debugging operations
-impl<DB> EngineContext<DB>
-where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
-    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
-    <DB as Database>::Error: Clone + Send + Sync,
-{
-    /// Get the bytecode address for a snapshot.
-    ///
-    /// Returns the address where the executing bytecode is stored, which may differ
-    /// from the target address in cases of delegatecall or proxy contracts.
-    pub fn get_bytecode_address(&self, snapshot_id: usize) -> Option<Address> {
-        let (frame_id, _) = self.snapshots.get(snapshot_id)?;
-        self.trace.get(frame_id.trace_entry_id()).map(|entry| entry.code_address)
-    }
-
-    /// Get the target address for a snapshot.
-    ///
-    /// Returns the address that was the target of the call, which is the address
-    /// receiving the call in the current execution frame.
-    pub fn get_target_address(&self, snapshot_id: usize) -> Option<Address> {
-        let (frame_id, _) = self.snapshots.get(snapshot_id)?;
-        self.trace.get(frame_id.trace_entry_id()).map(|entry| entry.target)
-    }
-
-    /// Check if one trace entry is the parent of another.
-    ///
-    /// This method determines the parent-child relationship between trace entries,
-    /// useful for understanding call hierarchy during debugging.
-    pub fn is_parent_trace(&self, parent_id: usize, child_id: usize) -> bool {
-        match self.trace.get(child_id) {
-            Some(child_entry) => child_entry.parent_id == Some(parent_id),
-            None => false,
-        }
-    }
-
-    /// Get the address to code address mapping.
-    ///
-    /// Returns a cached mapping from target addresses to all code addresses that
-    /// have been executed for each target. This is useful for understanding
-    /// proxy patterns and delegatecall relationships.
-    pub fn address_code_address_map(&self) -> &HashMap<Address, HashSet<Address>> {
-        self.address_code_address_map.get_or_init(|| {
-            let mut map: HashMap<Address, HashSet<Address>> = HashMap::new();
-            for entry in &self.trace {
-                map.entry(entry.target).or_default().insert(entry.code_address);
-            }
-            map
-        })
-    }
-}
-
-// EVM creation and expression evaluation methods
-impl<DB> EngineContext<DB>
-where
-    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
-    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
-    <DB as Database>::Error: Clone + Send + Sync,
-{
-    /// Create a derived EVM instance for a specific snapshot.
-    ///
-    /// This method creates a new EVM instance using the database state from the
-    /// specified snapshot. The resulting EVM can be used for expression evaluation
-    /// and function calls without affecting the original debugging state.
-    ///
-    /// # Arguments
-    ///
-    /// * `snapshot_id` - The snapshot ID to create the EVM for
-    ///
-    /// # Returns
-    ///
-    /// Returns a configured EVM instance or None if the snapshot doesn't exist.
-    pub fn create_evm_for_snapshot(
-        &self,
-        snapshot_id: usize,
-    ) -> Option<MainnetEvm<DerivedContext<DB>>> {
-        let (_, snapshot) = self.snapshots.get(snapshot_id)?;
-
-        let db = CacheDB::new(CacheDB::new(snapshot.db()));
-        let cfg = self.cfg.clone();
-        let block = self.block.clone();
-
-        let mut ctx = Context::mainnet().with_db(db).with_cfg(cfg).with_block(block);
-        relax_evm_context_constraints(&mut ctx);
-        disable_nonce_check(&mut ctx);
-
-        Some(ctx.build_mainnet())
-    }
-
-    /// Send a mock transaction in a derived EVM.
-    ///
-    /// This method executes a transaction in the EVM state at the specified snapshot
-    /// without affecting the original debugging state. Used for expression evaluation
-    /// that requires transaction execution.
-    ///
-    /// # Arguments
-    ///
-    /// * `snapshot_id` - The snapshot ID to use as the base state
-    /// * `to` - The target address for the transaction
-    /// * `data` - The transaction data (call data)
-    /// * `value` - The value to send with the transaction
-    ///
-    /// # Returns
-    ///
-    /// Returns the execution result or an error if the transaction fails.
-    pub fn send_transaction_in_derived_evm(
-        &self,
-        snapshot_id: usize,
-        to: Address,
-        data: &[u8],
-        value: U256,
-    ) -> Result<ExecutionResult> {
-        let mut evm = self
-            .create_evm_for_snapshot(snapshot_id)
-            .ok_or(eyre!("No EVM found at snapshot {}", snapshot_id))?;
-
-        let mut tx_env = TxEnvBuilder::new()
-            .caller(self.tx.caller)
-            .call(to)
-            .value(value)
-            .data(Bytes::copy_from_slice(data))
-            .build_fill();
-        relax_evm_tx_constraints(&mut tx_env);
-
-        evm.transact_one(tx_env).map_err(|e| eyre!(e.to_string()))
-    }
-
-    /// Invoke a contract function call in a derived EVM.
-    ///
-    /// This method calls a specific contract function in the EVM state at the
-    /// specified snapshot. It handles ABI encoding/decoding automatically and
-    /// returns the decoded result.
-    ///
-    /// # Arguments
-    ///
-    /// * `snapshot_id` - The snapshot ID to use as the base state
-    /// * `to` - The contract address to call
-    /// * `function` - The ABI function definition
-    /// * `args` - The function arguments
-    /// * `value` - Optional value to send with the call
-    ///
-    /// # Returns
-    ///
-    /// Returns the decoded function result or an error if the call fails.
-    pub fn call_in_derived_evm(
-        &self,
-        snapshot_id: usize,
-        to: Address,
-        function: &Function,
-        args: &[DynSolValue],
-        value: Option<U256>,
-    ) -> Result<DynSolValue> {
-        let data = function.abi_encode_input(args).map_err(|e| eyre!(e.to_string()))?;
-        let value = value.unwrap_or_default();
-
-        let result = self.send_transaction_in_derived_evm(snapshot_id, to, &data, value)?;
-
-        match result {
-            ExecutionResult::Success { output, .. } => {
-                let decoded =
-                    function.abi_decode_output(output.data()).map_err(|e| eyre!(e.to_string()))?;
-                if decoded.len() == 1 {
-                    Ok(decoded.into_iter().next().unwrap())
-                } else {
-                    Ok(DynSolValue::Tuple(decoded))
-                }
-            }
-            ExecutionResult::Revert { output, .. } => {
-                Err(eyre!("Call reverted with output: 0x{}", hex::encode(output)))
-            }
-            ExecutionResult::Halt { reason, .. } => {
-                Err(eyre!("Call halted with reason: {:?}", reason))
-            }
-        }
     }
 }

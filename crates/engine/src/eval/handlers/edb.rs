@@ -56,7 +56,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use tracing::debug;
 
 use super::*;
-use crate::{EngineContext, Snapshot, SnapshotDetail};
+use crate::{ContextEvmTr, ContextQueryTr, EngineContext, Snapshot, SnapshotDetail};
 
 static EDB_EVAL_PLACEHOLDER_MAGIC: &str = "edb_eval_placeholder";
 

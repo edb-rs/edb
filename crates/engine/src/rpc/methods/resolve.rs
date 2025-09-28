@@ -22,7 +22,7 @@ use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::{error_codes, EngineContext, RpcError};
+use crate::{error_codes, ContextQueryTr, EngineContext, RpcError};
 
 pub fn get_contract_abi<DB>(
     context: &Arc<EngineContext<DB>>,
