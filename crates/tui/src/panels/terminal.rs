@@ -2197,12 +2197,12 @@ impl PanelTr for TerminalPanel {
         match event.kind {
             MouseEventKind::ScrollUp => {
                 self.mode = TerminalMode::Vim;
-                self.vim_move_cursor_up(3); // Move up 3 lines per scroll
+                self.vim_move_cursor_up(1);
                 Ok(EventResponse::Handled)
             }
             MouseEventKind::ScrollDown => {
                 self.mode = TerminalMode::Vim;
-                self.vim_move_cursor_down(3); // Move down 3 lines per scroll
+                self.vim_move_cursor_down(1);
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

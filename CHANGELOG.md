@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add expression watcher ([#7](https://github.com/edb-rs/edb/issues/7))
 - Partially support integration tests for edb ([#6](https://github.com/edb-rs/edb/issues/6))
 - Add a popup window when errors occur in TUI
+- Add mouse interaction support in TUI ([#16](https://github.com/edb-rs/edb/issues/16))
 
 ### Changed
 - Improved horizontal scrolling support in terminal panel vim mode

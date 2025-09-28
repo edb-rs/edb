@@ -2110,13 +2110,11 @@ impl PanelTr for DisplayPanel {
 
         match event.kind {
             MouseEventKind::ScrollUp => {
-                // Move up 3 times
-                self.move_up(3);
+                self.move_up(1);
                 Ok(EventResponse::Handled)
             }
             MouseEventKind::ScrollDown => {
-                // Move down 3 times
-                self.move_down(3);
+                self.move_down(1);
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

@@ -1367,11 +1367,11 @@ impl PanelTr for TracePanel {
 
         match event.kind {
             MouseEventKind::ScrollUp => {
-                self.inner.move_up(3); // Move up 3 lines per scroll
+                self.inner.move_up(1);
                 Ok(EventResponse::Handled)
             }
             MouseEventKind::ScrollDown => {
-                self.inner.move_down(3); // Move down 3 lines per scroll
+                self.inner.move_down(1);
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

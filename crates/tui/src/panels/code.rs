@@ -1302,11 +1302,11 @@ impl PanelTr for CodePanel {
 
         match event.kind {
             MouseEventKind::ScrollUp => {
-                self.move_up(3); // Move up 3 lines per scroll
+                self.move_up(1);
                 Ok(EventResponse::Handled)
             }
             MouseEventKind::ScrollDown => {
-                self.move_down(3); // Move down 3 lines per scroll
+                self.move_down(1);
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

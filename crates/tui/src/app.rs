@@ -996,6 +996,28 @@ impl App {
         Ok(())
     }
 
+    /// Handle batched mouse events of the same type
+    pub async fn handle_mouse_batch(
+        &mut self,
+        mouse_events: Vec<MouseEvent>,
+        data_manager: &mut DataManager,
+    ) -> Result<()> {
+        if mouse_events.is_empty() {
+            return Ok(());
+        }
+
+        debug!("Processing mouse batch of {} events", mouse_events.len());
+
+        for event in mouse_events {
+            if let Err(e) = self.handle_mouse_event(event, data_manager).await {
+                self.error_popup = Some(format!("{e}"));
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get the panel at the given screen position (for mouse click detection)
     fn get_panel_at_position(&self, column: u16, row: u16) -> Option<PanelType> {
         let width = self.layout_manager.width();

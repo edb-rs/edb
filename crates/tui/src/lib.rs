@@ -40,16 +40,18 @@ pub use ui::{
 };
 
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream},
+    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEvent},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use eyre::Result;
-use futures::StreamExt;
+use eyre::{bail, Result};
+use futures::{FutureExt, StreamExt};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{io, sync::Arc, time::Duration};
 use tokio::{select, time::interval};
 use tracing::{debug, error, info, warn};
+
+use crate::data::DataManager;
 
 /// Configuration for the TUI
 #[derive(Debug, Clone)]
@@ -164,36 +166,53 @@ impl Tui {
             select! {
                 // Handle terminal events (keyboard, mouse, resize)
                 event_result = event_stream.next() => {
-                    if let Some(Ok(event)) = event_result {
-                        debug!("Received event: {:?}", event);
+                    if let Some(Ok(current_event)) = event_result {
+                        debug!("Received event: {:?}", current_event);
 
-                        match event {
+                        match current_event {
+                            Event::Mouse(first_mouse_event) if self.config.enable_mouse => {
+                                let mut mouse_events = vec![first_mouse_event];
+                                let mut other_event_to_handle = None;
+
+                                // Try to batch consecutive same-type mouse events
+                                while let Some(Some(Ok(event))) = event_stream.next().now_or_never() {
+                                    match event {
+                                        Event::Mouse(mouse_event) => {
+                                            mouse_events.push(mouse_event);
+                                        }
+                                        other => {
+                                            // Different event type - save it for later processing
+                                            other_event_to_handle = Some(other);
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // Process the batched mouse events
+                                if let Err(e) = self.app.handle_mouse_batch(mouse_events, &mut data_manager).await {
+                                    error!("Mouse batch error: {}", e);
+                                }
+
+                                // Now handle the deferred event if any
+                                if let Some(other_event) = other_event_to_handle {
+                                    match other_event {
+                                        Event::Key(key_event) => {
+                                            if self.handle_key_event(key_event, &mut data_manager).await? {
+                                                break Ok(());
+                                            }
+                                        }
+                                        Event::Resize(width, height) => self.handle_resize(width, height),
+                                        Event::Mouse(_) => bail!("Unexpected mouse event in deferred handling"),
+                                        _ => {}
+                                    }
+                                }
+                            }
                             Event::Key(key_event) => {
-                                match self.app.handle_key_event(key_event, &mut data_manager).await? {
-                                    EventResponse::Exit => {
-                                        info!("Exit requested");
-                                        break Ok(());
-                                    }
-                                    EventResponse::Handled => {},
-                                    EventResponse::NotHandled => {
-                                        warn!("Unhandled key event: {:?}", key_event);
-                                    }
-                                    EventResponse::ChangeFocus(panel_type) => {
-                                        // Handle panel focus changes
-                                        debug!("Focus change requested to {:?}", panel_type);
-                                        self.app.change_focus(panel_type);
-                                    }
+                                if self.handle_key_event(key_event, &mut data_manager).await? {
+                                    break Ok(());
                                 }
                             }
-                            Event::Mouse(mouse_event) if self.config.enable_mouse => {
-                                if let Err(e) = self.app.handle_mouse_event(mouse_event, &mut data_manager).await {
-                                    error!("Mouse event error: {}", e);
-                                }
-                            }
-                            Event::Resize(width, height) => {
-                                debug!("Terminal resized: {}x{}", width, height);
-                                self.app.handle_resize(width, height);
-                            }
+                            Event::Resize(width, height) => self.handle_resize(width, height),
                             _ => {}
                         }
                     }
@@ -230,6 +249,36 @@ impl Tui {
 
         info!("TUI event loop ended");
         result
+    }
+
+    // Handle a single resize event
+    fn handle_resize(&mut self, width: u16, height: u16) {
+        debug!("Terminal resized: {}x{}", width, height);
+        self.app.handle_resize(width, height);
+    }
+
+    // Handle a single key event, returning true if the app should exit
+    async fn handle_key_event(
+        &mut self,
+        key_event: KeyEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<bool> {
+        match self.app.handle_key_event(key_event, data_manager).await? {
+            EventResponse::Exit => {
+                info!("Exit requested");
+                return Ok(true);
+            }
+            EventResponse::Handled => {}
+            EventResponse::NotHandled => {
+                warn!("Unhandled key event: {:?}", key_event);
+            }
+            EventResponse::ChangeFocus(panel_type) => {
+                debug!("Focus change requested to {:?}", panel_type);
+                self.app.change_focus(panel_type);
+            }
+        }
+
+        Ok(false)
     }
 }
 

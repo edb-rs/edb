@@ -79,9 +79,9 @@ impl Cli {
     /// Validate CLI arguments and warn about misused options
     pub fn validate(&self) {
         // Warn if TUI options are used with non-TUI mode
-        if !matches!(self.ui, UiMode::Tui) && self.tui_options.mouse {
-            tracing::warn!("--mouse flag has no effect when not using TUI mode");
-            eprintln!("Warning: --mouse flag has no effect when not using TUI mode");
+        if !matches!(self.ui, UiMode::Tui) && self.tui_options.disable_mouse {
+            tracing::warn!("--disable-mouse flag has no effect when not using TUI mode");
+            eprintln!("Warning: --disable-mouse flag has no effect when not using TUI mode");
         }
     }
 }
@@ -90,9 +90,9 @@ impl Cli {
 #[derive(Debug, Args)]
 #[command(next_help_heading = "Terminal UI Options (only apply with --ui=tui)")]
 pub struct TuiOptions {
-    /// Enable mouse support in the terminal UI
+    /// Disable mouse support in the terminal UI
     #[arg(long)]
-    pub mouse: bool,
+    pub disable_mouse: bool,
 }
 
 /// Available UI modes
@@ -169,10 +169,7 @@ async fn main() -> Result<()> {
         Commands::ProxyStatus => unreachable!(), // Handled above
     };
 
-    tracing::info!(
-        "Engine preparation complete. RPC server is running on {}",
-        rpc_server_handle.addr
-    );
+    println!("Engine preparation complete. RPC server is running on {}", rpc_server_handle.addr);
 
     // Launch Terminal UI
     tracing::info!("Launching Terminal UI...");
@@ -186,7 +183,7 @@ async fn main() -> Result<()> {
     cmd.arg("--url").arg(format!("http://{}", rpc_server_handle.addr));
 
     // Only pass --mouse flag if requested and using TUI mode
-    if matches!(cli.ui, UiMode::Tui) && cli.tui_options.mouse {
+    if matches!(cli.ui, UiMode::Tui) && !cli.tui_options.disable_mouse {
         cmd.arg("--mouse");
     }
 
