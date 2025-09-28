@@ -51,11 +51,11 @@
 //! multiple debugging clients through Arc wrapping. All database operations
 //! use read-only snapshots to ensure debugging session integrity.
 
-mod query;
-pub use query::*;
-
 mod evm;
 pub use evm::*;
+
+mod query;
+pub use query::*;
 
 use std::{
     collections::{HashMap, HashSet},

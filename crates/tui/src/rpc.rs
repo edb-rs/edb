@@ -21,7 +21,7 @@
 use crate::ui::spinner::Spinner;
 use alloy_json_abi::JsonAbi;
 use alloy_primitives::{Address, Bytes, U256};
-use edb_common::types::{CallableAbiInfo, Code, EdbSolValue, SnapshotInfo, Trace};
+use edb_common::types::{Breakpoint, CallableAbiInfo, Code, EdbSolValue, SnapshotInfo, Trace};
 use eyre::Result;
 use jsonrpsee::{
     core::client::ClientT,
@@ -359,6 +359,20 @@ impl RpcClient {
 
         serde_json::from_value(value)
             .map_err(|e| eyre::eyre!("Failed to parse evaluated value: {}", e))
+    }
+
+    /// Get breakpoint hits
+    pub async fn get_breakpoint_hits(&self, breakpoint: &Breakpoint) -> Result<Vec<usize>> {
+        let value = self
+            .request_with_spinner(
+                "edb_getBreakpointHits",
+                rpc_params!(breakpoint),
+                &format!("Getting breakpoint hits for {breakpoint:?}"),
+            )
+            .await?;
+
+        serde_json::from_value(value)
+            .map_err(|e| eyre::eyre!("Failed to parse breakpoint hits: {}", e))
     }
 }
 

@@ -27,18 +27,11 @@
 //! - [`RpcError`] - Structured error information following JSON-RPC error format
 //! - [`RpcId`] - Request/response identifier (string or number)
 //!
-//! # Debugging Types
-//!
-//! - [`Breakpoint`] - Breakpoint configuration and metadata
-//! - [`BreakpointLocation`] - Location specification for breakpoints
-//! - [`LocationType`] - Type of location (source line vs program counter)
-//!
 //! # Error Handling
 //!
 //! The module includes standard JSON-RPC error codes in the [`error_codes`] module
 //! for consistent error reporting across all RPC methods.
 
-use alloy_primitives::Address;
 use serde::{Deserialize, Serialize};
 
 /// JSON-RPC 2.0 request structure.
@@ -101,59 +94,6 @@ pub enum RpcId {
     Number(u64),
     /// String identifier
     String(String),
-}
-
-/// Debugging breakpoint configuration.
-///
-/// Represents a breakpoint that can pause execution at specific locations.
-/// Supports both source-level and bytecode-level breakpoints with optional conditions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Breakpoint {
-    /// Unique identifier for this breakpoint
-    pub id: BreakpointId,
-    /// Location where the breakpoint is set
-    pub location: BreakpointLocation,
-    /// Whether the breakpoint is currently active
-    pub enabled: bool,
-    /// Optional condition that must be true for breakpoint to trigger
-    pub condition: Option<String>,
-}
-
-/// Unique identifier for a breakpoint.
-///
-/// Used to reference breakpoints in enable/disable/remove operations.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct BreakpointId(pub String);
-
-/// Location specification for a breakpoint.
-///
-/// Defines where a breakpoint should be placed, supporting both source-level
-/// (line number) and bytecode-level (program counter) locations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BreakpointLocation {
-    /// Contract address where the breakpoint is set
-    pub address: Address,
-    /// Type of location (source line or program counter)
-    pub location_type: LocationType,
-    /// Source code line number (for source-level breakpoints)
-    pub line: Option<usize>,
-    /// Program counter offset (for bytecode-level breakpoints)
-    pub pc: Option<usize>,
-    /// Source file path (for source-level breakpoints)
-    pub path: Option<String>,
-}
-
-/// Type of breakpoint location.
-///
-/// Determines whether the breakpoint is set at a source code line
-/// or at a specific bytecode instruction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LocationType {
-    /// Breakpoint set at a source code line
-    SourceLine,
-    /// Breakpoint set at a specific bytecode instruction (program counter)
-    ProgramCounter,
 }
 
 /// JSON-RPC error codes for consistent error reporting.

@@ -54,6 +54,7 @@
 //! pattern of parameter validation, operation execution, and result serialization.
 
 mod artifact;
+mod breakpoint;
 mod expr;
 mod navigation;
 mod resolve;
@@ -118,6 +119,7 @@ where
             "edb_getStorage" => storage::get_storage(&self.context, params),
             "edb_getStorageDiff" => storage::get_storage_diff(&self.context, params),
             "edb_evalOnSnapshot" => expr::eval_on_snapshot(&self.context, params),
+            "edb_getBreakpointHits" => breakpoint::get_breakpoint_hits(&self.context, params),
             // Unimplemented methods
             _ => Err(RpcError {
                 code: error_codes::METHOD_NOT_FOUND,
