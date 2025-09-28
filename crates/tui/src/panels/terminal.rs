@@ -739,8 +739,8 @@ impl TerminalPanel {
                     self.add_output("        <loc> := <addr>:<path>:<line> (source)");
                     self.add_output("               | <addr>:<pc>          (opcode)");
                     self.add_output("  break remove <id>               - Remove breakpoint");
-                    self.add_output("  break enable <id>               - Enable breakpoint");
-                    self.add_output("  break disable <id>              - Disable breakpoint");
+                    self.add_output("  break enable [id]               - Enable breakpoint(s)");
+                    self.add_output("  break disable [id]              - Disable breakpoint(s)");
                     self.add_output(
                         "  break add_expr <id> $<expr>     - Add condition to breakpoint",
                     );
@@ -846,8 +846,18 @@ impl TerminalPanel {
                         }
                     }
                     "enable" => {
-                        if parts.len() != 3 {
-                            self.add_error("Usage: break enable <id>");
+                        if parts.len() != 3 && parts.len() != 2 {
+                            self.add_error("Usage: break enable [id]");
+                            return Ok(());
+                        }
+
+                        if parts.len() == 2 {
+                            match dm.execution.enable_all_breakpoints() {
+                                Ok(()) => self.add_output("All breakpoints enabled"),
+                                Err(e) => {
+                                    self.add_error(&format!("Failed to enable breakpoints: {e}"))
+                                }
+                            }
                             return Ok(());
                         }
 
@@ -862,8 +872,18 @@ impl TerminalPanel {
                         }
                     }
                     "disable" => {
-                        if parts.len() != 3 {
-                            self.add_error("Usage: break disable <id>");
+                        if parts.len() != 3 && parts.len() != 2 {
+                            self.add_error("Usage: break disable [id]");
+                            return Ok(());
+                        }
+
+                        if parts.len() == 2 {
+                            match dm.execution.disable_all_breakpoints() {
+                                Ok(()) => self.add_output("All breakpoints disabled"),
+                                Err(e) => {
+                                    self.add_error(&format!("Failed to disable breakpoints: {e}"))
+                                }
+                            }
                             return Ok(());
                         }
 
@@ -953,8 +973,10 @@ impl TerminalPanel {
                         self.add_output("        <loc> := <addr>:<path>:<line> (source)");
                         self.add_output("               | <addr>:<pc>          (opcode)");
                         self.add_output("  break remove <id>               - Remove breakpoint");
-                        self.add_output("  break enable <id>               - Enable breakpoint");
-                        self.add_output("  break disable <id>              - Disable breakpoint");
+                        self.add_output("  break enable [id]               - Enable breakpoint(s)");
+                        self.add_output(
+                            "  break disable [id]              - Disable breakpoint(s)",
+                        );
                         self.add_output(
                             "  break add_expr <id> $<expr>     - Add condition to breakpoint",
                         );
@@ -1075,8 +1097,8 @@ impl TerminalPanel {
         self.add_output("        <loc> := <addr>:<path>:<line> (source)");
         self.add_output("               | <addr>:<pc>          (opcode)");
         self.add_output("  break remove <id>               - Remove breakpoint");
-        self.add_output("  break enable <id>               - Enable breakpoint");
-        self.add_output("  break disable <id>              - Disable breakpoint");
+        self.add_output("  break enable [id]               - Enable breakpoint (all if no id)");
+        self.add_output("  break disable [id]              - Disable breakpoint (all if no id)");
         self.add_output("  break add_expr <id> $<expr>     - Add condition expression");
         self.add_output("  break list                      - List all breakpoints");
         self.add_output("  break clear                     - Clear all breakpoints");

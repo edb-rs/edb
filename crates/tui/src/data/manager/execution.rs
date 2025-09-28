@@ -866,6 +866,30 @@ impl ExecutionManager {
         Ok(())
     }
 
+    pub fn disable_all_breakpoints(&mut self) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot disable breakpoints while there is a pending request");
+        }
+
+        for (_, enabled) in &mut self.breakpoints {
+            *enabled = false;
+        }
+        Ok(())
+    }
+
+    pub fn enable_all_breakpoints(&mut self) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot enable breakpoints while there is a pending request");
+        }
+
+        for (_, enabled) in &mut self.breakpoints {
+            *enabled = true;
+        }
+        Ok(())
+    }
+
     /// Find breakpoints matching the given criteria
     /// Returns a vector of breakpoint IDs (1-indexed) that match
     pub fn find_breakpoints(&self, bp: &Breakpoint, location_only: bool) -> Vec<(usize, bool)> {
