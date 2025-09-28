@@ -115,6 +115,8 @@ enum PendingCommand {
     ShowAddress(usize),
     /// Evaluate Solidity expression
     EvalExpr(usize, String),
+    /// Resolve a breakpoint
+    BreakpointHits(Breakpoint),
 }
 
 impl PendingCommand {
@@ -178,6 +180,9 @@ impl PendingCommand {
                 }
                 PendingCommand::EvalExpr(id, expr) => {
                     dm.resolver.eval_on_snapshot(*id, expr)?;
+                }
+                PendingCommand::BreakpointHits(bp) => {
+                    dm.execution.get_breakpoint_hits(bp)?;
                 }
             }
             Some(())
@@ -383,6 +388,7 @@ impl PendingCommand {
                     .map(|v| format!("{} = {}", expr, dm.resolver.resolve_sol_value(&v, Some(ctx))))
                     .map_err(|e| eyre!(e))
             }
+            Self::BreakpointHits(bp) => Ok(format!("Breakpoint added: {bp}")),
         }
     }
 }
@@ -810,15 +816,13 @@ impl TerminalPanel {
                             Breakpoint::new(loc, None)
                         };
 
-                        match dm.execution.add_breakpoint(breakpoint.clone()) {
-                            Ok(true) => {
-                                let bp_count = dm.execution.list_breakpoints().count();
-                                self.add_output(&format!(
-                                    "Breakpoint #{bp_count} added: {breakpoint}"
-                                ));
+                        match dm.execution.add_breakpoint(breakpoint) {
+                            Ok((bp, true)) => {
+                                self.add_output(&format!("Breakpoint added: {bp}"));
                             }
-                            Ok(false) => {
-                                self.add_output("Breakpoint already exists at this location");
+                            Ok((bp, false)) => {
+                                self.pending_command = Some(PendingCommand::BreakpointHits(bp));
+                                self.spinner.start_loading("Waiting for resolving breakpoint...");
                             }
                             Err(e) => {
                                 self.add_error(&format!("Failed to add breakpoint: {e}"));
@@ -886,9 +890,16 @@ impl TerminalPanel {
                                         .execution
                                         .update_breakpoint_condition(id, normalize_expression(expr))
                                     {
-                                        Ok(()) => self.add_output(&format!(
-                                            "Breakpoint #{id} condition updated: {expr}"
+                                        Ok((bp, true)) => self.add_output(&format!(
+                                            "Breakpoint #{id} condition updated: {bp}"
                                         )),
+                                        Ok((bp, false)) => {
+                                            self.pending_command =
+                                                Some(PendingCommand::BreakpointHits(bp));
+                                            self.spinner.start_loading(
+                                                "Waiting for resolving breakpoint...",
+                                            );
+                                        }
                                         Err(e) => self
                                             .add_error(&format!("Failed to update condition: {e}")),
                                     }

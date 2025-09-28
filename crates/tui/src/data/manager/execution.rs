@@ -52,6 +52,7 @@ pub struct ExecutionState {
     prev_call: FetchCache<usize, usize>,
     storage: FetchCache<(usize, U256), U256>,
     storage_diff: FetchCache<usize, HashMap<U256, (U256, U256)>>,
+    breakpoint_hits: FetchCache<Breakpoint, Vec<usize>>,
     trace_data: Trace,
 }
 
@@ -67,6 +68,7 @@ impl ManagerStateTr for ExecutionState {
             prev_call: FetchCache::new(),
             storage: FetchCache::new(),
             storage_diff: FetchCache::new(),
+            breakpoint_hits: FetchCache::new(),
             trace_data,
         })
     }
@@ -95,10 +97,14 @@ impl ManagerStateTr for ExecutionState {
         if self.storage_diff.need_update(&other.storage_diff) {
             self.storage_diff.update(&other.storage_diff);
         }
+
+        if self.breakpoint_hits.need_update(&other.breakpoint_hits) {
+            self.breakpoint_hits.update(&other.breakpoint_hits);
+        }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExecutionRequest {
     SnapshotInfo(usize),
     Code(usize),
@@ -107,13 +113,15 @@ pub enum ExecutionRequest {
     PrevCall(usize),
     Storage(usize, U256),
     StorageDiff(usize),
+    BreakpointHits(Breakpoint),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExecutionStatus {
     Normal,
     WaitNextCall(usize),
     WaitPrevCall(usize),
+    WaitBreakpointHits(Breakpoint),
 }
 
 impl ExecutionStatus {
@@ -129,25 +137,25 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
         state: &mut ExecutionState,
     ) -> Result<()> {
         match self {
-            Self::SnapshotInfo(id) => {
-                if state.snapshot_info.contains_key(&id) {
+            Self::SnapshotInfo(ref id) => {
+                if state.snapshot_info.contains_key(id) {
                     return Ok(());
                 }
 
-                let info = rpc_client.get_snapshot_info(id).await?;
-                state.snapshot_info.insert(id, Some(info));
+                let info = rpc_client.get_snapshot_info(*id).await?;
+                state.snapshot_info.insert(*id, Some(info));
             }
-            Self::Code(id) => {
-                if state.snapshot_info.get(&id).is_none() {
-                    let info = rpc_client.get_snapshot_info(id).await?;
-                    state.snapshot_info.insert(id, Some(info));
+            Self::Code(ref id) => {
+                if state.snapshot_info.get(id).is_none() {
+                    let info = rpc_client.get_snapshot_info(*id).await?;
+                    state.snapshot_info.insert(*id, Some(info));
                 }
 
                 let entry_id = state
                     .snapshot_info
-                    .get(&id)
+                    .get(id)
                     .and_then(|info| info.as_ref().map(|i| i.frame_id()))
-                    .ok_or_else(|| eyre::eyre!("Snapshot info for id {} not found", id))?
+                    .ok_or_else(|| eyre::eyre!("Snapshot info for id {id} not found"))?
                     .trace_entry_id();
                 let bytecode_address = state
                     .trace_data
@@ -159,62 +167,70 @@ impl ManagerRequestTr<ExecutionState> for ExecutionRequest {
                     return Ok(());
                 }
 
-                let code = rpc_client.get_code(id).await?;
+                let code = rpc_client.get_code(*id).await?;
                 state.code.insert(bytecode_address, Some(code));
             }
-            Self::CodeByAddress(address) => {
-                if state.code.contains_key(&address) {
+            Self::CodeByAddress(ref address) => {
+                if state.code.contains_key(address) {
                     return Ok(());
                 }
 
-                let code = rpc_client.get_code_by_address(address).await?;
-                state.code.insert(address, Some(code));
+                let code = rpc_client.get_code_by_address(*address).await?;
+                state.code.insert(*address, Some(code));
             }
-            Self::NextCall(id) => {
-                if state.next_call.contains_key(&id) {
+            Self::NextCall(ref id) => {
+                if state.next_call.contains_key(id) {
                     return Ok(());
                 }
 
-                let next_call = rpc_client.get_next_call(id).await?;
+                let next_call = rpc_client.get_next_call(*id).await?;
 
                 // We separate this insertion since id might be equal to next_call
-                state.next_call.insert(id, Some(next_call));
+                state.next_call.insert(*id, Some(next_call));
 
                 // We will update all snapshots in the range
                 for i in id + 1..next_call {
                     state.next_call.insert(i, Some(next_call));
                 }
             }
-            Self::PrevCall(id) => {
-                if state.prev_call.contains_key(&id) {
+            Self::PrevCall(ref id) => {
+                if state.prev_call.contains_key(id) {
                     return Ok(());
                 }
 
-                let prev_call = rpc_client.get_prev_call(id).await?;
+                let prev_call = rpc_client.get_prev_call(*id).await?;
 
                 // We separate this insertion since id might be equal to prev_call
-                state.prev_call.insert(id, Some(prev_call));
+                state.prev_call.insert(*id, Some(prev_call));
 
                 // We will update all snapshots in the range
-                for i in prev_call + 1..id {
+                for i in prev_call + 1..*id {
                     state.prev_call.insert(i, Some(prev_call));
                 }
             }
-            Self::Storage(id, slot) => {
-                if state.storage.contains_key(&(id, slot)) {
+            Self::Storage(ref id, ref slot) => {
+                if state.storage.contains_key(&(*id, *slot)) {
                     return Ok(());
                 }
 
-                let value = rpc_client.get_storage(id, slot).await?;
-                state.storage.insert((id, slot), Some(value));
+                let value = rpc_client.get_storage(*id, *slot).await?;
+                state.storage.insert((*id, *slot), Some(value));
             }
-            Self::StorageDiff(id) => {
-                if state.storage_diff.contains_key(&id) {
+            Self::StorageDiff(ref id) => {
+                if state.storage_diff.contains_key(id) {
                     return Ok(());
                 }
 
-                let diff = rpc_client.get_storage_diff(id).await?;
-                state.storage_diff.insert(id, Some(diff));
+                let diff = rpc_client.get_storage_diff(*id).await?;
+                state.storage_diff.insert(*id, Some(diff));
+            }
+            Self::BreakpointHits(ref breakpoint) => {
+                if state.breakpoint_hits.contains_key(breakpoint) {
+                    return Ok(());
+                }
+
+                let hits = rpc_client.get_breakpoint_hits(breakpoint).await?;
+                state.breakpoint_hits.insert(breakpoint.clone(), Some(hits));
             }
         }
 
@@ -342,6 +358,21 @@ impl ExecutionManager {
         }
     }
 
+    pub fn get_breakpoint_hits(&mut self, breakpoint: &Breakpoint) -> Option<&Vec<usize>> {
+        let _ = self.pull_from_core();
+
+        if !self.state.breakpoint_hits.contains_key(breakpoint) {
+            debug!("Breakpoint hits not found in cache, fetching...");
+            self.new_fetching_request(ExecutionRequest::BreakpointHits(breakpoint.clone()));
+            return None;
+        }
+
+        match self.state.breakpoint_hits.get(breakpoint) {
+            Some(hits) => hits.as_ref(),
+            _ => None,
+        }
+    }
+
     pub fn get_snapshot_info(&mut self, id: usize) -> Option<&SnapshotInfo> {
         let _ = self.pull_from_core();
 
@@ -413,7 +444,7 @@ impl ExecutionManager {
     }
 
     pub fn get_execution_status(&self) -> ExecutionStatus {
-        self.execution_status
+        self.execution_status.clone()
     }
 
     pub fn get_snapshot_count(&self) -> usize {
@@ -521,7 +552,7 @@ impl ExecutionManager {
                 // There is a pending execution request, for which we should wait
                 // and should not update current_snapshot
                 if let Some(next_id) = self.get_next_call(src_id) {
-                    // The pending request is for the same id, we can proceed
+                    // The pending request is ready, we can proceed
                     self.execution_status = ExecutionStatus::Normal;
 
                     // We will override the current snapshot
@@ -536,12 +567,23 @@ impl ExecutionManager {
                 // There is a pending execution request, for which we should wait
                 // and should not update current_snapshot
                 if let Some(prev_id) = self.get_prev_call(src_id) {
-                    // The pending request is for the same id, we can proceed
+                    // The pending request is ready, we can proceed
                     self.execution_status = ExecutionStatus::Normal;
 
                     // We will override the current snapshot
                     let _ = self.goto_snapshot(prev_id);
                     let _ = self.display_snapshot(prev_id);
+                }
+
+                // Any other execution request will be rejected
+                false
+            }
+            ExecutionStatus::WaitBreakpointHits(ref bp) => {
+                // There is a pending execution request, for which we should wait
+                // and should not update current_snapshot
+                if self.get_breakpoint_hits(&bp.clone()).is_some() {
+                    // The pending request is ready, we can proceed
+                    self.execution_status = ExecutionStatus::Normal;
                 }
 
                 // Any other execution request will be rejected
@@ -662,6 +704,11 @@ impl ExecutionManager {
             return None;
         }
 
+        if bp.loc.is_none() {
+            // We do not validate condition-only breakpoints
+            return Some(bp);
+        }
+
         let loc = bp.loc.as_ref()?;
         let bytecode_address = loc.bytecode_address();
         let code = self.get_code_by_bytecode_address(bytecode_address)?;
@@ -715,7 +762,7 @@ impl ExecutionManager {
         self.breakpoints.iter().enumerate().map(|(i, (bp, enabled))| (i + 1, bp, *enabled))
     }
 
-    pub fn add_breakpoint(&mut self, bp: Breakpoint) -> Result<bool> {
+    pub fn add_breakpoint(&mut self, bp: Breakpoint) -> Result<(Breakpoint, bool)> {
         // When we try to add a breakpoint, we check whether there is a pending request
         if !self.check_pending_request() {
             // There is a pending request, we should not update breakpoints
@@ -725,14 +772,22 @@ impl ExecutionManager {
         let bp = self.validate_breakpoint(bp).ok_or_else(|| eyre::eyre!("Invalid breakpoint"))?;
 
         if self.breakpoint_set.insert(bp.clone()) {
-            self.breakpoints.push((bp, true));
-            Ok(true)
+            self.breakpoints.push((bp.clone(), true));
+        }
+
+        if self.get_breakpoint_hits(&bp).is_some() {
+            Ok((bp, true)) // Breakpoint added or already exists
         } else {
-            Ok(false)
+            self.execution_status = ExecutionStatus::WaitBreakpointHits(bp.clone());
+            Ok((bp, false)) // Retrieving breakpoint hits, please wait
         }
     }
 
-    pub fn update_breakpoint_condition(&mut self, id: usize, expr: String) -> Result<()> {
+    pub fn update_breakpoint_condition(
+        &mut self,
+        id: usize,
+        expr: String,
+    ) -> Result<(Breakpoint, bool)> {
         // When we try to add a breakpoint, we check whether there is a pending request
         if !self.check_pending_request() {
             // There is a pending request, we should not update breakpoints
@@ -743,15 +798,26 @@ impl ExecutionManager {
             bail!("Breakpoint id {id} out of bounds");
         }
 
-        // TODO: remove the locations pointing to the old breakpoint
+        let mut new_bp = self.breakpoints[id - 1].0.clone();
+        new_bp.set_condition(&expr);
 
+        // We can update the breakpoint
         self.breakpoints[id - 1].0.set_condition(&expr);
 
-        // TODO: try to fetch the location
-        Ok(())
+        if self.get_breakpoint_hits(&new_bp).is_some() {
+            Ok((new_bp, true))
+        } else {
+            self.execution_status = ExecutionStatus::WaitBreakpointHits(new_bp.clone());
+            Ok((new_bp, false)) // Retrieving breakpoint hits, please wait
+        }
     }
 
     pub fn enable_breakpoint(&mut self, id: usize) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot enable breakpoint while there is a pending request");
+        }
+
         if id == 0 || id > self.breakpoints.len() {
             bail!("Breakpoint id {id} out of bounds");
         }
@@ -761,6 +827,11 @@ impl ExecutionManager {
     }
 
     pub fn disable_breakpoint(&mut self, id: usize) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot disable breakpoint while there is a pending request");
+        }
+
         if id == 0 || id > self.breakpoints.len() {
             bail!("Breakpoint id {id} out of bounds");
         }
@@ -770,6 +841,11 @@ impl ExecutionManager {
     }
 
     pub fn remove_breakpoint(&mut self, id: usize) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot remove breakpoint while there is a pending request");
+        }
+
         if id == 0 || id > self.breakpoints.len() {
             bail!("Breakpoint id {id} out of bounds");
         }
@@ -780,6 +856,11 @@ impl ExecutionManager {
     }
 
     pub fn clear_breakpoints(&mut self) -> Result<()> {
+        if !self.check_pending_request() {
+            // There is a pending request, we should not update breakpoints
+            bail!("Cannot clear breakpoints while there is a pending request");
+        }
+
         self.breakpoints.clear();
         self.breakpoint_set.clear();
         Ok(())
@@ -808,9 +889,25 @@ impl ExecutionManager {
     }
 
     /// Return the breakpoints that are hit at the current snapshot
-    pub fn get_hit_breakpoints(&mut self, _snaphost_id: usize) -> Vec<usize> {
-        // TODO
-        vec![]
+    pub fn get_hit_breakpoints(&mut self, snaphost_id: usize) -> Vec<usize> {
+        let _ = self.pull_from_core();
+
+        let enabled_breakpoints: Vec<usize> = self
+            .breakpoints
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, enabled))| *enabled)
+            .map(|(idx, _)| idx) // 1-indexed
+            .collect();
+
+        enabled_breakpoints
+            .into_iter()
+            .filter(|&idx| {
+                let (bp, _) = self.breakpoints[idx].clone();
+                self.get_breakpoint_hits(&bp).is_some_and(|hits| hits.contains(&snaphost_id))
+            })
+            .map(|idx| idx + 1) // Convert to 1-indexed
+            .collect()
     }
 }
 

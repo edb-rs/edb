@@ -797,13 +797,9 @@ impl DisplayPanel {
         // Get hit breakpoints for current snapshot
         self.hit_breakpoints = dm.execution.get_hit_breakpoints(current_snapshot);
 
-        // Get all breakpoints from execution manager
-        let breakpoint_data: Vec<(usize, &Breakpoint, bool)> =
-            dm.execution.list_breakpoints().collect();
-
         // Update breakpoint entries
         self.breakpoints.clear();
-        for (id, breakpoint, enabled) in breakpoint_data {
+        for (id, breakpoint, enabled) in dm.execution.list_breakpoints() {
             let is_hit = self.hit_breakpoints.contains(&id);
             self.breakpoints.push(BreakpointEntry {
                 id,

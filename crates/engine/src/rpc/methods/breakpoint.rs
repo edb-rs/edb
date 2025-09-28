@@ -188,7 +188,39 @@ where
     <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
     <DB as Database>::Error: Clone + Send + Sync,
 {
-    let loc_match = match (snapshot.detail(), &breakpoint.loc) {
+    let loc_match = check_location_match(context, snapshot, breakpoint);
+
+    let expr_match = match &breakpoint.condition {
+        // No expression specified in breakpoint, match any
+        None => true,
+        Some(expr) => {
+            eval::eval_on_snapshot(
+                context.clone(),
+                &format!("bool({expr})"),
+                snapshot.id(), // Use snapshot ID directly
+            )
+            .is_ok_and(|v| v == DynSolValue::Bool(true))
+        }
+    };
+
+    if loc_match && expr_match {
+        Ok(snapshot.id())
+    } else {
+        bail!("Breakpoint not hit");
+    }
+}
+
+fn check_location_match<DB>(
+    context: &Arc<EngineContext<DB>>,
+    snapshot: &Snapshot<DB>,
+    breakpoint: &Breakpoint,
+) -> bool
+where
+    DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
+    <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
+    <DB as Database>::Error: Clone + Send + Sync,
+{
+    match (snapshot.detail(), &breakpoint.loc) {
         // No location specified in breakpoint, match any
         (_, None) => true,
         (
@@ -202,41 +234,36 @@ where
             if detail.bytecode_address != *bytecode_address {
                 false
             } else {
-                let offset = context
-                    .analysis_results
-                    .get(bytecode_address)
-                    .and_then(|res| res.usid_to_step.get(&detail.usid))
-                    .and_then(|step| step.read().src.start);
+                let Some(analysis_result) = context.analysis_results.get(bytecode_address) else {
+                    return false;
+                };
+
+                let Some(step) =
+                    analysis_result.usid_to_step.get(&detail.usid).map(|step| step.read())
+                else {
+                    return false;
+                };
+
+                if step
+                    .src
+                    .index
+                    .and_then(|idx| analysis_result.sources.get(&(idx as u32)))
+                    .map(|s| s.path != *file_path)
+                    .unwrap_or(false)
+                {
+                    return false;
+                }
 
                 context
                     .artifacts
                     .get(bytecode_address)
                     .and_then(|artifact| artifact.input.sources.get(file_path))
-                    .zip(offset)
+                    .zip(step.src.start)
                     .is_some_and(|(source, offset)| {
                         source.content[..offset + 1].lines().count() == *line_number
                     })
             }
         }
         _ => false,
-    };
-
-    let expr_match = match &breakpoint.condition {
-        // No expression specified in breakpoint, match any
-        None => true,
-        Some(expr) => {
-            eval::eval_on_snapshot(
-                context.clone(),
-                &format!("bool({expr})"),
-                snapshot.id(), // Use snapshot ID directly
-            )
-            .is_ok_and(|v| v == DynSolValue::Bool(false))
-        }
-    };
-
-    if loc_match && expr_match {
-        Ok(snapshot.id())
-    } else {
-        bail!("Breakpoint not hit");
     }
 }

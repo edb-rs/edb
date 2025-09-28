@@ -177,7 +177,15 @@ impl BreakpointLocation {
     /// Formats the breakpoint location as a string.
     pub fn display(&self, addr_label: Option<String>) -> String {
         let bytecode_address = self.bytecode_address();
-        let addr_str = addr_label.unwrap_or_else(|| format!("{bytecode_address}"));
+        let addr_str = addr_label.unwrap_or_else(|| {
+            let full_addr = format!("{bytecode_address}");
+            if full_addr.len() > 14 {
+                // Create human-readable short format: 0x1234...5678
+                format!("{}...{}", &full_addr[..8], &full_addr[full_addr.len() - 6..])
+            } else {
+                full_addr
+            }
+        });
 
         match self {
             Self::Opcode { pc, .. } => {
@@ -269,7 +277,7 @@ mod tests {
             bytecode_address: address!("1234567890123456789012345678901234567890"),
             pc: 42,
         };
-        assert_eq!(loc.display(None), "0x1234567890123456789012345678901234567890:42");
+        assert_eq!(loc.display(None), "0x123456...567890:42");
         assert_eq!(loc.display(Some("<addr>".to_string())), "<addr>:42");
 
         // Test source breakpoint formatting
@@ -278,20 +286,33 @@ mod tests {
             file_path: PathBuf::from("src/main.rs"),
             line_number: 100,
         };
-        assert_eq!(loc.display(None), "0x1234567890123456789012345678901234567890:src/main.rs:100");
+        assert_eq!(loc.display(None), "0x123456...567890:src/main.rs:100");
         assert_eq!(loc.display(Some("<addr>".to_string())), "<addr>:src/main.rs:100");
     }
 
     #[test]
-    fn test_breakpoint_location_roundtrip() {
-        // Test that parsing and formatting are inverse operations
+    fn test_breakpoint_location_parsing() {
+        // Test that parsing works correctly with full address format
         let original_opcode = "0x1234567890123456789012345678901234567890:42";
         let loc = BreakpointLocation::from_str(original_opcode).unwrap();
-        assert_eq!(loc.display(None), original_opcode);
+        match loc {
+            BreakpointLocation::Opcode { bytecode_address, pc } => {
+                assert_eq!(bytecode_address, address!("1234567890123456789012345678901234567890"));
+                assert_eq!(pc, 42);
+            }
+            _ => panic!("Expected Opcode variant"),
+        }
 
         let original_source = "0x1234567890123456789012345678901234567890:src/main.rs:100";
         let loc = BreakpointLocation::from_str(original_source).unwrap();
-        assert_eq!(loc.display(None), original_source);
+        match loc {
+            BreakpointLocation::Source { bytecode_address, file_path, line_number } => {
+                assert_eq!(bytecode_address, address!("1234567890123456789012345678901234567890"));
+                assert_eq!(file_path, PathBuf::from("src/main.rs"));
+                assert_eq!(line_number, 100);
+            }
+            _ => panic!("Expected Source variant"),
+        }
     }
 
     #[test]
