@@ -317,7 +317,7 @@ impl ExecutionManager {
             breakpoint_set: HashSet::new(),
         };
 
-        let _ = mgr.goto_snapshot(0);
+        let _ = mgr.goto_snapshot(0, false);
         let _ = mgr.display_snapshot(0);
         mgr
     }
@@ -526,7 +526,7 @@ impl ExecutionManager {
         }
     }
 
-    fn goto_snapshot(&mut self, id: usize) -> Result<()> {
+    fn goto_snapshot(&mut self, id: usize, stop_on_breakpoint: bool) -> Result<usize> {
         if id >= self.state.snapshot_count {
             Err(eyre::eyre!(
                 "Snapshot id {} out of bounds (total {})",
@@ -534,13 +534,21 @@ impl ExecutionManager {
                 self.state.snapshot_count
             ))
         } else {
+            debug!("Going to snapshot {id}, stop_on_breakpoint={stop_on_breakpoint}");
+
+            let id = if stop_on_breakpoint {
+                self.find_breakpoint_hit_in_range(self.current_snapshot, id)
+            } else {
+                id
+            };
+
             self.get_snapshot_info(id);
             self.get_code(id);
 
             // Use try_write instead of blocking write
             self.current_snapshot = id;
 
-            Ok(())
+            Ok(id)
         }
     }
 
@@ -556,8 +564,9 @@ impl ExecutionManager {
                     self.execution_status = ExecutionStatus::Normal;
 
                     // We will override the current snapshot
-                    let _ = self.goto_snapshot(next_id);
-                    let _ = self.display_snapshot(next_id);
+                    let _ = self
+                        .goto_snapshot(next_id, true)
+                        .and_then(|to_id| self.display_snapshot(to_id));
                 }
 
                 // Any other execution request will be rejected
@@ -571,8 +580,9 @@ impl ExecutionManager {
                     self.execution_status = ExecutionStatus::Normal;
 
                     // We will override the current snapshot
-                    let _ = self.goto_snapshot(prev_id);
-                    let _ = self.display_snapshot(prev_id);
+                    let _ = self
+                        .goto_snapshot(prev_id, false)
+                        .and_then(|to_id| self.display_snapshot(to_id));
                 }
 
                 // Any other execution request will be rejected
@@ -598,15 +608,16 @@ impl ExecutionManager {
     }
 
     /// The actual function that deals with execution
-    pub fn goto(&mut self, id: usize) -> Result<()> {
+    pub fn goto(&mut self, id: usize, stop_on_breakpoint: bool) -> Result<()> {
         if !self.check_pending_request() {
             // There is a pending request, we should not update current_snapshot
             return Ok(());
         }
 
         let goto_id = id.max(0).min(self.state.snapshot_count - 1);
-        let _ = self.goto_snapshot(goto_id);
-        let _ = self.display_snapshot(goto_id);
+        let _ = self
+            .goto_snapshot(goto_id, stop_on_breakpoint)
+            .and_then(|to_id| self.display_snapshot(to_id));
 
         Ok(())
     }
@@ -619,7 +630,7 @@ impl ExecutionManager {
 
         let next_id =
             self.current_snapshot.saturating_add(count).min(self.state.snapshot_count - 1);
-        self.goto(next_id)
+        self.goto(next_id, true)
     }
 
     pub fn next(&mut self) -> Result<()> {
@@ -631,7 +642,7 @@ impl ExecutionManager {
         let current_id = self.get_current_snapshot();
         if let Some(snapshot_info) = self.get_snapshot_info(current_id) {
             let next_id = snapshot_info.next_id();
-            self.goto(next_id)
+            self.goto(next_id, true)
         } else {
             // We do nothing if we do not have the snapshot info
             Ok(())
@@ -647,7 +658,7 @@ impl ExecutionManager {
         let current_id = self.get_current_snapshot();
         if let Some(snapshot_info) = self.get_snapshot_info(current_id) {
             let prev_id = snapshot_info.prev_id();
-            self.goto(prev_id)
+            self.goto(prev_id, false)
         } else {
             // We do nothing if we do not have the snapshot info
             Ok(())
@@ -661,7 +672,7 @@ impl ExecutionManager {
         }
 
         let prev_id = self.current_snapshot.saturating_sub(count).max(0);
-        self.goto(prev_id)
+        self.goto(prev_id, false)
     }
 
     pub fn next_call(&mut self) -> Result<()> {
@@ -671,7 +682,7 @@ impl ExecutionManager {
         }
 
         if let Some(next_call) = self.get_next_call(self.current_snapshot) {
-            self.goto(next_call)?;
+            self.goto(next_call, true)?;
         } else {
             self.execution_status = ExecutionStatus::WaitNextCall(self.current_snapshot);
         }
@@ -686,7 +697,7 @@ impl ExecutionManager {
         }
 
         if let Some(prev_call) = self.get_prev_call(self.current_snapshot) {
-            self.goto(prev_call)?;
+            self.goto(prev_call, false)?;
         } else {
             self.execution_status = ExecutionStatus::WaitPrevCall(self.current_snapshot);
         }
@@ -932,6 +943,35 @@ impl ExecutionManager {
             })
             .map(|idx| idx + 1) // Convert to 1-indexed
             .collect()
+    }
+
+    /// Check if there is any breakpoint hit between from (exclusive) and to (inclusive)
+    fn find_breakpoint_hit_in_range(&mut self, from: usize, to: usize) -> usize {
+        let _ = self.pull_from_core();
+
+        if to <= from + 1 {
+            // No intermediate snapshots to check
+            return to;
+        }
+
+        let enabled_bps = self
+            .breakpoints
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, enabled))| *enabled)
+            .map(|(idx, _)| idx)
+            .collect::<Vec<usize>>();
+
+        enabled_bps
+            .into_iter()
+            .filter_map(|idx| {
+                let (bp, _) = self.breakpoints[idx].clone();
+                self.get_breakpoint_hits(&bp).and_then(|hits| {
+                    hits.iter().filter(|&&hit_id| hit_id > from && hit_id <= to).min().cloned()
+                })
+            })
+            .min()
+            .unwrap_or(to)
     }
 }
 

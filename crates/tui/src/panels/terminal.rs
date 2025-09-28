@@ -718,7 +718,7 @@ impl TerminalPanel {
                 id = dm.execution.get_sanitized_id(id);
                 self.pending_command = Some(PendingCommand::Goto(id));
                 self.spinner.start_loading(&format!("Going to snapshot {id}..."));
-                dm.execution.goto(id)?;
+                dm.execution.goto(id, false)?; // we do not stop at breakpoints
             }
             "info" => {
                 // A secret debugging cmd

@@ -1328,7 +1328,7 @@ impl PanelTr for TracePanel {
                         // Jump to the first snapshot of this trace entry if available
                         if let Some(snapshot_id) = entry.first_snapshot_id {
                             debug!("Jumping to snapshot: {}", snapshot_id);
-                            dm.execution.goto(snapshot_id)?;
+                            dm.execution.goto(snapshot_id, false)?;
                         } else {
                             bail!("The selected trace entry has no associated snapshot (likely a state variable view function). We cannot change execution to this entry.");
                         }
