@@ -978,13 +978,17 @@ impl App {
             MouseEventKind::ScrollUp => {
                 // Handle scroll up - move selection up
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    let _ = panel.handle_mouse_event(event, data_manager);
+                    if let Err(e) = panel.handle_mouse_event(event, data_manager) {
+                        self.error_popup = Some(format!("{e}"));
+                    }
                 }
             }
             MouseEventKind::ScrollDown => {
                 // Handle scroll down - move selection down
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
-                    let _ = panel.handle_mouse_event(event, data_manager);
+                    if let Err(e) = panel.handle_mouse_event(event, data_manager) {
+                        self.error_popup = Some(format!("{e}"));
+                    }
                 }
             }
             _ => {}

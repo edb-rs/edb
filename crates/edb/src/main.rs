@@ -21,7 +21,7 @@
 use std::env;
 
 use alloy_primitives::TxHash;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use eyre::Result;
 
 mod cmd;
@@ -36,7 +36,8 @@ mod utils;
 )]
 #[command(version)]
 pub struct Cli {
-    /// Upstream RPC URLs (comma-separated, overrides defaults if provided)
+    /// Upstream RPC URLs (comma-separated, overrides defaults if provided).
+    ///
     /// Example: --rpc-urls "https://eth.llamarpc.com,https://rpc.ankr.com/eth"
     #[arg(long)]
     rpc_urls: Option<String>,
@@ -65,9 +66,33 @@ pub struct Cli {
     #[arg(long, env = "EDB_CACHE_DIR")]
     pub cache_dir: Option<String>,
 
+    /// TUI-specific options
+    #[command(flatten)]
+    pub tui_options: TuiOptions,
+
     /// Command to execute
     #[command(subcommand)]
     pub command: Commands,
+}
+
+impl Cli {
+    /// Validate CLI arguments and warn about misused options
+    pub fn validate(&self) {
+        // Warn if TUI options are used with non-TUI mode
+        if !matches!(self.ui, UiMode::Tui) && self.tui_options.mouse {
+            tracing::warn!("--mouse flag has no effect when not using TUI mode");
+            eprintln!("Warning: --mouse flag has no effect when not using TUI mode");
+        }
+    }
+}
+
+/// TUI-specific options
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Terminal UI Options (only apply with --ui=tui)")]
+pub struct TuiOptions {
+    /// Enable mouse support in the terminal UI
+    #[arg(long)]
+    pub mouse: bool,
 }
 
 /// Available UI modes
@@ -107,6 +132,9 @@ async fn main() -> Result<()> {
 
     // Parse CLI arguments
     let cli = Cli::parse();
+
+    // Validate CLI arguments
+    cli.validate();
 
     if let Some(cache_dir) = &cli.cache_dir {
         tracing::info!("Using cache directory: {cache_dir}");
@@ -154,10 +182,15 @@ async fn main() -> Result<()> {
     tracing::debug!("Found TUI binary at: {:?}", tui_binary);
 
     // Spawn TUI as a child process with inherited stdio
-    let mut child = std::process::Command::new(&tui_binary)
-        .arg("--url")
-        .arg(format!("http://{}", rpc_server_handle.addr))
-        .arg("--mouse")
+    let mut cmd = std::process::Command::new(&tui_binary);
+    cmd.arg("--url").arg(format!("http://{}", rpc_server_handle.addr));
+
+    // Only pass --mouse flag if requested and using TUI mode
+    if matches!(cli.ui, UiMode::Tui) && cli.tui_options.mouse {
+        cmd.arg("--mouse");
+    }
+
+    let mut child = cmd
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())

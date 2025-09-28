@@ -109,6 +109,8 @@ pub struct TracePanelInner {
     vim_command_buffer: String,
     /// Whether we're in VIM command mode (after pressing :)
     vim_command_mode: bool,
+    /// Number of lines that will be displayed (for scrolling calculations)
+    displayed_line_count: usize,
 
     // ========== Execution Tracking ==========
     /// Currently executing trace entry ID (from execution snapshot)
@@ -128,6 +130,7 @@ impl TracePanelInner {
             content_width: 0,
             horizontal_offset: 0,
             max_line_width: 0,
+            displayed_line_count: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
             collapsed_entries: HashSet::new(),
             current_execution_entry: None,
@@ -210,42 +213,29 @@ impl TracePanelInner {
     }
 
     /// Move selection up with repetition support
-    fn move_up(&mut self, _trace: &Trace, count: usize) {
-        for _ in 0..count {
-            if self.selected_index > 0 {
-                self.selected_index -= 1;
-                // Auto-scroll up if needed
-                if self.selected_index < self.scroll_offset {
-                    self.scroll_offset = self.selected_index;
-                }
-            } else {
-                break;
-            }
+    fn move_up(&mut self, count: usize) {
+        self.selected_index = self.selected_index.saturating_sub(count);
+        // Auto-scroll up if needed
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
         }
     }
 
     /// Move selection down with repetition support
-    fn move_down(&mut self, trace: &Trace, count: usize) {
-        let display_lines = self.generate_display_lines(trace);
-        let max_lines = display_lines.len();
-        for _ in 0..count {
-            if self.selected_index < max_lines.saturating_sub(1) {
-                self.selected_index += 1;
-                // Auto-scroll down if needed
-                let viewport_height = self.context_height;
-                if self.selected_index >= self.scroll_offset + viewport_height {
-                    self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
-                }
-            } else {
-                break;
-            }
+    fn move_down(&mut self, count: usize) {
+        let max_lines = self.displayed_line_count;
+        self.selected_index =
+            self.selected_index.saturating_add(count).min(max_lines.saturating_sub(1));
+        // Auto-scroll down if needed
+        let viewport_height = self.context_height;
+        if self.selected_index >= self.scroll_offset + viewport_height {
+            self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
         }
     }
 
     /// Move to specific line number (1-based)
-    fn move_to(&mut self, line_num: usize, trace: &Trace) {
-        let display_lines = self.generate_display_lines(trace);
-        let max_lines = display_lines.len();
+    fn move_to(&mut self, line_num: usize) {
+        let max_lines = self.displayed_line_count;
         self.selected_index = line_num.saturating_sub(1);
         // Center the view on this line if possible
         let viewport_height = self.context_height;
@@ -261,10 +251,10 @@ impl TracePanelInner {
     }
 
     /// Execute VIM command from command buffer
-    fn execute_vim_command(&mut self, trace: &Trace) {
+    fn execute_vim_command(&mut self) {
         let command = self.vim_command_buffer.trim();
         if let Ok(line_number) = command.parse::<usize>() {
-            self.move_to(line_number, trace);
+            self.move_to(line_number);
         }
         // Clear command mode
         self.vim_command_buffer.clear();
@@ -1016,10 +1006,9 @@ impl PanelTr for TracePanel {
 
     fn title(&self, dm: &mut DataManager) -> String {
         let trace = dm.execution.get_trace();
-        let display_lines = self.generate_display_lines(trace);
         let visible_entries =
             trace.iter().filter(|entry| self.is_entry_visible(entry, trace)).count();
-        format!("Trace ({} lines, {} entries)", display_lines.len(), visible_entries)
+        format!("Trace ({} lines, {} entries)", self.displayed_line_count, visible_entries)
     }
 
     fn render(&mut self, frame: &mut Frame<'_>, area: Rect, dm: &mut DataManager) {
@@ -1052,6 +1041,7 @@ impl PanelTr for TracePanel {
 
         // Generate display lines with expansion/collapse support
         let display_lines = self.generate_display_lines(trace);
+        self.inner.displayed_line_count = display_lines.len();
 
         // Calculate max line width for horizontal scrolling
         self.inner.calculate_max_line_width(trace, dm);
@@ -1219,7 +1209,7 @@ impl PanelTr for TracePanel {
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Enter => {
-                    self.inner.execute_vim_command(trace);
+                    self.inner.execute_vim_command();
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::Esc => {
@@ -1249,14 +1239,14 @@ impl PanelTr for TracePanel {
                 // VIM-like navigation: k (up)
                 KeyCode::Up | KeyCode::Char('k') => {
                     let count = self.inner.get_vim_repetition();
-                    self.inner.move_up(trace, count);
+                    self.inner.move_up(count);
                     self.inner.clear_vim_state();
                     Ok(EventResponse::Handled)
                 }
                 // VIM-like navigation: j (down)
                 KeyCode::Down | KeyCode::Char('j') => {
                     let count = self.inner.get_vim_repetition();
-                    self.inner.move_down(trace, count);
+                    self.inner.move_down(count);
                     self.inner.clear_vim_state();
                     Ok(EventResponse::Handled)
                 }
@@ -1290,7 +1280,7 @@ impl PanelTr for TracePanel {
                 KeyCode::Char('g') => {
                     // Handle 'gg' sequence
                     if self.inner.vim_number_prefix == "g" {
-                        self.inner.move_to(1, trace);
+                        self.inner.move_to(1);
                         self.inner.vim_number_prefix.clear();
                     } else {
                         self.inner.vim_number_prefix = String::from("g");
@@ -1301,13 +1291,12 @@ impl PanelTr for TracePanel {
                 KeyCode::Char('G') => {
                     if self.inner.vim_number_prefix.is_empty() {
                         // G without number - go to bottom
-                        let display_lines = self.generate_display_lines(trace);
-                        let max_lines = display_lines.len();
-                        self.inner.move_to(max_lines, trace);
+                        let max_lines = self.displayed_line_count;
+                        self.inner.move_to(max_lines);
                     } else if self.inner.vim_number_prefix != "g" {
                         // nG - go to line n
                         let line = self.inner.get_vim_repetition();
-                        self.inner.move_to(line, trace);
+                        self.inner.move_to(line);
                     }
                     self.inner.clear_vim_state();
                     Ok(EventResponse::Handled)
@@ -1320,11 +1309,11 @@ impl PanelTr for TracePanel {
                 }
                 // Page navigation
                 KeyCode::PageUp => {
-                    self.inner.move_up(trace, self.inner.context_height / 2);
+                    self.inner.move_up(self.inner.context_height / 2);
                     Ok(EventResponse::Handled)
                 }
                 KeyCode::PageDown => {
-                    self.inner.move_down(trace, self.inner.context_height / 2);
+                    self.inner.move_down(self.inner.context_height / 2);
                     Ok(EventResponse::Handled)
                 }
                 // Other operations
@@ -1372,19 +1361,17 @@ impl PanelTr for TracePanel {
     fn handle_mouse_event(
         &mut self,
         event: crossterm::event::MouseEvent,
-        data_manager: &mut DataManager,
+        _dm: &mut DataManager,
     ) -> Result<EventResponse> {
         use crossterm::event::MouseEventKind;
 
         match event.kind {
             MouseEventKind::ScrollUp => {
-                let trace = data_manager.execution.get_trace();
-                self.inner.move_up(trace, 3); // Move up 3 lines per scroll
+                self.inner.move_up(3); // Move up 3 lines per scroll
                 Ok(EventResponse::Handled)
             }
             MouseEventKind::ScrollDown => {
-                let trace = data_manager.execution.get_trace();
-                self.inner.move_down(trace, 3); // Move down 3 lines per scroll
+                self.inner.move_down(3); // Move down 3 lines per scroll
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),

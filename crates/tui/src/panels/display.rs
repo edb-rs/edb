@@ -202,6 +202,8 @@ pub struct DisplayPanel {
     max_line_width: usize,
     /// Whether this panel is focused
     focused: bool,
+    /// Syntax highlighter for Sol values
+    syntax_highlighter: SyntaxHighlighter,
 
     // ========== Data (Flag) ==========
     /// Current execution snapshot
@@ -240,8 +242,8 @@ pub struct DisplayPanel {
     storage_display_lines: usize,
     /// Cached display line count for transient storage mode
     tstorage_display_lines: usize,
-    /// Syntax highlighter for Sol values
-    syntax_highlighter: SyntaxHighlighter,
+    /// Current display line count (cached)
+    displayed_line_count: usize,
 }
 
 impl DisplayPanel {
@@ -276,6 +278,7 @@ impl DisplayPanel {
             storage_display_lines: 0,
             tstorage_display_lines: 0,
             syntax_highlighter: SyntaxHighlighter::new(),
+            displayed_line_count: 0,
         }
     }
 
@@ -1129,19 +1132,31 @@ impl DisplayPanel {
     }
 
     /// Move selection up with auto-scrolling
-    fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-            // Auto-scroll up if selection moves above visible area
-            if self.selected_index < self.scroll_offset {
-                self.scroll_offset = self.selected_index;
-            }
+    fn move_up(&mut self, n: usize) {
+        self.selected_index = self.selected_index.saturating_sub(n);
+
+        // Auto-scroll up if selection moves above visible area
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
         }
     }
 
     /// Move selection down with auto-scrolling
-    fn move_down(&mut self, dm: &mut DataManager) {
-        let max_items = match self.mode {
+    fn move_down(&mut self, n: usize) {
+        let max_items = self.displayed_line_count;
+
+        self.selected_index =
+            self.selected_index.saturating_add(n).min(max_items.saturating_sub(1));
+        let viewport_height = self.context_height;
+        // Auto-scroll down if selection moves below visible area
+        if self.selected_index >= self.scroll_offset + viewport_height {
+            self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
+        }
+    }
+
+    /// Calculate the number of lines that will be displayed
+    fn calculate_context_lines(&self, dm: &mut DataManager) -> usize {
+        match self.mode {
             DisplayMode::Stack => self.stack_items.len(),
             DisplayMode::Memory => self.memory_chunks.len(),
             DisplayMode::CallData => {
@@ -1156,15 +1171,6 @@ impl DisplayPanel {
             DisplayMode::Variables => self.calculate_variables_display_lines(dm),
             DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
             DisplayMode::Breakpoints => self.breakpoints.len(),
-        };
-
-        if self.selected_index < max_items.saturating_sub(1) {
-            self.selected_index += 1;
-            let viewport_height = self.context_height;
-            // Auto-scroll down if selection moves below visible area
-            if self.selected_index >= self.scroll_offset + viewport_height {
-                self.scroll_offset = (self.selected_index + 1).saturating_sub(viewport_height);
-            }
         }
     }
 
@@ -1899,16 +1905,7 @@ impl DisplayPanel {
         let status_area =
             Rect { x: area.x + 1, y: area.y + area.height - 3, width: area.width - 2, height: 1 };
 
-        let item_count = match self.mode {
-            DisplayMode::Stack => self.stack_items.len(),
-            DisplayMode::Memory => self.memory_chunks.len(),
-            DisplayMode::CallData => self.calldata.len().div_ceil(32),
-            DisplayMode::Storage => self.storage_display_lines,
-            DisplayMode::TransientStorage => self.tstorage_display_lines,
-            DisplayMode::Variables => self.calculate_variables_display_lines(dm),
-            DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
-            DisplayMode::Breakpoints => self.breakpoints.len(),
-        };
+        let item_count = self.displayed_line_count;
 
         let status_bar = StatusBar::new()
             .current_panel("Display".to_string())
@@ -2012,6 +2009,9 @@ impl PanelTr for DisplayPanel {
         // Calculate max line width for horizontal scrolling
         self.calculate_max_line_width(dm);
 
+        // Cache the display line counts
+        self.displayed_line_count = self.calculate_context_lines(dm);
+
         // Render based on current mode
         match self.mode {
             DisplayMode::Stack => self.render_stack(frame, area, dm),
@@ -2040,11 +2040,11 @@ impl PanelTr for DisplayPanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::Up => {
-                self.move_up();
+                self.move_up(1);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Down => {
-                self.move_down(dm);
+                self.move_down(1);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Left => {
@@ -2067,15 +2067,11 @@ impl PanelTr for DisplayPanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::PageUp => {
-                for _ in 0..5 {
-                    self.move_up();
-                }
+                self.move_up(5);
                 Ok(EventResponse::Handled)
             }
             KeyCode::PageDown => {
-                for _ in 0..5 {
-                    self.move_down(dm);
-                }
+                self.move_down(5);
                 Ok(EventResponse::Handled)
             }
             KeyCode::Home => {
@@ -2083,22 +2079,7 @@ impl PanelTr for DisplayPanel {
                 Ok(EventResponse::Handled)
             }
             KeyCode::End => {
-                let max_items = match self.mode {
-                    DisplayMode::Stack => self.stack_items.len(),
-                    DisplayMode::Memory => self.memory_chunks.len(),
-                    DisplayMode::CallData => {
-                        if self.calldata.is_empty() {
-                            0
-                        } else {
-                            self.calldata.len().div_ceil(32)
-                        }
-                    }
-                    DisplayMode::Storage => self.storage_display_lines.max(1),
-                    DisplayMode::TransientStorage => self.tstorage_display_lines.max(1),
-                    DisplayMode::Variables => self.calculate_variables_display_lines(dm),
-                    DisplayMode::Expressions => self.calculate_expressions_display_lines(dm),
-                    DisplayMode::Breakpoints => self.breakpoints.len(),
-                };
+                let max_items = self.displayed_line_count;
                 self.selected_index = max_items.saturating_sub(1);
                 Ok(EventResponse::Handled)
             }
@@ -2123,23 +2104,19 @@ impl PanelTr for DisplayPanel {
     fn handle_mouse_event(
         &mut self,
         event: crossterm::event::MouseEvent,
-        data_manager: &mut DataManager,
+        _dm: &mut DataManager,
     ) -> Result<EventResponse> {
         use crossterm::event::MouseEventKind;
 
         match event.kind {
             MouseEventKind::ScrollUp => {
                 // Move up 3 times
-                for _ in 0..3 {
-                    self.move_up();
-                }
+                self.move_up(3);
                 Ok(EventResponse::Handled)
             }
             MouseEventKind::ScrollDown => {
                 // Move down 3 times
-                for _ in 0..3 {
-                    self.move_down(data_manager);
-                }
+                self.move_down(3);
                 Ok(EventResponse::Handled)
             }
             _ => Ok(EventResponse::NotHandled),
