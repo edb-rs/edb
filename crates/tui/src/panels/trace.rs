@@ -1369,6 +1369,28 @@ impl PanelTr for TracePanel {
         }
     }
 
+    fn handle_mouse_event(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
+        use crossterm::event::MouseEventKind;
+
+        match event.kind {
+            MouseEventKind::ScrollUp => {
+                let trace = data_manager.execution.get_trace();
+                self.inner.move_up(trace, 3); // Move up 3 lines per scroll
+                Ok(EventResponse::Handled)
+            }
+            MouseEventKind::ScrollDown => {
+                let trace = data_manager.execution.get_trace();
+                self.inner.move_down(trace, 3); // Move down 3 lines per scroll
+                Ok(EventResponse::Handled)
+            }
+            _ => Ok(EventResponse::NotHandled),
+        }
+    }
+
     fn on_focus(&mut self) {
         self.focused = true;
         debug!("Trace panel gained focus");

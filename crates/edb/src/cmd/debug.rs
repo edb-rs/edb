@@ -23,10 +23,11 @@ use eyre::Result;
 /// Debug a Foundry test case
 pub async fn debug_foundry_test(
     test_name: &str,
+    block: Option<u64>,
     cli: &crate::Cli,
     rpc_url: &str,
 ) -> Result<edb_engine::rpc::RpcServerHandle> {
-    tracing::info!("Starting Foundry test debug workflow");
+    tracing::info!("Starting Foundry test debug workflow at block {block:?}");
 
     // Step 1: Find the transaction hash for the test
     let tx_hash = find_test_transaction(test_name)?;

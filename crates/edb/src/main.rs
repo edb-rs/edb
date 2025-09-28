@@ -45,10 +45,6 @@ pub struct Cli {
     #[arg(long, value_enum, default_value = "tui")]
     pub ui: UiMode,
 
-    /// Block number to fork at (default: latest)
-    #[arg(long)]
-    pub block: Option<u64>,
-
     /// Port for the RPC proxy server
     #[arg(long, default_value = "8546")]
     pub proxy_port: u16,
@@ -93,6 +89,9 @@ pub enum Commands {
     Test {
         /// Test name to debug
         test_name: String,
+
+        /// Block number to fork at (default: latest)
+        block: Option<u64>,
     },
     /// Show RPC proxy provider status
     ProxyStatus,
@@ -135,9 +134,9 @@ async fn main() -> Result<()> {
             let tx_hash: TxHash = tx_hash.parse()?;
             cmd::replay_transaction(tx_hash, &cli, &effective_rpc_url).await?
         }
-        Commands::Test { test_name } => {
+        Commands::Test { test_name, block } => {
             tracing::info!("Debugging test: {}", test_name);
-            cmd::debug_foundry_test(test_name, &cli, &effective_rpc_url).await?
+            cmd::debug_foundry_test(test_name, *block, &cli, &effective_rpc_url).await?
         }
         Commands::ProxyStatus => unreachable!(), // Handled above
     };
@@ -158,6 +157,7 @@ async fn main() -> Result<()> {
     let mut child = std::process::Command::new(&tui_binary)
         .arg("--url")
         .arg(format!("http://{}", rpc_server_handle.addr))
+        .arg("--mouse")
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())

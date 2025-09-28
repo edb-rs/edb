@@ -2187,6 +2187,28 @@ impl PanelTr for TerminalPanel {
         }
     }
 
+    fn handle_mouse_event(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        _data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
+        use crossterm::event::MouseEventKind;
+
+        match event.kind {
+            MouseEventKind::ScrollUp => {
+                self.mode = TerminalMode::Vim;
+                self.vim_move_cursor_up(3); // Move up 3 lines per scroll
+                Ok(EventResponse::Handled)
+            }
+            MouseEventKind::ScrollDown => {
+                self.mode = TerminalMode::Vim;
+                self.vim_move_cursor_down(3); // Move down 3 lines per scroll
+                Ok(EventResponse::Handled)
+            }
+            _ => Ok(EventResponse::NotHandled),
+        }
+    }
+
     fn on_focus(&mut self) {
         self.focused = true;
         debug!("Terminal panel gained focus");

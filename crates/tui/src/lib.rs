@@ -70,7 +70,7 @@ impl Default for TuiConfig {
             rpc_url: "http://localhost:3030".to_string(),
             refresh_interval: Duration::from_millis(50),
             data_fetch_interval: Duration::from_millis(200),
-            enable_mouse: false,
+            enable_mouse: true,
         }
     }
 }

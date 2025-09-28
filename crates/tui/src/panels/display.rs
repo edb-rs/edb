@@ -2120,6 +2120,32 @@ impl PanelTr for DisplayPanel {
         }
     }
 
+    fn handle_mouse_event(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        data_manager: &mut DataManager,
+    ) -> Result<EventResponse> {
+        use crossterm::event::MouseEventKind;
+
+        match event.kind {
+            MouseEventKind::ScrollUp => {
+                // Move up 3 times
+                for _ in 0..3 {
+                    self.move_up();
+                }
+                Ok(EventResponse::Handled)
+            }
+            MouseEventKind::ScrollDown => {
+                // Move down 3 times
+                for _ in 0..3 {
+                    self.move_down(data_manager);
+                }
+                Ok(EventResponse::Handled)
+            }
+            _ => Ok(EventResponse::NotHandled),
+        }
+    }
+
     fn on_focus(&mut self) {
         self.focused = true;
         debug!("Display panel gained focus");

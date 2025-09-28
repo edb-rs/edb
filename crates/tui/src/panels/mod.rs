@@ -67,7 +67,7 @@ pub trait PanelTr: Debug + Send {
     }
 
     /// Handle mouse events
-    fn _handle_mouse_event(
+    fn handle_mouse_event(
         &mut self,
         event: MouseEvent,
         data_manager: &mut DataManager,
@@ -140,16 +140,16 @@ impl PanelTr for Panel {
         }
     }
 
-    fn _handle_mouse_event(
+    fn handle_mouse_event(
         &mut self,
         event: MouseEvent,
         data_manager: &mut DataManager,
     ) -> Result<EventResponse> {
         match self {
-            Self::Code(panel) => panel._handle_mouse_event(event, data_manager),
-            Self::Display(panel) => panel._handle_mouse_event(event, data_manager),
-            Self::Terminal(panel) => panel._handle_mouse_event(event, data_manager),
-            Self::Trace(panel) => panel._handle_mouse_event(event, data_manager),
+            Self::Code(panel) => panel.handle_mouse_event(event, data_manager),
+            Self::Display(panel) => panel.handle_mouse_event(event, data_manager),
+            Self::Terminal(panel) => panel.handle_mouse_event(event, data_manager),
+            Self::Trace(panel) => panel.handle_mouse_event(event, data_manager),
         }
     }
 

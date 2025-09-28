@@ -963,11 +963,81 @@ impl App {
     /// Handle mouse events
     pub async fn handle_mouse_event(
         &mut self,
-        _event: MouseEvent,
-        _data_manager: &mut DataManager,
+        event: MouseEvent,
+        data_manager: &mut DataManager,
     ) -> Result<()> {
-        // Mouse event handling can be implemented here
+        use crossterm::event::{MouseButton, MouseEventKind};
+
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Handle panel focusing on left click
+                if let Some(panel_type) = self.get_panel_at_position(event.column, event.row) {
+                    self.change_focus(panel_type);
+                }
+            }
+            MouseEventKind::ScrollUp => {
+                // Handle scroll up - move selection up
+                if let Some(panel) = self.panels.get_mut(&self.current_panel) {
+                    let _ = panel.handle_mouse_event(event, data_manager);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                // Handle scroll down - move selection down
+                if let Some(panel) = self.panels.get_mut(&self.current_panel) {
+                    let _ = panel.handle_mouse_event(event, data_manager);
+                }
+            }
+            _ => {}
+        }
         Ok(())
+    }
+
+    /// Get the panel at the given screen position (for mouse click detection)
+    fn get_panel_at_position(&self, column: u16, row: u16) -> Option<PanelType> {
+        let width = self.layout_manager.width();
+        let height = self.layout_manager.height();
+
+        // Skip the status bar (first row)
+        if row == 0 {
+            return None;
+        }
+
+        let content_row = row - 1; // Adjust for status bar
+
+        match self.layout_manager.layout_type() {
+            LayoutType::Full => {
+                // Full layout: left (Code/Trace) | right split (Display top, Terminal bottom)
+                let split_col = (width * self.vertical_split / 100).max(1);
+                let split_row = ((height - 1) * self.horizontal_split / 100).max(1);
+
+                if column < split_col {
+                    // Left side - Code or Trace based on full_left_panel
+                    Some(self.full_left_panel)
+                } else if content_row < split_row {
+                    // Right top - Display
+                    Some(PanelType::Display)
+                } else {
+                    // Right bottom - Terminal
+                    Some(PanelType::Terminal)
+                }
+            }
+            LayoutType::Compact => {
+                // Compact layout: main panel (top) | terminal (bottom)
+                let split_row = ((height - 1) * self.horizontal_split / 100).max(1);
+
+                if content_row < split_row {
+                    // Top - current panel (Trace/Code/Display cycle)
+                    Some(self.current_panel)
+                } else {
+                    // Bottom - Terminal
+                    Some(PanelType::Terminal)
+                }
+            }
+            LayoutType::Mobile => {
+                // Mobile layout: only current panel visible
+                Some(self.current_panel)
+            }
+        }
     }
 
     /// Get current panel for external access
