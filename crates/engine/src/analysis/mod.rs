@@ -47,12 +47,13 @@ pub use annotation::*;
 mod visitor;
 pub use visitor::*;
 
-mod source;
-pub use source::*;
-
 // Import necessary types for the trait definitions
 use auto_impl::auto_impl;
-use foundry_compilers::artifacts::{ast::SourceLocation, TypeName, VariableDeclaration};
+use foundry_compilers::artifacts::{
+    ast::SourceLocation, ContractKind, Mutability, StorageLocation, TypeName, VariableDeclaration,
+};
+
+use crate::SourceRange;
 
 mod macros {
     macro_rules! universal_id {
@@ -129,11 +130,15 @@ pub trait AnalysisTypes {
         Contract = Self::Contract,
     >;
     /// The type type.
-    type UserDefinedType: IUserDefinedType;
+    type UserDefinedType: IType;
     /// The scope type.
     type Scope: IScope<Variable = Self::Variable>;
     /// The step type.
-    type Step: IStep<Function = Self::Function, Contract = Self::Contract>;
+    type Step: IStep<
+        Variable = Self::Variable,
+        Function = Self::Function,
+        Contract = Self::Contract,
+    >;
     /// The function type.
     type Function: IFunction<Contract = Self::Contract>;
     /// The contract type.
@@ -158,6 +163,8 @@ impl AnalysisTypes for EDBAnalysisTypes {
 /// array index, etc.) allowing for better testability and flexibility in the analysis system.
 #[auto_impl(Box, &, Arc, Rc)]
 pub trait IVariable: Clone + Serialize + DeserializeOwned {
+    /// The user defined type type.
+    type Type: IType;
     /// The scope type.
     type Scope: IScope;
     /// The function type.
@@ -194,8 +201,23 @@ pub trait IVariable: Clone + Serialize + DeserializeOwned {
         !self.is_state_variable()
     }
 
+    /// Returns the source range of the declaration of this variable.
+    fn declaration_src(&self) -> SourceRange;
+
     /// Returns the scope that this variable is declared in.
     fn scope(&self) -> Self::Scope;
+
+    /// Returns the storage location of this variable.
+    fn storage_location(&self) -> StorageLocation;
+
+    /// Returns the mutability of this variable.
+    fn mutability(&self) -> Mutability;
+
+    #[deprecated(note = "use `variable_type`")]
+    fn type_name(&self) -> TypeName;
+
+    /// Returns the type of the variable.
+    fn variable_type(&self) -> Self::Type;
 
     /// Returns the function that this variable is declared in, if any.
     ///
@@ -211,7 +233,7 @@ pub trait IVariable: Clone + Serialize + DeserializeOwned {
 
 /// Type trait that abstracts the common methods of Solidity types and hides implementation details.
 #[auto_impl(Box, &, Arc, Rc)]
-pub trait IUserDefinedType: Clone + Serialize + DeserializeOwned {
+pub trait IType: Clone + Serialize + DeserializeOwned {
     /// The unique type identifier.
     fn id(&self) -> UTID;
 
@@ -255,6 +277,8 @@ pub trait IScope: Clone + Serialize + DeserializeOwned {
 /// Step trait that abstracts the common methods of steps and hides implementation details.
 #[auto_impl(Box, &, Arc, Rc)]
 pub trait IStep: Clone + Serialize + DeserializeOwned {
+    /// The variable type.
+    type Variable: IVariable;
     /// The function type.
     type Function: IFunction<Contract = Self::Contract>;
     /// The contract type.
@@ -263,8 +287,17 @@ pub trait IStep: Clone + Serialize + DeserializeOwned {
     /// The unique step identifier.
     fn id(&self) -> USID;
 
+    /// The variant of the step.
+    fn kind(&self) -> StepKind;
+
     /// Returns the source range of this step.
     fn src(&self) -> SourceRange;
+
+    /// Returns the variables updated in this step.
+    fn updated_variables(&self) -> Vec<Self::Variable>;
+
+    /// Returns the number of function calls in this step.
+    fn function_call_count(&self) -> usize;
 
     /// Returns the function that this step belongs to.
     fn function(&self) -> Self::Function;
@@ -297,6 +330,9 @@ pub trait IFunction: Clone + Serialize + DeserializeOwned {
 pub trait IContract: Clone + Serialize + DeserializeOwned {
     /// The unique contract identifier.
     fn id(&self) -> UCID;
+
+    /// Returns the kind of this contract, i.e., contract, interface, or library.
+    fn kind(&self) -> ContractKind;
 }
 
 /// A trait for types whose internal data can be cached.

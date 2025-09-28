@@ -34,8 +34,8 @@ use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
         visitor::VisitorAction, AnalysisTypes, Contract, ContractRef, EDBAnalysisTypes, Function,
-        FunctionRef, FunctionTypeNameRef, IContract, IFunction, IScope, IStep, IUserDefinedType,
-        IVariable, ScopeNode, Step, StepRef, StepVariant, UserDefinedType, UserDefinedTypeRef,
+        FunctionRef, FunctionTypeNameRef, IContract, IFunction, IScope, IStep, IType, IVariable,
+        ScopeNode, Step, StepRef, StepVariant, UserDefinedType, UserDefinedTypeRef,
         UserDefinedTypeVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk, UCID,
         UFID, UTID,
     },

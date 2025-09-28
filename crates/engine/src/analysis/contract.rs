@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use foundry_compilers::artifacts::ContractDefinition;
+use foundry_compilers::artifacts::{ContractDefinition, ContractKind};
 use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,10 @@ impl<'de> Deserialize<'de> for ContractRef {
 impl IContract for ContractRef {
     fn id(&self) -> UCID {
         self.inner.read().ucid
+    }
+
+    fn kind(&self) -> ContractKind {
+        self.inner.read().definition.kind.clone()
     }
 }
 

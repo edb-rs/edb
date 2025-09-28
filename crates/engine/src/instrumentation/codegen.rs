@@ -19,7 +19,7 @@ use foundry_compilers::artifacts::{ContractKind, Mutability, StorageLocation, Ty
 use semver::Version;
 
 use crate::{
-    analysis::{VariableRef, USID, UVID},
+    analysis::{IContract, IVariable, VariableRef, USID, UVID},
     contains_function_type, contains_mapping_type, contains_user_defined_type, VersionRef,
     MAGIC_SNAPSHOT_NUMBER, MAGIC_VARIABLE_UPDATE_NUMBER,
 };
@@ -42,10 +42,9 @@ pub fn generate_step_hook(version: &VersionRef, usid: USID) -> Option<String> {
 }
 
 /// Generates a variable update hook.
-pub fn generate_variable_update_hook(
+pub fn generate_variable_update_hook<VAR: IVariable>(
     version: &VersionRef,
-    uvid: UVID,
-    variable: &VariableRef,
+    variable: &VAR,
 ) -> Option<String> {
     if **version < Version::parse("0.4.24").unwrap() {
         // if the abi.encode function is not available, we skip the variable update hook
@@ -57,29 +56,26 @@ pub fn generate_variable_update_hook(
     // Variables declared as calldata are not supported too.
     // In addition, source code with 0.4.x solidity version is not supported due to the lack of the `abi.encode` function.
     // TODO: support user-defined types and arrays, as well as state variables, solidity <0.4.24, in the future
-    let declaration = variable.declaration();
-    let base_type = &declaration.type_name;
-    let is_state_variable = declaration.state_variable;
-    let is_calldata_variable = declaration.storage_location == StorageLocation::Calldata;
-    let is_storage_variable = declaration.storage_location == StorageLocation::Storage;
-    if base_type.as_ref().is_some_and(|ty| {
-        (contains_user_defined_type(ty) && **version < Version::parse("0.8.0").unwrap())
-            || contains_function_type(ty)
-            || contains_mapping_type(ty)
-            || is_state_variable
-            || is_calldata_variable
-            || is_storage_variable
-    }) {
+    let ty = &variable.type_name();
+    let is_state_variable = variable.is_state_variable();
+    let is_calldata_variable = variable.storage_location() == StorageLocation::Calldata;
+    let is_storage_variable = variable.storage_location() == StorageLocation::Storage;
+    if (contains_user_defined_type(ty) && **version < Version::parse("0.8.0").unwrap())
+        || contains_function_type(ty)
+        || contains_mapping_type(ty)
+        || is_state_variable
+        || is_calldata_variable
+        || is_storage_variable
+    {
         return None;
     }
 
-    let base_var = variable.base();
-    let base_name = &base_var.declaration().name;
+    let name = variable.name();
     Some(format!(
         "require(keccak256(abi.encode(uint256({}), uint256({}), abi.encode({}))) != bytes32(uint256(0x2333)));",
         MAGIC_VARIABLE_UPDATE_NUMBER,
-        u64::from(uvid),
-        base_name
+        u64::from(variable.id()),
+        name
     ))
 }
 
@@ -94,27 +90,21 @@ pub fn generate_variable_update_hook(
 ///
 /// # Returns
 /// * `Option<String>` - The generated view function code, or None if user-defined types are present
-pub fn generate_view_method(state_variable: &VariableRef) -> Option<String> {
-    if state_variable
-        .read()
-        .contract()
-        .map(|c| c.definition().kind != ContractKind::Contract)
-        .unwrap_or(true)
-    {
+pub fn generate_view_method<V: IVariable>(state_variable: &V) -> Option<String> {
+    if state_variable.contract().map(|c| c.kind() != ContractKind::Contract).unwrap_or(true) {
         // We only generate view methods for state variables in contracts
         return None;
     }
 
-    let declaration = state_variable.declaration();
-    if declaration.mutability == Some(Mutability::Constant) {
+    if state_variable.mutability() == Mutability::Constant {
         // We do not need to output constant state variables
         return None;
     }
 
-    let var_name = &declaration.name;
+    let var_name = state_variable.name();
 
     // Get the type information
-    let type_name = declaration.type_name.as_ref()?;
+    let type_name = &state_variable.type_name();
 
     // Check if the type contains user-defined types and get parameter info
     let (params, return_type) = analyze_type_for_view_method(type_name)?;
@@ -123,7 +113,7 @@ pub fn generate_view_method(state_variable: &VariableRef) -> Option<String> {
     let params_str = if params.is_empty() { String::new() } else { params.join(", ") };
 
     // Generate the function body
-    let body = generate_view_body(var_name, &params);
+    let body = generate_view_body(&var_name, &params);
 
     // Get UVID
     let uvid = state_variable.id();

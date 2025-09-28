@@ -39,9 +39,12 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{
-    macros::universal_id, ContractRef, FunctionRef, IStep, SourceRange, VariableRef,
-    VariableScopeRef, UFID,
+use crate::{
+    analysis::{
+        macros::universal_id, ContractRef, FunctionRef, IStep, SourceRange, VariableRef,
+        VariableScopeRef, UFID,
+    },
+    Func, IfStmt, LoopStmt, Stmt, TryStmt,
 };
 
 universal_id! {
@@ -206,6 +209,7 @@ impl StepRef {
 }
 
 impl IStep for StepRef {
+    type Variable = VariableRef;
     type Function = FunctionRef;
     type Contract = ContractRef;
 
@@ -218,6 +222,18 @@ impl IStep for StepRef {
     }
 
     fn function(&self) -> Self::Function {
+        todo!()
+    }
+
+    fn kind(&self) -> StepKind {
+        todo!()
+    }
+
+    fn function_call_count(&self) -> usize {
+        todo!()
+    }
+
+    fn updated_variables(&self) -> Vec<Self::Variable> {
         todo!()
     }
 }
@@ -313,6 +329,20 @@ pub enum StepVariant {
     DoWhileLoop(DoWhileStatement),
     /// The try external call
     Try(TryStatement),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StepKind {
+    // Function entry
+    FuncEntry(Func),
+    // Normal statements
+    Stmt(Stmt),
+    // If condition statement
+    If(IfStmt),
+    // For/While/DoWhile loop
+    Loop(LoopStmt),
+    // Try statement
+    Try(TryStmt),
 }
 
 /// Computes the left difference of `a` and `b` (`a \ b`).

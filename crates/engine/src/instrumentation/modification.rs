@@ -17,12 +17,12 @@
 use std::{collections::BTreeMap, fmt::Display, sync::Arc};
 
 use crate::{
-    analysis::{stmt_src, SourceAnalysis, VariableRef},
+    analysis::{stmt_src, AnalysisTypes, IStep, IVariable, SourceAnalysis, StepKind, VariableRef},
     find_index_of_first_statement_in_block, find_index_of_first_statement_in_block_or_statement,
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
-    USID, UVID,
+    BlkOrStmt, Stmt, USID, UVID,
 };
 
 use eyre::Result;
@@ -40,13 +40,13 @@ const RIGHT_BRACKET_PRIORITY: u8 = 0; // used for the right bracket of the block
 pub type VersionRef = Arc<Version>;
 
 /// The collections of modifications on a source file.
-pub struct SourceModifications {
+pub struct SourceModifications<VAR> {
     source_id: u32,
     /// The modifications on the source file. The key is the location of modification in the original source code.
-    modifications: BTreeMap<usize, Modification>,
+    modifications: BTreeMap<usize, Modification<VAR>>,
 }
 
-impl SourceModifications {
+impl<VAR: IVariable> SourceModifications<VAR> {
     /// Creates a new source modifications.
     pub fn new(source_id: u32) -> Self {
         Self { source_id, modifications: BTreeMap::new() }
@@ -57,7 +57,7 @@ impl SourceModifications {
     /// # Panics
     ///
     /// Panics if the modification overlaps with the previous or next modification.
-    pub fn add_modification(&mut self, modification: Modification) {
+    pub fn add_modification(&mut self, modification: Modification<VAR>) {
         assert_eq!(modification.source_id(), self.source_id, "modification source id mismatch");
 
         let loc = modification.loc();
@@ -106,7 +106,7 @@ impl SourceModifications {
     }
 
     /// Extends the modifications with the given modifications.
-    pub fn extend_modifications(&mut self, modifications: Vec<Modification>) {
+    pub fn extend_modifications(&mut self, modifications: Vec<Modification<VAR>>) {
         for modification in modifications {
             self.add_modification(modification);
         }
@@ -136,14 +136,14 @@ impl SourceModifications {
 /// The modifications on a source file.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, derive_more::From)]
-pub enum Modification {
+pub enum Modification<VAR> {
     /// An action to instrument a code in the source file.
-    Instrument(#[from] InstrumentAction),
+    Instrument(#[from] InstrumentAction<VAR>),
     /// An action to remove a code in the source file.
     Remove(#[from] RemoveAction),
 }
 
-impl Modification {
+impl<VAR: IVariable> Modification<VAR> {
     /// Gets the source ID of the modification.
     pub fn source_id(&self) -> u32 {
         match self {
@@ -183,7 +183,7 @@ impl Modification {
     }
 
     /// Gets the instrument action if it is an instrument action.
-    pub fn as_instrument_action(&self) -> &InstrumentAction {
+    pub fn as_instrument_action(&self) -> &InstrumentAction<VAR> {
         match self {
             Self::Instrument(instrument_action) => instrument_action,
             Self::Remove(_) => panic!("cannot get instrument action from remove action"),
@@ -209,7 +209,7 @@ impl Modification {
     }
 
     /// Modifies the instrument action if it is an instrument action.
-    pub fn modify_instrument_action(&mut self, f: impl FnOnce(&mut InstrumentAction)) {
+    pub fn modify_instrument_action(&mut self, f: impl FnOnce(&mut InstrumentAction<VAR>)) {
         match self {
             Self::Instrument(instrument_action) => {
                 f(instrument_action);
@@ -221,13 +221,13 @@ impl Modification {
 
 /// An action to instrument a code in the source file.
 #[derive(Debug, Clone)]
-pub struct InstrumentAction {
+pub struct InstrumentAction<VAR> {
     /// The source ID of the source file to instrument
     pub source_id: u32,
     /// The location of the code to instrument. This is the offset of the code at which the instrumented code should be inserted.
     pub loc: usize,
     /// The code to instrument
-    pub content: InstrumentContent,
+    pub content: InstrumentContent<VAR>,
     /// The priority of the instrument action. If two `InstrumentAction`s have the same `loc`, the one with higher priority will be applied first.
     pub priority: u8,
 }
@@ -253,13 +253,13 @@ impl RemoveAction {
 
 /// The content to instrument.
 #[derive(Debug, Clone)]
-pub enum InstrumentContent {
+pub enum InstrumentContent<VAR> {
     /// The code to instrument. The plain code can be directly inserted into the source code as a string.
     Plain(String),
     /// View method for state variables
     ViewMethod {
         /// The state variable being accessed.
-        variable: VariableRef,
+        variable: VAR,
     },
     /// A `before_step` hook. The debugger will pause here during step-by-step execution.
     BeforeStepHook {
@@ -274,14 +274,12 @@ pub enum InstrumentContent {
     VariableUpdateHook {
         /// Compiler Version
         version: VersionRef,
-        /// The UVID of the variable.
-        uvid: UVID,
         /// The variable that is updated.
-        variable: VariableRef,
+        variable: VAR,
     },
 }
 
-impl Display for InstrumentContent {
+impl<V: IVariable> Display for InstrumentContent<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let content = match self {
             Self::Plain(content) => content.clone(),
@@ -291,21 +289,21 @@ impl Display for InstrumentContent {
             Self::BeforeStepHook { version, usid, .. } => {
                 codegen::generate_step_hook(version, *usid).unwrap_or_default()
             }
-            Self::VariableUpdateHook { version, uvid, variable } => {
-                codegen::generate_variable_update_hook(version, *uvid, variable).unwrap_or_default()
+            Self::VariableUpdateHook { version, variable } => {
+                codegen::generate_variable_update_hook(version, variable).unwrap_or_default()
             }
         };
         write!(f, "{content}")
     }
 }
 
-impl SourceModifications {
+impl<VAR: IVariable> SourceModifications<VAR> {
     /// Collects the modifications on the source code given the analysis result.
-    pub fn collect_modifications(
+    pub fn collect_modifications<T: AnalysisTypes<Variable = VAR>>(
         &mut self,
         compiler_version: VersionRef,
         source: &str,
-        analysis: &SourceAnalysis,
+        analysis: &SourceAnalysis<T>,
     ) -> Result<()> {
         // Collect the modifications to generate view methods for state variables.
         self.collect_view_method_modifications(analysis);
@@ -323,11 +321,14 @@ impl SourceModifications {
     }
 
     /// Collects the modifications to generate view methods for state variables.
-    fn collect_view_method_modifications(&mut self, analysis: &SourceAnalysis) {
+    fn collect_view_method_modifications<T: AnalysisTypes<Variable = VAR>>(
+        &mut self,
+        analysis: &SourceAnalysis<T>,
+    ) {
         let source_id = self.source_id;
         for state_variable in &analysis.state_variables {
-            let src = &state_variable.declaration().src;
-            let loc = src.start.unwrap_or(0) + src.length.unwrap_or(0) + 1; // XXX (ZZ): we may need to check last char
+            let src = state_variable.declaration_src();
+            let loc = src.next_loc() + 1; // XXX (ZZ): we may need to check last char
             let instrument_action = InstrumentAction {
                 source_id,
                 loc,
@@ -339,14 +340,14 @@ impl SourceModifications {
     }
 
     /// Collects the modifications to convert a statement to a block. Some control flow structures, such as if/for/while/try/catch/etc., may have their body as a single statement. We need to convert them to a block.
-    fn collect_statement_to_block_modifications(
+    fn collect_statement_to_block_modifications<T: AnalysisTypes<Variable = VAR>>(
         &mut self,
         source: &str,
-        analysis: &SourceAnalysis,
+        analysis: &SourceAnalysis<T>,
     ) -> Result<()> {
         let source_id = self.source_id;
 
-        let left_bracket = |loc: usize| -> InstrumentAction {
+        let left_bracket = |loc: usize| -> InstrumentAction<VAR> {
             InstrumentAction {
                 source_id,
                 loc,
@@ -354,7 +355,7 @@ impl SourceModifications {
                 priority: LEFT_BRACKET_PRIORITY,
             }
         };
-        let right_bracket = |loc: usize| -> InstrumentAction {
+        let right_bracket = |loc: usize| -> InstrumentAction<VAR> {
             InstrumentAction {
                 source_id,
                 loc,
@@ -362,20 +363,14 @@ impl SourceModifications {
                 priority: RIGHT_BRACKET_PRIORITY,
             }
         };
-        let wrap_statement_as_block = |stmt: &Statement| -> Vec<Modification> {
-            let stmt_src = stmt_src(stmt);
+        let wrap_statement_as_block = |stmt: &Stmt| -> Vec<Modification<VAR>> {
+            let stmt_src = stmt.src();
             // The left bracket is inserted just before the statement.
-            let start_pos = stmt_src.start.expect_with_context(
-                "statement start location not found",
-                source_id,
-                source,
-                &stmt_src,
-            );
+            let start_pos = stmt_src.start;
             let left_bracket = left_bracket(start_pos);
 
             // The right bracket is inserted just after the statement.
-            let end_pos =
-                find_next_index_of_statement(source, stmt).expect("statement end not found");
+            let end_pos = stmt_src.next_loc();
             let right_bracket = right_bracket(end_pos);
 
             vec![left_bracket.into(), right_bracket.into()]
@@ -392,32 +387,25 @@ impl SourceModifications {
         }
 
         for step in &analysis.steps {
-            match &step.variant() {
-                crate::analysis::StepVariant::IfCondition(if_stmt) => {
+            match &step.kind() {
+                StepKind::If(if_stmt) => {
                     // modify the true body if needed
-                    if let Some(stmt) = indeed_statement(&if_stmt.true_body) {
+                    if let BlkOrStmt::Stmt(stmt) = &if_stmt.true_branch {
                         let modifications = wrap_statement_as_block(stmt);
                         self.extend_modifications(modifications);
                     }
 
                     // modify the false body if needed
-                    if let Some(stmt) =
-                        if_stmt.false_body.as_ref().and_then(|body| indeed_statement(body))
-                    {
-                        let modifications = wrap_statement_as_block(stmt);
-                        self.extend_modifications(modifications);
+                    if let Some(stmt) = if_stmt.false_branch.as_ref() {
+                        if let BlkOrStmt::Stmt(stmt) = stmt {
+                            let modifications = wrap_statement_as_block(stmt);
+                            self.extend_modifications(modifications);
+                        }
                     }
                 }
-                crate::analysis::StepVariant::ForLoop(for_stmt) => {
+                StepKind::Loop(loop_stmt) => {
                     // modify the body if needed
-                    if let Some(stmt) = indeed_statement(&for_stmt.body) {
-                        let modifications = wrap_statement_as_block(stmt);
-                        self.extend_modifications(modifications);
-                    }
-                }
-                crate::analysis::StepVariant::WhileLoop(while_stmt) => {
-                    // modify the body if needed
-                    if let Some(stmt) = indeed_statement(&while_stmt.body) {
+                    if let BlkOrStmt::Stmt(stmt) = &loop_stmt.body {
                         let modifications = wrap_statement_as_block(stmt);
                         self.extend_modifications(modifications);
                     }
@@ -428,84 +416,54 @@ impl SourceModifications {
         Ok(())
     }
 
-    fn collect_before_step_hook_modifications(
+    fn collect_before_step_hook_modifications<T: AnalysisTypes<Variable = VAR>>(
         &mut self,
         compiler_version: VersionRef,
         source: &str,
-        analysis: &SourceAnalysis,
+        analysis: &SourceAnalysis<T>,
     ) -> Result<()> {
         let source_id = self.source_id;
         for step in &analysis.steps {
-            let usid = step.usid();
-            let variant = step.variant();
-            let function_calls = step.function_calls();
-            let (loc, priority) = match variant {
-                crate::analysis::StepVariant::FunctionEntry(function_definition) => {
+            let usid = step.id();
+            let kind = step.kind();
+            let function_calls = step.function_call_count();
+            let (loc, priority) = match kind {
+                StepKind::FuncEntry(func) => {
                     // the before step hook should be instrumented before the first statement of the function
-                    let Some(body) = &function_definition.body else {
+                    let Some(body) = &func.body else {
                         // skip the step if the function has no body
                         continue;
                     };
                     // the first char of function body is the '{', so we insert after that.
-                    let loc = find_index_of_first_statement_in_block(body)
-                        .expect("function body start location not found");
+                    let loc = body.first_stmt_loc();
                     (loc, FUNCTION_ENTRY_PRIORITY)
                 }
-                crate::analysis::StepVariant::ModifierEntry(modifier_definition) => {
-                    // the before step hook should be instrumented before the first statement of the modifier
-                    let Some(body) = &modifier_definition.body else {
-                        // skip the step if the modifier has no body
-                        continue;
-                    };
-                    let loc = find_index_of_first_statement_in_block(body)
-                        .expect("modifier body start location not found");
-                    (loc, FUNCTION_ENTRY_PRIORITY)
-                }
-                crate::analysis::StepVariant::Statement(statement) => {
+                StepKind::Stmt(stmt) => {
                     // the before step hook should be instrumented before the statement
-                    let loc =
-                        stmt_src(statement).start.expect("statement start location not found");
+                    let loc = stmt.src().start;
                     (loc, BEFORE_STEP_PRIORITY)
                 }
-                crate::analysis::StepVariant::Statements(statements) => {
-                    // the before step hook should be instrumented before the first statement
-                    let loc =
-                        stmt_src(&statements[0]).start.expect("statement start location not found");
-                    (loc, BEFORE_STEP_PRIORITY)
-                }
-                crate::analysis::StepVariant::IfCondition(if_statement) => {
+                StepKind::If(if_stmt) => {
                     // the before step hook should be instrumented before the if statement
-                    let loc =
-                        if_statement.src.start.expect("if statement start location not found");
+                    let loc = if_stmt.src.start;
                     (loc, BEFORE_STEP_PRIORITY)
                 }
-                crate::analysis::StepVariant::ForLoop(for_statement) => {
-                    // the before step hook should be instrumented before the for statement
-                    let loc =
-                        for_statement.src.start.expect("for statement start location not found");
+                StepKind::Loop(loop_stmt) => {
+                    let loc = if loop_stmt.is_do_while {
+                        // the before step hook should be instrumented after the last statement of the do-while statement
+                        match &loop_stmt.body {
+                            BlkOrStmt::Blk(blk) => blk.last_stmt_next_loc(),
+                            BlkOrStmt::Stmt(stmt) => stmt.src().next_loc(),
+                        }
+                    } else {
+                        // the before step hook should be instrumented before the for statement
+                        loop_stmt.src.start
+                    };
                     (loc, BEFORE_STEP_PRIORITY)
                 }
-                crate::analysis::StepVariant::WhileLoop(while_statement) => {
-                    // the before step hook should be instrumented before the while statement
-                    let loc = while_statement
-                        .src
-                        .start
-                        .expect("while statement start location not found");
-                    (loc, BEFORE_STEP_PRIORITY)
-                }
-                crate::analysis::StepVariant::DoWhileLoop(do_while_statement) => {
-                    // the before step hook should be instrumented after the last statement of the do-while statement
-                    let loc = find_next_index_of_last_statement_in_block(
-                        source,
-                        &do_while_statement.body,
-                    )
-                    .expect("do-while statement last statement location not found");
-                    (loc, BEFORE_STEP_PRIORITY)
-                }
-                crate::analysis::StepVariant::Try(try_statement) => {
+                StepKind::Try(try_stmt) => {
                     // the before step hook should be instrumented before the try statement
-                    let loc =
-                        try_statement.src.start.expect("try statement start location not found");
+                    let loc = try_stmt.src.start;
                     (loc, BEFORE_STEP_PRIORITY)
                 }
             };
@@ -525,123 +483,90 @@ impl SourceModifications {
         Ok(())
     }
 
-    fn collect_variable_update_hook_modifications(
+    fn collect_variable_update_hook_modifications<T: AnalysisTypes<Variable = VAR>>(
         &mut self,
         compiler_version: VersionRef,
         source: &str,
-        analysis: &SourceAnalysis,
+        analysis: &SourceAnalysis<T>,
     ) -> Result<()> {
         let source_id = self.source_id;
         for step in &analysis.steps {
-            let updated_variables = &step.read().updated_variables;
-            let locs: Vec<usize> = match step.variant() {
-                crate::analysis::StepVariant::FunctionEntry(function_definition) => {
+            let updated_variables = step.updated_variables();
+            let locs: Vec<usize> = match step.kind() {
+                StepKind::FuncEntry(func) => {
                     // the variable update hook should be instrumented before the first statement of the function
-                    let Some(body) = &function_definition.body else {
+                    let Some(body) = &func.body else {
                         // skip the step if the function has no body
                         continue;
                     };
                     // the first char of function body is the '{', so we insert after that.
-                    vec![body.src.start.expect("function body start location not found") + 1]
+                    vec![body.src.start + 1]
                 }
-                crate::analysis::StepVariant::ModifierEntry(modifier_definition) => {
-                    // the variable update hook should be instrumented before the first statement of the modifier
-                    let Some(body) = &modifier_definition.body else {
-                        // skip the step if the modifier has no body
-                        continue;
-                    };
-                    vec![body.src.start.expect("modifier body start location not found") + 1]
-                }
-                crate::analysis::StepVariant::Statement(statement) => {
-                    match statement {
-                        Statement::Block(_)
-                        | Statement::UncheckedBlock(_)
-                        | Statement::DoWhileStatement(_)
-                        | Statement::ForStatement(_)
-                        | Statement::IfStatement(_)
-                        | Statement::TryStatement(_)
-                        | Statement::WhileStatement(_) => {
+                StepKind::Stmt(stmt) => {
+                    match stmt {
+                        Stmt::If(_) | Stmt::Loop(_) | Stmt::Try(_) => {
                             unreachable!("should not be a statement step")
                         }
-                        Statement::Break(_)
-                        | Statement::Continue(_)
-                        | Statement::PlaceholderStatement(_)
-                        | Statement::Return(_)
-                        | Statement::RevertStatement(_) => {
+                        Stmt::Jump(_) => {
                             // these statement does not have any variable update, so we skip it
                             vec![]
                         }
-                        Statement::EmitStatement(_)
-                        | Statement::ExpressionStatement(_)
-                        | Statement::InlineAssembly(_)
-                        | Statement::VariableDeclarationStatement(_) => {
+                        Stmt::Declaration(stmt) => {
+                            // the variable update hook should be instrumented after the declaration statement
+                            vec![stmt.src.next_loc()]
+                        }
+                        Stmt::Expression(stmt) => {
+                            // the variable update hook should be instrumented after the expression statement
+                            vec![stmt.src.next_loc()]
+                        }
+                        Stmt::InlineAssembly(stmt) => {
+                            // the variable update hook should be instrumented after the inline assembly statement
+                            vec![stmt.src.next_loc()]
+                        }
+                        Stmt::Emit(stmt) => {
                             // the variable update hook should be instrumented after the emit statement
-                            find_next_index_of_statement(source, statement)
-                                .map(|loc| vec![loc])
-                                .unwrap_or_default()
+                            vec![stmt.src.next_loc()]
                         }
                     }
                 }
-                crate::analysis::StepVariant::Statements(statements) => {
-                    // the variable update hook should be instrumented after the statments
-                    statements
-                        .last()
-                        .and_then(|stmt| {
-                            find_next_index_of_statement(source, stmt).map(|loc| vec![loc])
-                        })
-                        .unwrap_or_default()
-                }
-                crate::analysis::StepVariant::IfCondition(if_statement) => {
+                StepKind::If(if_stmt) => {
                     // the variable update hook should be instrumented before the first statement of both the true and false bodies
-                    let mut locs = find_index_of_first_statement_in_block_or_statement(
-                        &if_statement.true_body,
-                    )
-                    .map(|loc| vec![loc])
-                    .unwrap_or_default();
-                    if let Some(false_loc) = if_statement.false_body.as_ref().and_then(|body| {
-                        find_index_of_first_statement_in_block_or_statement(body)
-                            .map(|loc| vec![loc])
-                    }) {
-                        locs.extend(false_loc.into_iter());
+                    let mut locs = vec![];
+
+                    // true branch
+                    let loc = if_stmt.true_branch.first_stmt_loc();
+                    locs.push(loc);
+
+                    // false branch
+                    if let Some(false_branch) = &if_stmt.false_branch {
+                        let loc = false_branch.first_stmt_loc();
+                        locs.push(loc);
                     }
+
                     locs
                 }
-                crate::analysis::StepVariant::ForLoop(for_statement) => {
-                    // the variable update hook should be instrumented before the first statement of the for statement
-                    find_index_of_first_statement_in_block_or_statement(&for_statement.body)
-                        .map(|loc| vec![loc])
-                        .unwrap_or_default()
+                StepKind::Loop(loop_stmt) => {
+                    let loc = if loop_stmt.is_do_while {
+                        // the variable update hook should be instrumented after the do-while statement
+                        loop_stmt.src.next_loc()
+                    } else {
+                        // the variable update hook should be instrumented before the first statement of the loop body
+                        loop_stmt.body.first_stmt_loc()
+                    };
+                    vec![loc]
                 }
-                crate::analysis::StepVariant::WhileLoop(while_statement) => {
-                    // the variable update hook should be instrumented before the first statement of the while statement
-                    find_index_of_first_statement_in_block_or_statement(&while_statement.body)
-                        .map(|loc| vec![loc])
-                        .unwrap_or_default()
-                }
-                crate::analysis::StepVariant::DoWhileLoop(do_while_statement) => {
-                    // the variable update hook should be instrumented before the do-while statement
-                    find_next_index_of_source_location(&do_while_statement.src)
-                        .map(|loc| vec![loc])
-                        .unwrap_or_default()
-                }
-                crate::analysis::StepVariant::Try(try_statement) => {
+                StepKind::Try(try_stmt) => {
                     // the variable update hook should be instrumented before the first statement in all catch blocks
-                    try_statement
-                        .clauses
-                        .iter()
-                        .filter_map(|clause| find_index_of_first_statement_in_block(&clause.block))
-                        .collect()
+                    try_stmt.clauses.iter().map(|clause| clause.first_stmt_loc()).collect()
                 }
             };
             for loc in locs {
-                for updated_variable in updated_variables {
-                    let uvid = updated_variable.id();
+                for updated_variable in &updated_variables {
                     let instrument_action = InstrumentAction {
                         source_id,
                         loc,
                         content: InstrumentContent::VariableUpdateHook {
                             version: compiler_version.clone(),
-                            uvid,
                             variable: updated_variable.clone(),
                         },
                         priority: VARIABLE_UPDATE_PRIORITY,

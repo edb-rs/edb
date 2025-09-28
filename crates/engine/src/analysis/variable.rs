@@ -32,14 +32,18 @@ use delegate::delegate;
 use derive_more::From;
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Block, ContractDefinition, Expression, ForStatement, FunctionDefinition,
-    ModifierDefinition, SourceUnit, TypeName, UncheckedBlock, VariableDeclaration,
+    ModifierDefinition, Mutability, SourceUnit, StorageLocation, TypeName, UncheckedBlock,
+    VariableDeclaration,
 };
 use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::analysis::{macros::universal_id, ContractRef, FunctionRef, IScope, IVariable};
+use crate::analysis::{
+    macros::universal_id, ContractRef, FunctionRef, IScope, IVariable, SourceRange,
+    UserDefinedTypeRef,
+};
 
 // use crate::{
 //     // Visitor, Walk
@@ -172,6 +176,8 @@ impl<'de> Deserialize<'de> for VariableRef {
 }
 
 impl IVariable for VariableRef {
+    type Type = UserDefinedTypeRef;
+
     type Scope = VariableScopeRef;
 
     type Function = FunctionRef;
@@ -211,6 +217,26 @@ impl IVariable for VariableRef {
     }
 
     fn contract(&self) -> Option<Self::Contract> {
+        todo!()
+    }
+
+    fn mutability(&self) -> Mutability {
+        todo!()
+    }
+
+    fn type_name(&self) -> TypeName {
+        todo!()
+    }
+
+    fn variable_type(&self) -> Self::Type {
+        todo!()
+    }
+
+    fn declaration_src(&self) -> SourceRange {
+        todo!()
+    }
+
+    fn storage_location(&self) -> StorageLocation {
         todo!()
     }
 }

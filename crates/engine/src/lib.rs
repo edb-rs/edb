@@ -95,6 +95,9 @@
 pub mod analysis;
 use analysis::*;
 
+pub mod ast;
+pub use ast::*;
+
 pub mod core;
 pub use core::*;
 
