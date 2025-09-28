@@ -2094,6 +2094,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-sol-types",
  "alloy-transport-http",
+ "auto_impl",
  "axum",
  "delegate",
  "derive_more",

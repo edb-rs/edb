@@ -65,8 +65,8 @@ use tracing::debug;
 
 use crate::{
     analysis::{
-        AnalysisError, Analyzer, ContractRef, FunctionRef, SourceAnalysis, StepRef,
-        UserDefinedTypeRef, UCID, UFID, UTID,
+        AnalysisError, Analyzer, ContractRef, EDBAnalysisTypes, FunctionRef, SourceAnalysis,
+        StepRef, UserDefinedTypeRef, UCID, UFID, UTID,
     },
     ASTPruner, Artifact, VariableRef, USID, UVID,
 };
@@ -102,7 +102,7 @@ use crate::{
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     /// Maps source index to their corresponding source analysis results
-    pub sources: HashMap<u32, SourceAnalysis>,
+    pub sources: HashMap<u32, SourceAnalysis<EDBAnalysisTypes>>,
     /// Maps unique contract identifiers to their contract references
     pub ucid_to_contract: HashMap<UCID, ContractRef>,
     /// Maps unique function identifiers to their function references
@@ -166,7 +166,7 @@ pub struct AnalysisResult {
 /// This function can return the following errors:
 /// - `AnalysisError::StepPartitionError`: When step partitioning fails
 pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
-    let source_results: Vec<SourceAnalysis> = artifact
+    let source_results: Vec<SourceAnalysis<EDBAnalysisTypes>> = artifact
         .output
         .sources
         .par_iter()

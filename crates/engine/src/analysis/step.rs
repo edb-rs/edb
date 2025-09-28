@@ -39,7 +39,10 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{macros::universal_id, VariableRef, VariableScopeRef, UFID};
+use crate::analysis::{
+    macros::universal_id, ContractRef, FunctionRef, IStep, SourceRange, VariableRef,
+    VariableScopeRef, UFID,
+};
 
 universal_id! {
     /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
@@ -199,6 +202,23 @@ impl StepRef {
     delegate! {
         to self.inner.read() {
         }
+    }
+}
+
+impl IStep for StepRef {
+    type Function = FunctionRef;
+    type Contract = ContractRef;
+
+    fn id(&self) -> USID {
+        todo!()
+    }
+
+    fn src(&self) -> SourceRange {
+        todo!()
+    }
+
+    fn function(&self) -> Self::Function {
+        todo!()
     }
 }
 

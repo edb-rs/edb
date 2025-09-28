@@ -39,7 +39,7 @@ use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::analysis::{macros::universal_id, ContractRef, FunctionRef};
+use crate::analysis::{macros::universal_id, ContractRef, FunctionRef, IScope, IVariable};
 
 // use crate::{
 //     // Visitor, Walk
@@ -168,6 +168,50 @@ impl<'de> Deserialize<'de> for VariableRef {
         // Deserialize as Variable and wrap it in VariableRef
         let variable = Variable::deserialize(deserializer)?;
         Ok(Self::new(variable))
+    }
+}
+
+impl IVariable for VariableRef {
+    type Scope = VariableScopeRef;
+
+    type Function = FunctionRef;
+
+    type Contract = ContractRef;
+
+    fn id(&self) -> UVID {
+        todo!()
+    }
+
+    fn unnamed(&self) -> bool {
+        todo!()
+    }
+
+    fn name(&self) -> String {
+        todo!()
+    }
+
+    fn is_param(&self) -> bool {
+        todo!()
+    }
+
+    fn is_return(&self) -> bool {
+        todo!()
+    }
+
+    fn is_state_variable(&self) -> bool {
+        todo!()
+    }
+
+    fn scope(&self) -> Self::Scope {
+        todo!()
+    }
+
+    fn function(&self) -> Option<Self::Function> {
+        todo!()
+    }
+
+    fn contract(&self) -> Option<Self::Contract> {
+        todo!()
     }
 }
 
@@ -417,6 +461,34 @@ impl<'de> Deserialize<'de> for VariableScopeRef {
         // Deserialize as VariableScope and wrap it in VariableScopeRef
         let scope = VariableScope::deserialize(deserializer)?;
         Ok(Self::new(scope))
+    }
+}
+
+impl IScope for VariableScopeRef {
+    type Variable = VariableRef;
+
+    fn ast_id(&self) -> usize {
+        self.inner.read().ast_id()
+    }
+
+    fn src(&self) -> super::SourceRange {
+        todo!()
+    }
+
+    fn parent(&self) -> Option<&Self> {
+        todo!()
+    }
+
+    fn children(&self) -> Vec<&Self> {
+        todo!()
+    }
+
+    fn add_child(&mut self, child: &Self) {
+        todo!()
+    }
+
+    fn declared_variables(&self) -> Vec<Self::Variable> {
+        todo!()
     }
 }
 /// Represents the scope and visibility information for a variable.

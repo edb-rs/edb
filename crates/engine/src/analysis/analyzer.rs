@@ -33,8 +33,9 @@ use tracing::{debug, error};
 use crate::{
     // new_usid, AnnotationsToChange,
     analysis::{
-        visitor::VisitorAction, Contract, ContractRef, Function, FunctionRef, FunctionTypeNameRef,
-        ScopeNode, Step, StepRef, StepVariant, UserDefinedType, UserDefinedTypeRef,
+        visitor::VisitorAction, AnalysisTypes, Contract, ContractRef, EDBAnalysisTypes, Function,
+        FunctionRef, FunctionTypeNameRef, IContract, IFunction, IScope, IStep, IUserDefinedType,
+        IVariable, ScopeNode, Step, StepRef, StepVariant, UserDefinedType, UserDefinedTypeRef,
         UserDefinedTypeVariant, Variable, VariableScope, VariableScopeRef, Visitor, Walk, UCID,
         UFID, UTID,
     },
@@ -61,7 +62,7 @@ use crate::{
 /// - `unit`: Processed source unit ready for analysis
 /// - `steps`: List of analyzed execution steps in this file
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourceAnalysis {
+pub struct SourceAnalysis<T: AnalysisTypes> {
     /// Unique identifier for this source file
     pub id: u32,
     /// File system path to the source file
@@ -71,28 +72,26 @@ pub struct SourceAnalysis {
     /// Version requirement for the source file. The source file may not declare the solidity version.
     pub version_req: Option<VersionReq>,
     /// Global variable scope of the source file
-    pub global_scope: VariableScopeRef,
+    pub global_scope: T::Scope,
     /// List of analyzed execution steps in this file
-    pub steps: Vec<StepRef>,
+    pub steps: Vec<T::Step>,
     /// State variables that should be made public
-    pub private_state_variables: Vec<VariableRef>,
+    pub private_state_variables: Vec<T::Variable>,
     /// List of all contracts in this file.
-    pub contracts: Vec<ContractRef>,
+    pub contracts: Vec<T::Contract>,
     /// List of all functions in this file.
-    pub functions: Vec<FunctionRef>,
+    pub functions: Vec<T::Function>,
     /// List of all state variables in this file.
-    pub state_variables: Vec<VariableRef>,
+    pub state_variables: Vec<T::Variable>,
     /// Functions that should be made public
-    pub private_functions: Vec<FunctionRef>,
+    pub private_functions: Vec<T::Function>,
     /// Functions that should be made mutable (i.e., neither pure nor view)
-    pub immutable_functions: Vec<FunctionRef>,
-    /// Variables that are defined as function types
-    pub function_types: Vec<FunctionTypeNameRef>,
+    pub immutable_functions: Vec<T::Function>,
     /// User defined types defined in this file.
-    pub user_defined_types: Vec<UserDefinedTypeRef>,
+    pub user_defined_types: Vec<T::UserDefinedType>,
 }
 
-impl SourceAnalysis {
+impl<T: AnalysisTypes> SourceAnalysis<T> {
     /// Returns a mapping of all variables in this source file by their UVID.
     ///
     /// This method traverses the entire variable scope tree and collects all
@@ -101,17 +100,20 @@ impl SourceAnalysis {
     /// # Returns
     ///
     /// A HashMap mapping UVIDs to their corresponding VariableRef instances.
-    pub fn variable_table(&self) -> HashMap<UVID, VariableRef> {
+    pub fn variable_table(&self) -> HashMap<UVID, T::Variable> {
         let mut table = HashMap::default();
-        fn walk_scope(scope: &VariableScopeRef, table: &mut HashMap<UVID, VariableRef>) {
-            for variable in scope.variables() {
-                table.insert(variable.read().id(), variable.clone());
+        fn walk_scope<TT: AnalysisTypes>(
+            scope: &TT::Scope,
+            table: &mut HashMap<UVID, TT::Variable>,
+        ) {
+            for variable in scope.declared_variables() {
+                table.insert(variable.id(), variable.clone());
             }
             for child in scope.children() {
-                walk_scope(child, table);
+                walk_scope::<TT>(child, table);
             }
         }
-        walk_scope(&self.global_scope, &mut table);
+        walk_scope::<T>(&self.global_scope, &mut table);
         table
     }
 
@@ -123,37 +125,37 @@ impl SourceAnalysis {
     /// # Returns
     ///
     /// A HashMap mapping USIDs to their corresponding StepRef instances.
-    pub fn step_table(&self) -> HashMap<USID, StepRef> {
+    pub fn step_table(&self) -> HashMap<USID, T::Step> {
         let mut table = HashMap::default();
         for step in &self.steps {
-            table.insert(step.read().usid, step.clone());
+            table.insert(step.id(), step.clone());
         }
         table
     }
 
     /// Returns a mapping of all functions in this source file by their UFID.
-    pub fn function_table(&self) -> HashMap<UFID, FunctionRef> {
+    pub fn function_table(&self) -> HashMap<UFID, T::Function> {
         let mut table = HashMap::default();
         for function in &self.functions {
-            table.insert(function.read().ufid, function.clone());
+            table.insert(function.id(), function.clone());
         }
         table
     }
 
     /// Returns a mapping of all contracts in this source file by their UCID.
-    pub fn contract_table(&self) -> HashMap<UCID, ContractRef> {
+    pub fn contract_table(&self) -> HashMap<UCID, T::Contract> {
         let mut table = HashMap::default();
         for contract in &self.contracts {
-            table.insert(contract.read().ucid, contract.clone());
+            table.insert(contract.id(), contract.clone());
         }
         table
     }
 
     /// Returns a mapping of all user defined types in this source file by their UTID.
-    pub fn user_defined_type_table(&self) -> HashMap<UTID, UserDefinedTypeRef> {
+    pub fn user_defined_type_table(&self) -> HashMap<UTID, T::UserDefinedType> {
         let mut table = HashMap::default();
         for user_defined_type in &self.user_defined_types {
-            table.insert(user_defined_type.read().utid, user_defined_type.clone());
+            table.insert(user_defined_type.id(), user_defined_type.clone());
         }
         table
     }
@@ -163,279 +165,12 @@ impl SourceAnalysis {
     /// # Returns
     ///
     /// A HashMap mapping AST IDs to their corresponding UserDefinedTypeRef instances.
-    pub fn user_defined_types(&self) -> HashMap<usize, UserDefinedTypeRef> {
+    pub fn user_defined_types(&self) -> HashMap<usize, T::UserDefinedType> {
         let mut table = HashMap::default();
         for user_defined_type in &self.user_defined_types {
             table.insert(user_defined_type.ast_id(), user_defined_type.clone());
         }
         table
-    }
-
-    /// Prints the analysis results in a human-readable format.
-    ///
-    /// This method displays a comprehensive overview of the source analysis,
-    /// including file information, variable scopes, execution steps, and
-    /// recommendations for code improvements.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use edb_engine::analysis::{Analyzer, SourceAnalysis};
-    /// use foundry_compilers::artifacts::Artifact;
-    ///
-    /// // Assuming you have a compiled artifact
-    /// let artifact: Artifact = /* your compiled artifact */;
-    ///
-    /// // Analyze the artifact
-    /// let analyses = Analyzer::analyze(&artifact).unwrap();
-    ///
-    /// // Print the analysis results for each source file
-    /// for analysis in analyses {
-    ///     analysis.pretty_display();
-    /// }
-    /// ```
-    ///
-    /// This will output something like:
-    /// ```
-    /// === Source Analysis Report ===
-    /// File ID: 1
-    /// Path: contract.sol
-    /// Source Content Length: 1234 characters
-    ///
-    /// === Variable Scopes ===
-    /// Scope(SourceUnit): {}
-    ///   Scope(ContractDefinition): {balance, owner}
-    ///     Scope(Block): {amount}
-    ///
-    /// === Execution Steps (5 total) ===
-    /// Step 1 (USID: 0):
-    ///   Type: Variable Declaration
-    ///   Location: 45:12
-    ///   Source: uint256 balance = 0;
-    ///   Declared variables: balance (state): uint256 (Private)
-    ///
-    /// Step 2 (USID: 1):
-    ///   Type: Expression
-    ///   Location: 50:15
-    ///   Source: transfer(amount);
-    ///   Function calls: transfer(1 args)
-    ///
-    /// === Recommendations ===
-    /// Private state variables that should be made public:
-    ///   - balance (visibility: Private)
-    /// === End Report ===
-    /// ```
-    pub fn pretty_display(&self, sources: &BTreeMap<u32, Source>) {
-        println!("=== Source Analysis Report ===");
-        println!("File ID: {}", self.id);
-        println!("Path: {}", self.path.display());
-        println!();
-
-        // Display variable scope information
-        println!("=== Variable Scopes ===");
-        println!("{}", self.global_scope.pretty_display());
-        println!();
-
-        // Display execution steps
-        println!("=== Execution Steps ({} total) ===", self.steps.len());
-        for (i, step) in self.steps.iter().enumerate() {
-            println!("Step {} (USID: {}):", i + 1, step.read().usid);
-            println!("  Type: {}", self.step_variant_name(&step.read().variant));
-            println!(
-                "  Location: {}:{}",
-                step.read().src.start.map(|s| s.to_string()).unwrap_or_else(|| "?".to_string()),
-                step.read().src.length.map(|l| l.to_string()).unwrap_or_else(|| "?".to_string())
-            );
-
-            // Display source code
-            if let Some(source_code) = self.extract_source_code(sources, &step.read().src) {
-                println!("  Source: {}", source_code.trim());
-            }
-
-            // Display function calls
-            if !step.read().function_calls.is_empty() {
-                println!(
-                    "  Function calls: {}",
-                    self.format_function_calls(&step.read().function_calls)
-                );
-            }
-
-            // Display declared variables
-            if !step.read().declared_variables.is_empty() {
-                println!(
-                    "  Declared variables: {}",
-                    self.format_declared_variables(
-                        step.read()
-                            .declared_variables
-                            .iter()
-                            .map(|v| v.declaration().clone())
-                            .collect::<Vec<_>>()
-                            .as_slice()
-                    )
-                );
-            }
-
-            // Display accessible variables
-            if !step.read().accessible_variables.is_empty() {
-                println!(
-                    "  Accessible variables: {}",
-                    self.format_updated_variables(&step.read().accessible_variables)
-                );
-            }
-
-            // Display updated variables
-            if !step.read().updated_variables.is_empty() {
-                println!(
-                    "  Updated variables: {}",
-                    self.format_updated_variables(&step.read().updated_variables)
-                );
-            }
-            println!();
-        }
-
-        // Display recommendations
-        self.display_recommendations();
-        println!("=== End Report ===");
-    }
-
-    /// Returns a human-readable name for the step variant.
-    fn step_variant_name(&self, variant: &StepVariant) -> String {
-        match variant {
-            StepVariant::FunctionEntry(_) => "Function Entry".to_string(),
-            StepVariant::ModifierEntry(_) => "Modifier Entry".to_string(),
-            StepVariant::Statement(stmt) => self.statement_name(stmt),
-            StepVariant::Statements(_) => "Multiple Statements".to_string(),
-            StepVariant::IfCondition(_) => "If Condition".to_string(),
-            StepVariant::ForLoop(_) => "For Loop".to_string(),
-            StepVariant::WhileLoop(_) => "While Loop".to_string(),
-            StepVariant::DoWhileLoop(_) => "Do-While Loop".to_string(),
-            StepVariant::Try(_) => "Try Statement".to_string(),
-        }
-    }
-
-    /// Returns a human-readable name for a statement.
-    fn statement_name(&self, stmt: &Statement) -> String {
-        match stmt {
-            Statement::Block(_) => "Block".to_string(),
-            Statement::Break(_) => "Break".to_string(),
-            Statement::Continue(_) => "Continue".to_string(),
-            Statement::DoWhileStatement(_) => "Do-While".to_string(),
-            Statement::EmitStatement(_) => "Emit".to_string(),
-            Statement::ExpressionStatement(_) => "Expression".to_string(),
-            Statement::ForStatement(_) => "For".to_string(),
-            Statement::IfStatement(_) => "If".to_string(),
-            Statement::InlineAssembly(_) => "Inline Assembly".to_string(),
-            Statement::PlaceholderStatement(_) => "Placeholder".to_string(),
-            Statement::Return(_) => "Return".to_string(),
-            Statement::RevertStatement(_) => "Revert".to_string(),
-            Statement::TryStatement(_) => "Try".to_string(),
-            Statement::UncheckedBlock(_) => "Unchecked Block".to_string(),
-            Statement::VariableDeclarationStatement(_) => "Variable Declaration".to_string(),
-            Statement::WhileStatement(_) => "While".to_string(),
-        }
-    }
-
-    /// Formats a list of function calls with detailed information.
-    fn format_function_calls(&self, calls: &[FunctionCall]) -> String {
-        calls
-            .iter()
-            .map(|call| {
-                let args = call.arguments.len();
-                // The expression field contains the function being called
-                // We'll use a simple representation since extracting the name is complex
-                format!("function_call({args} args)")
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// Formats a list of declared variables with detailed information.
-    fn format_declared_variables(&self, variables: &[VariableDeclaration]) -> String {
-        variables
-            .iter()
-            .map(|var| {
-                let name = &var.name;
-                name.to_string()
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// Formats a list of updated variables with detailed information.
-    fn format_updated_variables(&self, variables: &[VariableRef]) -> String {
-        variables.iter().map(|var| var.read().pretty_display()).collect::<Vec<_>>().join(", ")
-    }
-
-    /// Extracts the source code for a given source location.
-    fn extract_source_code(
-        &self,
-        sources: &BTreeMap<u32, Source>,
-        src: &SourceLocation,
-    ) -> Option<String> {
-        let start = src.start?;
-        let length = src.length?;
-        let index = src.index?;
-
-        if let Some(source) = sources.get(&(index as u32)) {
-            if start + length <= source.content.len() {
-                Some(source.content[start..start + length].to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Displays recommendations for code improvements.
-    fn display_recommendations(&self) {
-        let mut has_recommendations = false;
-
-        if !self.private_state_variables.is_empty() {
-            if !has_recommendations {
-                println!("=== Recommendations ===");
-                has_recommendations = true;
-            }
-            println!("Private state variables that should be made public:");
-            for var in &self.private_state_variables {
-                println!(
-                    "  - {} (visibility: {:?})",
-                    var.declaration().name,
-                    var.declaration().visibility
-                );
-            }
-        }
-
-        if !self.private_functions.is_empty() {
-            if !has_recommendations {
-                println!("=== Recommendations ===");
-                has_recommendations = true;
-            }
-            println!("Private functions that should be made public:");
-            for func in &self.private_functions {
-                println!("  - {} (visibility: {:?})", func.name(), func.visibility());
-            }
-        }
-
-        if !self.immutable_functions.is_empty() {
-            if !has_recommendations {
-                println!("=== Recommendations ===");
-                has_recommendations = true;
-            }
-            println!("Functions that should be made mutable:");
-            for func in &self.immutable_functions {
-                let mutability = func
-                    .state_mutability()
-                    .as_ref()
-                    .map(|m| format!("{m:?}"))
-                    .unwrap_or_else(|| "None".to_string());
-                println!("  - {} (mutability: {})", func.name(), mutability);
-            }
-        }
-
-        if has_recommendations {
-            println!();
-        }
     }
 }
 
@@ -537,7 +272,7 @@ impl Analyzer {
         source_id: u32,
         source_path: &PathBuf,
         source_unit: &SourceUnit,
-    ) -> Result<SourceAnalysis, AnalysisError> {
+    ) -> Result<SourceAnalysis<EDBAnalysisTypes>, AnalysisError> {
         debug!(path=?source_path, "start walking the AST");
         source_unit.walk(&mut self).map_err(AnalysisError::Other)?;
         debug!(path=?source_path, "finished walking the AST");
@@ -570,7 +305,6 @@ impl Analyzer {
             functions,
             private_functions: self.private_functions,
             immutable_functions: self.immutable_functions,
-            function_types: self.function_types,
             user_defined_types: self.user_defined_types,
         })
     }
@@ -1508,7 +1242,9 @@ pub(crate) mod tests {
     ///
     /// # Returns
     /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
-    pub(crate) fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
+    pub(crate) fn compile_and_analyze(
+        source: &str,
+    ) -> (BTreeMap<u32, Source>, SourceAnalysis<EDBAnalysisTypes>) {
         // Compile the source code to get the AST
         let version = Version::parse("0.8.20").unwrap();
         let result = compile_contract_source_to_source_unit(version, source, false);
@@ -1592,7 +1328,6 @@ contract TestContract {
 
         // Use utility function to compile and analyze
         let (_sources, analysis) = compile_and_analyze(source);
-        analysis.pretty_display(&_sources);
 
         // Assert that we have two statement steps
         assert!(count_step_by_variant!(analysis, Statement()) == 2);
@@ -1701,7 +1436,6 @@ contract TestContract {
 
         // Use utility function to compile and analyze
         let (_sources, analysis) = compile_and_analyze(source);
-        analysis.pretty_display(&_sources);
 
         // Assert that we have one if step, and one statement step
         assert!(count_step_by_variant!(analysis, IfCondition()) == 1);
@@ -1845,59 +1579,59 @@ contract TestContract {
         }
     }
 
-    #[test]
-    fn test_function_type_collection() {
-        let source = r#"
-        contract TestContract {
-            // Function type as state variable
-            function(uint256) returns (bool) private callback;
+    // #[test]
+    // fn test_function_type_collection() {
+    //     let source = r#"
+    //     contract TestContract {
+    //         // Function type as state variable
+    //         function(uint256) returns (bool) private callback;
 
-            // Function type in array
-            function(uint256) external pure returns (bool)[] private validators;
+    //         // Function type in array
+    //         function(uint256) external pure returns (bool)[] private validators;
 
-            // Function type in mapping
-            mapping(address => function(uint256) returns (bool)) private userCallbacks;
+    //         // Function type in mapping
+    //         mapping(address => function(uint256) returns (bool)) private userCallbacks;
 
-            // Function with function type parameters (internal function)
-            function setCallback(function(uint256) returns (bool) _callback) internal {
-                callback = _callback;
-            }
+    //         // Function with function type parameters (internal function)
+    //         function setCallback(function(uint256) returns (bool) _callback) internal {
+    //             callback = _callback;
+    //         }
 
-            // Modifier with function type parameter
-            modifier onlyValidated(function(uint256) returns (bool) _validator) {
-                require(_validator(123), "Not validated");
-                _;
-            }
-        }
-        "#;
+    //         // Modifier with function type parameter
+    //         modifier onlyValidated(function(uint256) returns (bool) _validator) {
+    //             require(_validator(123), "Not validated");
+    //             _;
+    //         }
+    //     }
+    //     "#;
 
-        let (_sources, analysis) = compile_and_analyze(source);
+    //     let (_sources, analysis) = compile_and_analyze(source);
 
-        // Should collect function types from:
-        // 1. State variable 'callback'
-        // 2. Array element type in 'validators'
-        // 3. Mapping value type in 'userCallbacks'
-        // 4. Function parameter in 'setCallback'
-        // 5. Modifier parameter in 'onlyValidated'
-        // Total: at least 5 function types
-        assert!(
-            analysis.function_types.len() >= 5,
-            "Expected at least 5 function types, found: {}",
-            analysis.function_types.len()
-        );
+    //     // Should collect function types from:
+    //     // 1. State variable 'callback'
+    //     // 2. Array element type in 'validators'
+    //     // 3. Mapping value type in 'userCallbacks'
+    //     // 4. Function parameter in 'setCallback'
+    //     // 5. Modifier parameter in 'onlyValidated'
+    //     // Total: at least 5 function types
+    //     assert!(
+    //         analysis.function_types.len() >= 5,
+    //         "Expected at least 5 function types, found: {}",
+    //         analysis.function_types.len()
+    //     );
 
-        println!("Collected {} function types", analysis.function_types.len());
+    //     println!("Collected {} function types", analysis.function_types.len());
 
-        // Print each function type for inspection
-        for (i, func_type) in analysis.function_types.iter().enumerate() {
-            println!(
-                "Function type {}: visibility={:?}, stateMutability={:?}",
-                i + 1,
-                func_type.visibility(),
-                func_type.state_mutability()
-            );
-        }
-    }
+    //     // Print each function type for inspection
+    //     for (i, func_type) in analysis.function_types.iter().enumerate() {
+    //         println!(
+    //             "Function type {}: visibility={:?}, stateMutability={:?}",
+    //             i + 1,
+    //             func_type.visibility(),
+    //             func_type.state_mutability()
+    //         );
+    //     }
+    // }
 
     #[test]
     fn test_variable_assignment() {

@@ -25,7 +25,7 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::macros::universal_id;
+use crate::analysis::{macros::universal_id, IUserDefinedType};
 
 universal_id! {
     /// A Universal Type Identifier (UTID) is a unique identifier for a type in a contract.
@@ -106,6 +106,16 @@ impl<'de> Deserialize<'de> for UserDefinedTypeRef {
     {
         let user_defined_type = UserDefinedType::deserialize(deserializer)?;
         Ok(user_defined_type.into())
+    }
+}
+
+impl IUserDefinedType for UserDefinedTypeRef {
+    fn id(&self) -> UTID {
+        self.utid()
+    }
+
+    fn ast_id(&self) -> usize {
+        self.ast_id()
     }
 }
 

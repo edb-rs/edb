@@ -24,7 +24,7 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{macros::universal_id, ContractRef, StepRef};
+use crate::analysis::{macros::universal_id, ContractRef, IFunction, StepRef};
 
 universal_id! {
     /// A Universal Function Identifier (UFID) is a unique identifier for a function in contract execution.
@@ -192,6 +192,17 @@ impl<'de> Deserialize<'de> for FunctionTypeNameRef {
     }
 }
 
+impl IFunction for FunctionRef {
+    type Contract = ContractRef;
+
+    fn id(&self) -> UFID {
+        todo!()
+    }
+
+    fn contract(&self) -> Option<Self::Contract> {
+        todo!()
+    }
+}
 /// Represents a function or modifier in a smart contract with its metadata and type information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Function {

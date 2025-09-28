@@ -21,7 +21,7 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::macros::universal_id;
+use crate::analysis::{macros::universal_id, IContract};
 
 universal_id! {
     /// A Universal Contract Identifier (UCID) is a unique identifier for a contract.
@@ -93,6 +93,12 @@ impl<'de> Deserialize<'de> for ContractRef {
     {
         let contract = Contract::deserialize(deserializer)?;
         Ok(Self::new(contract))
+    }
+}
+
+impl IContract for ContractRef {
+    fn id(&self) -> UCID {
+        self.inner.read().ucid
     }
 }
 
