@@ -170,7 +170,7 @@ impl Tui {
                         debug!("Received event: {:?}", current_event);
 
                         match current_event {
-                            Event::Mouse(first_mouse_event) if self.config.enable_mouse => {
+                            Event::Mouse(first_mouse_event) if self.app.mouse_enabled => {
                                 let mut mouse_events = vec![first_mouse_event];
                                 let mut other_event_to_handle = None;
 

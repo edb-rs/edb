@@ -25,7 +25,11 @@ use crate::panels::{
     TracePanel,
 };
 use crate::rpc::RpcClient;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+    MouseButton, MouseEvent, MouseEventKind,
+};
+use crossterm::execute;
 use eyre::Result;
 use ratatui::layout::Alignment;
 use ratatui::style::Style;
@@ -35,6 +39,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     Frame,
 };
+use std::io::{stdout, Write};
 use std::sync::Arc;
 use std::{
     collections::HashMap,
@@ -49,6 +54,13 @@ pub enum ResizeDirection {
     Right,
     Up,
     Down,
+}
+
+/// Type of popup message to display
+#[derive(Debug, Clone)]
+pub enum PopupType {
+    Error(String),
+    Notification(String),
 }
 
 /// RPC connection status
@@ -137,6 +149,8 @@ impl ConnectionStatus {
 pub struct App {
     /// RPC client for communicating with debug server
     pub(crate) rpc_client: Arc<RpcClient>,
+    /// Whether mouse capture is enabled
+    pub(crate) mouse_enabled: bool,
     /// Layout manager for responsive design
     layout_manager: LayoutManager,
     /// Current focused panel
@@ -160,13 +174,13 @@ pub struct App {
     help_overlay: HelpOverlay,
     /// Whether to show help overlay
     show_help: bool,
-    /// Error popup message
-    error_popup: Option<String>,
+    /// Popup message (error or notification)
+    popup: Option<PopupType>,
 }
 
 impl App {
     /// Create a new application instance
-    pub async fn new(rpc_client: Arc<RpcClient>, _config: LayoutConfig) -> Result<Self> {
+    pub async fn new(rpc_client: Arc<RpcClient>, config: LayoutConfig) -> Result<Self> {
         let layout_manager = LayoutManager::new();
         let current_panel = PanelType::Trace;
 
@@ -176,6 +190,19 @@ impl App {
         panels.insert(PanelType::Code, Panel::Code(CodePanel::new()));
         panels.insert(PanelType::Display, Panel::Display(DisplayPanel::new()));
         panels.insert(PanelType::Terminal, Panel::Terminal(TerminalPanel::new()));
+
+        let popup = if config.enable_mouse {
+            let message = r#"Mouse Mode Enabled
+
+You can click panels to focus and use scroll to navigate.
+
+Text selection, copy, and paste are disabled in this mode.
+
+Press M to turn off Mouse Mode and re-enable text selection."#;
+            Some(PopupType::Notification(message.to_string()))
+        } else {
+            None
+        };
 
         Ok(Self {
             rpc_client,
@@ -191,7 +218,8 @@ impl App {
             horizontal_split: 50, // 50% top panels height
             help_overlay: HelpOverlay::new(),
             show_help: false,
-            error_popup: None,
+            popup,
+            mouse_enabled: config.enable_mouse,
         })
     }
 
@@ -213,8 +241,8 @@ impl App {
         }
 
         // Render error popup if active
-        if let Some(ref error_msg) = self.error_popup {
-            self.render_error_popup(frame, area, error_msg, data_manager);
+        if let Some(ref popup_type) = self.popup {
+            self.render_popup(frame, area, popup_type, data_manager);
         }
     }
 
@@ -424,6 +452,10 @@ impl App {
             status_spans.push(Span::styled(spinner_text, Style::default().fg(Color::Cyan)));
         }
 
+        // Mouse mode indicator
+        let mouse_indicator = if self.mouse_enabled { "ON" } else { "OFF" };
+        let mouse_color = if self.mouse_enabled { Color::Green } else { Color::Gray };
+
         status_spans.extend_from_slice(&[
             Span::raw(" | "),
             Span::styled(format!("Server: {server_url}"), Style::default().fg(Color::Cyan)),
@@ -431,6 +463,8 @@ impl App {
             Span::styled(format!("Panel: {panel_name}"), Style::default().fg(Color::White)),
             Span::raw(" | "),
             Span::styled(format!("Layout: {layout_type}"), Style::default().fg(Color::Gray)),
+            Span::raw(" | "),
+            Span::styled(format!("Mouse: {mouse_indicator}"), Style::default().fg(mouse_color)),
             Span::raw(" | "),
             Span::styled("Press ? for help", Style::default().fg(Color::Gray)),
         ]);
@@ -443,14 +477,18 @@ impl App {
         frame.render_widget(status_paragraph, area);
     }
 
-    /// Render compact error popup overlay
-    fn render_error_popup(
+    /// Render popup overlay (error or notification)
+    fn render_popup(
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        error_msg: &str,
+        popup_type: &PopupType,
         data_manager: &mut DataManager,
     ) {
+        let (message, is_error) = match popup_type {
+            PopupType::Error(msg) => (msg.as_str(), true),
+            PopupType::Notification(msg) => (msg.as_str(), false),
+        };
         // Calculate available width for popup (leave some margin)
         let max_popup_width = area.width.saturating_sub(4); // 2 chars margin on each side
         let max_popup_height = area.height.saturating_sub(2); // 1 line margin on top and bottom
@@ -460,8 +498,8 @@ impl App {
         let max_width = (max_popup_width / 3).max(min_width); // Use 1/3 of available width
         let content_width = (max_width.saturating_sub(4) as usize).max(min_width as usize); // -4 for borders and padding
 
-        // Split error message into lines and wrap long lines
-        let lines: Vec<&str> = error_msg.lines().collect();
+        // Split message into lines and wrap long lines
+        let lines: Vec<&str> = message.lines().collect();
         let mut wrapped_lines = Vec::new();
 
         for line in lines {
@@ -517,13 +555,7 @@ impl App {
         frame.render_widget(Clear, popup_area);
 
         // Create error content
-        let mut error_lines = vec![
-            Line::from(vec![Span::styled(
-                "❌ Error",
-                Style::default().fg(data_manager.theme.error_color),
-            )]),
-            Line::from(""),
-        ];
+        let mut error_lines = vec![];
 
         // Add wrapped error message lines
         for line in wrapped_lines {
@@ -541,10 +573,19 @@ impl App {
             Span::styled(" to dismiss", Style::default().fg(data_manager.theme.comment_color)),
         ]));
 
-        // Create popup block
+        // Create popup block with appropriate styling
+        let border_color = if is_error {
+            data_manager.theme.error_color
+        } else {
+            data_manager.theme.success_color
+        };
+
+        let title = if is_error { " Error " } else { " Info " };
+
         let popup_block = Block::default()
+            .title(title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(data_manager.theme.error_color))
+            .border_style(Style::default().fg(border_color))
             .style(Style::default());
 
         // Create popup paragraph
@@ -580,11 +621,11 @@ impl App {
 
         debug!("Key pressed: {:?}", key);
 
-        // If error popup is showing, handle error-specific keys
-        if self.error_popup.is_some() {
+        // If popup is showing, handle popup-specific keys
+        if self.popup.is_some() {
             match key.code {
                 KeyCode::Esc | KeyCode::Enter | KeyCode::Char(' ') => {
-                    self.error_popup = None;
+                    self.popup = None;
                     return Ok(EventResponse::Handled);
                 }
                 _ => return Ok(EventResponse::Handled), // Consume all other keys when error is shown
@@ -633,6 +674,14 @@ impl App {
                 self.help_overlay.reset_scroll();
                 Ok(EventResponse::Handled)
             }
+            KeyCode::Char('m') | KeyCode::Char('M') => {
+                // Toggle mouse mode with 'm' or 'M'
+                if let Err(e) = self.toggle_mouse_mode() {
+                    self.popup =
+                        Some(PopupType::Error(format!("Failed to toggle mouse mode: {e}")));
+                }
+                Ok(EventResponse::Handled)
+            }
             KeyCode::Esc => {
                 // ESC: Context-aware navigation
                 if self.current_panel == PanelType::Terminal {
@@ -641,7 +690,7 @@ impl App {
                         return match panel.handle_key_event(key, data_manager) {
                             Ok(response) => Ok(response),
                             Err(e) => {
-                                self.error_popup = Some(format!("{e}"));
+                                self.popup = Some(PopupType::Error(format!("{e}")));
                                 Ok(EventResponse::Handled)
                             }
                         };
@@ -673,7 +722,7 @@ impl App {
                                 return match panel.handle_key_event(key, data_manager) {
                                     Ok(response) => Ok(response),
                                     Err(e) => {
-                                        self.error_popup = Some(format!("{e}"));
+                                        self.popup = Some(PopupType::Error(format!("{e}")));
                                         Ok(EventResponse::Handled)
                                     }
                                 };
@@ -698,7 +747,7 @@ impl App {
                                 return match panel.handle_key_event(key, data_manager) {
                                     Ok(response) => Ok(response),
                                     Err(e) => {
-                                        self.error_popup = Some(format!("{e}"));
+                                        self.popup = Some(PopupType::Error(format!("{e}")));
                                         Ok(EventResponse::Handled)
                                     }
                                 };
@@ -712,7 +761,7 @@ impl App {
                             return match panel.handle_key_event(key, data_manager) {
                                 Ok(response) => Ok(response),
                                 Err(e) => {
-                                    self.error_popup = Some(format!("{e}"));
+                                    self.popup = Some(PopupType::Error(format!("{e}")));
                                     Ok(EventResponse::Handled)
                                 }
                             };
@@ -768,7 +817,7 @@ impl App {
                         match panel.handle_key_event(key, data_manager) {
                             Ok(response) => Ok(response),
                             Err(e) => {
-                                self.error_popup = Some(format!("{e}"));
+                                self.popup = Some(PopupType::Error(format!("{e}")));
                                 Ok(EventResponse::Handled)
                             }
                         }
@@ -841,7 +890,7 @@ impl App {
                         Ok(response) => Ok(response),
                         Err(e) => {
                             // Store error for popup display
-                            self.error_popup = Some(format!("{e}"));
+                            self.popup = Some(PopupType::Error(format!("{e}")));
                             Ok(EventResponse::Handled) // Don't crash, just show error
                         }
                     }
@@ -960,13 +1009,37 @@ impl App {
         debug!("Terminal resized to {}x{}", width, height);
     }
 
+    /// Toggle mouse capture mode
+    pub fn toggle_mouse_mode(&mut self) -> Result<()> {
+        self.mouse_enabled = !self.mouse_enabled;
+
+        let mut stdout = stdout();
+        if self.mouse_enabled {
+            execute!(stdout, EnableMouseCapture)?;
+            self.popup = Some(PopupType::Notification(
+                "Mouse mode: ON - Click panels to focus, scroll to navigate, but text selection is disabled.".to_string(),
+            ));
+        } else {
+            execute!(stdout, DisableMouseCapture)?;
+            self.popup = Some(PopupType::Notification(
+                "Mouse mode: OFF - Allows terminal text selection, but mouse navigation is disabled.".to_string(),
+            ));
+        }
+        stdout.flush()?;
+
+        Ok(())
+    }
+
     /// Handle mouse events
     pub async fn handle_mouse_event(
         &mut self,
         event: MouseEvent,
         data_manager: &mut DataManager,
     ) -> Result<()> {
-        use crossterm::event::{MouseButton, MouseEventKind};
+        // Only handle mouse events if mouse mode is enabled
+        if !self.mouse_enabled {
+            return Ok(());
+        }
 
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -979,7 +1052,7 @@ impl App {
                 // Handle scroll up - move selection up
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
                     if let Err(e) = panel.handle_mouse_event(event, data_manager) {
-                        self.error_popup = Some(format!("{e}"));
+                        self.popup = Some(PopupType::Error(format!("{e}")));
                     }
                 }
             }
@@ -987,7 +1060,7 @@ impl App {
                 // Handle scroll down - move selection down
                 if let Some(panel) = self.panels.get_mut(&self.current_panel) {
                     if let Err(e) = panel.handle_mouse_event(event, data_manager) {
-                        self.error_popup = Some(format!("{e}"));
+                        self.popup = Some(PopupType::Error(format!("{e}")));
                     }
                 }
             }
@@ -1010,7 +1083,7 @@ impl App {
 
         for event in mouse_events {
             if let Err(e) = self.handle_mouse_event(event, data_manager).await {
-                self.error_popup = Some(format!("{e}"));
+                self.popup = Some(PopupType::Error(format!("{e}")));
                 break;
             }
         }
