@@ -38,6 +38,10 @@ mod test_transactions {
     /// Uniswap V3 swap transaction
     pub const UNISWAP_V3_SWAP: &str =
         "0x1282e09bb5118f619da81b6a24c97999e7057ee9975628562c7cecbb4aa9f5af";
+
+    /// Uniswap V4 pool manager transaction
+    pub const UNISWAP_V4_POOL_MANAGER: &str =
+        "0x258b5a643ae7ccb8e45a4ea1e308f708c8e0eb6e2f535ec68f678c944c98b402";
 }
 
 async fn replay_transaction_and_analyze(tx_hash: &str) {
@@ -88,4 +92,12 @@ async fn test_engine_replay_uniswap_v3_swap() {
     info!("Testing engine replay with Uniswap V3 swap transaction");
 
     replay_transaction_and_analyze(test_transactions::UNISWAP_V3_SWAP).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_engine_replay_uniswap_v4_pool_manager() {
+    init::init_test_environment();
+    info!("Testing engine replay with Uniswap V4 pool manager transaction");
+
+    replay_transaction_and_analyze(test_transactions::UNISWAP_V4_POOL_MANAGER).await;
 }
