@@ -27,7 +27,6 @@ use tracing::{trace, warn};
 /// Set to 1 day since the source code of a contract is unlikely to change frequently.
 pub const DEFAULT_ETHERSCAN_CACHE_TTL: u64 = 86400;
 
-
 /// Trait for cache paths.
 pub trait CachePath {
     /// Returns the path to edb's cache dir: `~/.edb/cache` by default.
