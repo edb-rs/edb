@@ -68,11 +68,11 @@ where
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(next_call).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize snapshot info: {e}"),
+        message: format!("Failed to next call info: {e}"),
         data: None,
     })?;
 
-    debug!("Retrieved snapshot info for snapshot {}", snapshot_id);
+    debug!("Retrieved next call info for snapshot {}", snapshot_id);
     Ok(json_value)
 }
 
@@ -115,11 +115,11 @@ where
     // Serialize the SnapshotInfo enum to JSON
     let json_value = serde_json::to_value(prev_call).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
-        message: format!("Failed to serialize snapshot info: {e}"),
+        message: format!("Failed to serialize previous call info: {e}"),
         data: None,
     })?;
 
-    debug!("Retrieved snapshot info for snapshot {}", snapshot_id);
+    debug!("Retrieved previous call info for snapshot {}", snapshot_id);
     Ok(json_value)
 }
 

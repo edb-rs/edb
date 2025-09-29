@@ -188,7 +188,7 @@ where
     };
 
     // Serialize the SnapshotInfo enum to JSON
-    let json_value = serde_json::to_value(snapshot_info).map_err(|e| RpcError {
+    let json_value = serde_json::to_value(&snapshot_info).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
         message: format!("Failed to serialize snapshot info: {e}"),
         data: None,

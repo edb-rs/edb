@@ -147,5 +147,217 @@ pub struct OpcodeSnapshotInfoDetail {
     /// Call data for this execution context (shared via Arc within same call frame)
     pub calldata: Bytes,
     /// Transient storage state for EIP-1153 temporary storage operations
+    #[serde(with = "transient_string_map")]
     pub transient_storage: TransientStorage,
+}
+
+/// Custom serialization module for transient storage
+/// Converts HashMap<(Address, U256), U256> to HashMap<String, U256> for JSON serialization
+mod transient_string_map {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::HashMap;
+
+    pub fn serialize<S>(storage: &TransientStorage, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let string_map: HashMap<String, U256> = storage
+            .iter()
+            .map(|((addr, key), value)| {
+                let key_string = format!("{}:{}", addr, key);
+                (key_string, *value)
+            })
+            .collect();
+        string_map.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<TransientStorage, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let string_map: HashMap<String, U256> = HashMap::deserialize(deserializer)?;
+        let mut transient_storage = TransientStorage::default();
+
+        for (key_string, value) in string_map {
+            let parts: Vec<&str> = key_string.split(':').collect();
+            if parts.len() != 2 {
+                return Err(serde::de::Error::custom(format!(
+                    "Invalid transient storage key format: {}",
+                    key_string
+                )));
+            }
+
+            let addr: Address = parts[0].parse().map_err(|e| {
+                serde::de::Error::custom(format!("Invalid address in key {}: {}", key_string, e))
+            })?;
+
+            let key: U256 = parts[1].parse().map_err(|e| {
+                serde::de::Error::custom(format!("Invalid U256 in key {}: {}", key_string, e))
+            })?;
+
+            transient_storage.insert((addr, key), value);
+        }
+
+        Ok(transient_storage)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use alloy_primitives::{address, uint};
+
+        #[test]
+        fn test_transient_storage_serialization_empty() {
+            let storage = TransientStorage::default();
+
+            // Test serialization
+            let mut writer = Vec::new();
+            let mut serializer = serde_json::Serializer::new(&mut writer);
+            serialize(&storage, &mut serializer).unwrap();
+            let serialized_str = String::from_utf8(writer).unwrap();
+            assert_eq!(serialized_str, "{}");
+
+            // Test deserialization
+            let mut deserializer = serde_json::Deserializer::from_str(&serialized_str);
+            let deserialized: TransientStorage = deserialize(&mut deserializer).unwrap();
+            assert_eq!(deserialized.len(), 0);
+        }
+
+        #[test]
+        fn test_transient_storage_serialization_with_data() {
+            let mut storage = TransientStorage::default();
+            let addr1 = address!("0000000000000000000000000000000000000001");
+            let addr2 = address!("0000000000000000000000000000000000000002");
+            let key1 = uint!(100_U256);
+            let key2 = uint!(200_U256);
+            let value1 = uint!(1000_U256);
+            let value2 = uint!(2000_U256);
+
+            storage.insert((addr1, key1), value1);
+            storage.insert((addr2, key2), value2);
+
+            // Test serialization
+            let mut writer = Vec::new();
+            let mut serializer = serde_json::Serializer::new(&mut writer);
+            serialize(&storage, &mut serializer).unwrap();
+            let serialized_str = String::from_utf8(writer).unwrap();
+
+            // Check that serialization produces expected format
+            let json: serde_json::Value = serde_json::from_str(&serialized_str).unwrap();
+            assert!(json.is_object());
+            let obj = json.as_object().unwrap();
+            assert_eq!(obj.len(), 2);
+
+            // Check specific key-value pairs
+            let key1_str = format!("{}:{}", addr1, key1);
+            let key2_str = format!("{}:{}", addr2, key2);
+            assert_eq!(obj.get(&key1_str).unwrap(), &serde_json::to_value(value1).unwrap());
+            assert_eq!(obj.get(&key2_str).unwrap(), &serde_json::to_value(value2).unwrap());
+
+            // Test deserialization
+            let mut deserializer = serde_json::Deserializer::from_str(&serialized_str);
+            let deserialized: TransientStorage = deserialize(&mut deserializer).unwrap();
+            assert_eq!(deserialized.len(), 2);
+            assert_eq!(deserialized.get(&(addr1, key1)), Some(&value1));
+            assert_eq!(deserialized.get(&(addr2, key2)), Some(&value2));
+        }
+
+        #[test]
+        fn test_transient_storage_roundtrip() {
+            let mut original = TransientStorage::default();
+
+            // Add multiple entries with various addresses and keys
+            let entries = vec![
+                (
+                    address!("1111111111111111111111111111111111111111"),
+                    uint!(0_U256),
+                    uint!(42_U256),
+                ),
+                (
+                    address!("2222222222222222222222222222222222222222"),
+                    uint!(1_U256),
+                    uint!(84_U256),
+                ),
+                (
+                    address!("3333333333333333333333333333333333333333"),
+                    uint!(999999_U256),
+                    uint!(168_U256),
+                ),
+                (
+                    address!("1111111111111111111111111111111111111111"),
+                    uint!(1_U256),
+                    uint!(336_U256),
+                ), // Same address, different key
+            ];
+
+            for (addr, key, value) in &entries {
+                original.insert((*addr, *key), *value);
+            }
+
+            // Test roundtrip serialization
+            let mut writer = Vec::new();
+            let mut serializer = serde_json::Serializer::new(&mut writer);
+            serialize(&original, &mut serializer).unwrap();
+            let serialized_str = String::from_utf8(writer).unwrap();
+
+            let mut deserializer = serde_json::Deserializer::from_str(&serialized_str);
+            let deserialized: TransientStorage = deserialize(&mut deserializer).unwrap();
+
+            // Verify all entries are preserved
+            assert_eq!(deserialized.len(), entries.len());
+            for (addr, key, value) in &entries {
+                assert_eq!(deserialized.get(&(*addr, *key)), Some(value));
+            }
+        }
+
+        #[test]
+        fn test_transient_storage_invalid_format() {
+            // Test invalid key format (missing colon)
+            let invalid_json = r#"{"invalid_key": "1000"}"#;
+            let mut deserializer = serde_json::Deserializer::from_str(invalid_json);
+            let result: Result<TransientStorage, _> = deserialize(&mut deserializer);
+            assert!(result.is_err());
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid transient storage key format"));
+
+            // Test invalid address format
+            let invalid_json = r#"{"not_an_address:100": "1000"}"#;
+            let mut deserializer = serde_json::Deserializer::from_str(invalid_json);
+            let result: Result<TransientStorage, _> = deserialize(&mut deserializer);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("Invalid address"));
+
+            // Test invalid U256 format
+            let invalid_json =
+                r#"{"0x0000000000000000000000000000000000000001:not_a_number": "1000"}"#;
+            let mut deserializer = serde_json::Deserializer::from_str(invalid_json);
+            let result: Result<TransientStorage, _> = deserialize(&mut deserializer);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("Invalid U256"));
+        }
+
+        #[test]
+        fn test_transient_storage_large_values() {
+            let mut storage = TransientStorage::default();
+            let addr = address!("ffffffffffffffffffffffffffffffffffffffff");
+            let key = U256::MAX;
+            let value = U256::MAX;
+
+            storage.insert((addr, key), value);
+
+            // Test roundtrip with large values
+            let mut writer = Vec::new();
+            let mut serializer = serde_json::Serializer::new(&mut writer);
+            serialize(&storage, &mut serializer).unwrap();
+            let serialized_str = String::from_utf8(writer).unwrap();
+
+            let mut deserializer = serde_json::Deserializer::from_str(&serialized_str);
+            let deserialized: TransientStorage = deserialize(&mut deserializer).unwrap();
+
+            assert_eq!(deserialized.get(&(addr, key)), Some(&value));
+        }
+    }
 }

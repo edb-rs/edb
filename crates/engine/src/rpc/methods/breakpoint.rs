@@ -121,7 +121,8 @@ where
             data: None,
         })?;
 
-    let snapshot_ids = retrieve_breakpoint_snapshots(context, &breakpoint);
+    let mut snapshot_ids = retrieve_breakpoint_snapshots(context, &breakpoint);
+    snapshot_ids.sort();
 
     let json_value = serde_json::to_value(&snapshot_ids).map_err(|e| RpcError {
         code: error_codes::INTERNAL_ERROR,
