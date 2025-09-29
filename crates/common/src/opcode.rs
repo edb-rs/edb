@@ -112,3 +112,153 @@ impl OpcodeTr for OpCode {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_modifies_evm_state_storage() {
+        // Storage modification
+        assert!(OpCode::SSTORE.modifies_evm_state());
+
+        // Storage read doesn't modify state
+        assert!(!OpCode::SLOAD.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_modifies_evm_state_account_creation() {
+        assert!(OpCode::CREATE.modifies_evm_state());
+        assert!(OpCode::CREATE2.modifies_evm_state());
+        assert!(OpCode::SELFDESTRUCT.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_modifies_evm_state_calls() {
+        // Calls that can transfer value
+        assert!(OpCode::CALL.modifies_evm_state());
+        assert!(OpCode::CALLCODE.modifies_evm_state());
+
+        // Calls that cannot transfer value
+        assert!(!OpCode::DELEGATECALL.modifies_evm_state());
+        assert!(!OpCode::STATICCALL.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_modifies_evm_state_logs() {
+        assert!(OpCode::LOG0.modifies_evm_state());
+        assert!(OpCode::LOG1.modifies_evm_state());
+        assert!(OpCode::LOG2.modifies_evm_state());
+        assert!(OpCode::LOG3.modifies_evm_state());
+        assert!(OpCode::LOG4.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_modifies_evm_state_arithmetic() {
+        // Arithmetic operations don't modify state
+        assert!(!OpCode::ADD.modifies_evm_state());
+        assert!(!OpCode::SUB.modifies_evm_state());
+        assert!(!OpCode::MUL.modifies_evm_state());
+        assert!(!OpCode::DIV.modifies_evm_state());
+        assert!(!OpCode::MOD.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_modifies_evm_state_memory() {
+        // Memory operations don't modify persistent state
+        assert!(!OpCode::MSTORE.modifies_evm_state());
+        assert!(!OpCode::MSTORE8.modifies_evm_state());
+        assert!(!OpCode::MLOAD.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_modifies_evm_state_stack() {
+        // Stack operations don't modify persistent state
+        assert!(!OpCode::PUSH0.modifies_evm_state());
+        assert!(!OpCode::PUSH1.modifies_evm_state());
+        assert!(!OpCode::POP.modifies_evm_state());
+        assert!(!OpCode::DUP1.modifies_evm_state());
+        assert!(!OpCode::SWAP1.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_modifies_transient_storage() {
+        // Only TSTORE modifies transient storage
+        assert!(OpCode::TSTORE.modifies_transient_storage());
+
+        // TLOAD only reads
+        assert!(!OpCode::TLOAD.modifies_transient_storage());
+
+        // Regular storage operations don't affect transient storage
+        assert!(!OpCode::SSTORE.modifies_transient_storage());
+        assert!(!OpCode::SLOAD.modifies_transient_storage());
+
+        // Other operations
+        assert!(!OpCode::ADD.modifies_transient_storage());
+        assert!(!OpCode::MSTORE.modifies_transient_storage());
+    }
+
+    #[test]
+    fn test_is_call() {
+        // Contract creation
+        assert!(OpCode::CREATE.is_call());
+        assert!(OpCode::CREATE2.is_call());
+
+        // Various call types
+        assert!(OpCode::CALL.is_call());
+        assert!(OpCode::CALLCODE.is_call());
+        assert!(OpCode::DELEGATECALL.is_call());
+        assert!(OpCode::STATICCALL.is_call());
+
+        // Non-call operations
+        assert!(!OpCode::SSTORE.is_call());
+        assert!(!OpCode::SLOAD.is_call());
+        assert!(!OpCode::ADD.is_call());
+        assert!(!OpCode::JUMP.is_call());
+        assert!(!OpCode::RETURN.is_call());
+        assert!(!OpCode::REVERT.is_call());
+    }
+
+    #[test]
+    fn test_control_flow_opcodes() {
+        // Control flow opcodes don't modify state
+        assert!(!OpCode::JUMP.modifies_evm_state());
+        assert!(!OpCode::JUMPI.modifies_evm_state());
+        assert!(!OpCode::PC.modifies_evm_state());
+        assert!(!OpCode::JUMPDEST.modifies_evm_state());
+
+        // They also don't modify transient storage
+        assert!(!OpCode::JUMP.modifies_transient_storage());
+        assert!(!OpCode::JUMPI.modifies_transient_storage());
+
+        // And they're not calls
+        assert!(!OpCode::JUMP.is_call());
+        assert!(!OpCode::JUMPI.is_call());
+    }
+
+    #[test]
+    fn test_environment_opcodes() {
+        // Environment info opcodes don't modify state
+        assert!(!OpCode::ADDRESS.modifies_evm_state());
+        assert!(!OpCode::BALANCE.modifies_evm_state());
+        assert!(!OpCode::ORIGIN.modifies_evm_state());
+        assert!(!OpCode::CALLER.modifies_evm_state());
+        assert!(!OpCode::CALLVALUE.modifies_evm_state());
+        assert!(!OpCode::CALLDATALOAD.modifies_evm_state());
+        assert!(!OpCode::CALLDATASIZE.modifies_evm_state());
+        assert!(!OpCode::CODESIZE.modifies_evm_state());
+        assert!(!OpCode::GASPRICE.modifies_evm_state());
+    }
+
+    #[test]
+    fn test_return_opcodes() {
+        // Return and revert don't modify state (they may undo changes but don't create new state)
+        assert!(!OpCode::RETURN.modifies_evm_state());
+        assert!(!OpCode::REVERT.modifies_evm_state());
+        assert!(!OpCode::STOP.modifies_evm_state());
+        assert!(!OpCode::INVALID.modifies_evm_state());
+
+        // SELFDESTRUCT does modify state
+        assert!(OpCode::SELFDESTRUCT.modifies_evm_state());
+    }
+}

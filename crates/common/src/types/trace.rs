@@ -615,3 +615,506 @@ fn format_event(event: &LogData) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{address, Address, Bytes, LogData, B256, U256};
+    use revm::{
+        context::CreateScheme,
+        interpreter::{CallScheme, InstructionResult},
+    };
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_call_type_serialization() {
+        let call_types = vec![
+            CallType::Call(CallScheme::Call),
+            CallType::Call(CallScheme::CallCode),
+            CallType::Call(CallScheme::DelegateCall),
+            CallType::Call(CallScheme::StaticCall),
+            CallType::Create(CreateScheme::Create),
+            CallType::Create(CreateScheme::Create2 { salt: U256::from(123) }),
+        ];
+
+        for call_type in call_types {
+            let json = serde_json::to_string(&call_type).expect("Failed to serialize CallType");
+            let deserialized: CallType =
+                serde_json::from_str(&json).expect("Failed to deserialize CallType");
+            assert_eq!(deserialized, call_type);
+        }
+    }
+
+    #[test]
+    fn test_call_result_serialization() {
+        let results = vec![
+            CallResult::Success {
+                output: Bytes::from_static(b"success"),
+                result: InstructionResult::Return,
+            },
+            CallResult::Revert {
+                output: Bytes::from_static(b"revert reason"),
+                result: InstructionResult::Revert,
+            },
+            CallResult::Error {
+                output: Bytes::from_static(b"error"),
+                result: InstructionResult::OutOfGas,
+            },
+        ];
+
+        for result in results {
+            let json = serde_json::to_string(&result).expect("Failed to serialize CallResult");
+            let deserialized: CallResult =
+                serde_json::from_str(&json).expect("Failed to deserialize CallResult");
+            assert_eq!(deserialized, result);
+        }
+    }
+
+    #[test]
+    fn test_trace_entry_serialization() {
+        let entry = TraceEntry {
+            id: 1,
+            parent_id: Some(0),
+            depth: 1,
+            call_type: CallType::Call(CallScheme::Call),
+            caller: address!("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+            target: address!("0x1234567890123456789012345678901234567890"),
+            code_address: address!("0x1234567890123456789012345678901234567890"),
+            input: Bytes::from(hex::decode("deadbeef").unwrap()),
+            value: U256::from(1000),
+            result: Some(CallResult::Success {
+                output: Bytes::from_static(b"return_data"),
+                result: InstructionResult::Return,
+            }),
+            created_contract: false,
+            create_scheme: None,
+            bytecode: Some(Bytes::from(hex::decode("60806040").unwrap())),
+            target_label: Some("TestContract".to_string()),
+            self_destruct: None,
+            events: vec![],
+            first_snapshot_id: Some(42),
+        };
+
+        let json = serde_json::to_string(&entry).expect("Failed to serialize TraceEntry");
+        let deserialized: TraceEntry =
+            serde_json::from_str(&json).expect("Failed to deserialize TraceEntry");
+
+        assert_eq!(deserialized.id, entry.id);
+        assert_eq!(deserialized.parent_id, entry.parent_id);
+        assert_eq!(deserialized.depth, entry.depth);
+        assert_eq!(deserialized.call_type, entry.call_type);
+        assert_eq!(deserialized.caller, entry.caller);
+        assert_eq!(deserialized.target, entry.target);
+        assert_eq!(deserialized.code_address, entry.code_address);
+        assert_eq!(deserialized.input, entry.input);
+        assert_eq!(deserialized.value, entry.value);
+        assert_eq!(deserialized.result, entry.result);
+        assert_eq!(deserialized.created_contract, entry.created_contract);
+        assert_eq!(deserialized.create_scheme, entry.create_scheme);
+        assert_eq!(deserialized.bytecode, entry.bytecode);
+        assert_eq!(deserialized.target_label, entry.target_label);
+        assert_eq!(deserialized.self_destruct, entry.self_destruct);
+        assert_eq!(deserialized.events, entry.events);
+        assert_eq!(deserialized.first_snapshot_id, entry.first_snapshot_id);
+    }
+
+    #[test]
+    fn test_trace_serialization() {
+        let mut trace = Trace::new();
+
+        let input = Bytes::from(hex::decode("deadbeef").unwrap());
+        let bytecode = Bytes::from(hex::decode("60806040").unwrap());
+
+        trace.push(TraceEntry {
+            id: 0,
+            parent_id: None,
+            depth: 0,
+            call_type: CallType::Call(CallScheme::Call),
+            caller: address!("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+            target: address!("0x1234567890123456789012345678901234567890"),
+            code_address: address!("0x1234567890123456789012345678901234567890"),
+            input,
+            value: U256::from(1000),
+            result: Some(CallResult::Success {
+                output: Bytes::from_static(b"return_data"),
+                result: InstructionResult::Return,
+            }),
+            created_contract: false,
+            create_scheme: None,
+            bytecode: Some(bytecode),
+            target_label: None,
+            self_destruct: None,
+            events: vec![],
+            first_snapshot_id: None,
+        });
+
+        let json = serde_json::to_string(&trace).expect("Failed to serialize Trace");
+        let deserialized: Trace = serde_json::from_str(&json).expect("Failed to deserialize Trace");
+
+        assert_eq!(deserialized.len(), 1);
+        assert_eq!(deserialized[0].id, 0);
+        assert_eq!(deserialized[0].call_type, CallType::Call(CallScheme::Call));
+    }
+
+    #[test]
+    fn test_call_result_equality_special_cases() {
+        // Test special case where empty output allows STOP == RETURN
+        let stop_result =
+            CallResult::Success { output: Bytes::new(), result: InstructionResult::Stop };
+        let return_result =
+            CallResult::Success { output: Bytes::new(), result: InstructionResult::Return };
+
+        assert_eq!(stop_result, return_result);
+
+        // Test that non-empty outputs must match exactly
+        let stop_with_output = CallResult::Success {
+            output: Bytes::from_static(b"data"),
+            result: InstructionResult::Stop,
+        };
+        let return_with_output = CallResult::Success {
+            output: Bytes::from_static(b"data"),
+            result: InstructionResult::Return,
+        };
+
+        assert_ne!(stop_with_output, return_with_output);
+    }
+
+    #[test]
+    fn test_call_result_methods() {
+        let success = CallResult::Success {
+            output: Bytes::from_static(b"success_output"),
+            result: InstructionResult::Return,
+        };
+
+        assert_eq!(success.result(), InstructionResult::Return);
+        assert_eq!(success.output(), &Bytes::from_static(b"success_output"));
+
+        let revert = CallResult::Revert {
+            output: Bytes::from_static(b"revert_reason"),
+            result: InstructionResult::Revert,
+        };
+
+        assert_eq!(revert.result(), InstructionResult::Revert);
+        assert_eq!(revert.output(), &Bytes::from_static(b"revert_reason"));
+
+        let error = CallResult::Error {
+            output: Bytes::from_static(b"error_data"),
+            result: InstructionResult::OutOfGas,
+        };
+
+        assert_eq!(error.result(), InstructionResult::OutOfGas);
+        assert_eq!(error.output(), &Bytes::from_static(b"error_data"));
+    }
+
+    #[test]
+    fn test_trace_methods() {
+        let mut trace = Trace::new();
+        assert!(trace.is_empty());
+        assert_eq!(trace.len(), 0);
+
+        let entry = TraceEntry {
+            id: 0,
+            parent_id: None,
+            depth: 0,
+            call_type: CallType::Call(CallScheme::Call),
+            caller: Address::ZERO,
+            target: Address::ZERO,
+            code_address: Address::ZERO,
+            input: Bytes::new(),
+            value: U256::ZERO,
+            result: None,
+            created_contract: false,
+            create_scheme: None,
+            bytecode: None,
+            target_label: None,
+            self_destruct: None,
+            events: vec![],
+            first_snapshot_id: None,
+        };
+
+        trace.push(entry);
+        assert!(!trace.is_empty());
+        assert_eq!(trace.len(), 1);
+    }
+
+    #[test]
+    fn test_trace_to_json_value() {
+        let trace = Trace::new();
+        let json_value = trace.to_json_value().expect("Failed to convert to JSON");
+        assert!(json_value.is_object());
+    }
+
+    #[test]
+    fn test_trace_iteration() {
+        let mut trace = Trace::new();
+        let entry1 = TraceEntry {
+            id: 0,
+            parent_id: None,
+            depth: 0,
+            call_type: CallType::Call(CallScheme::Call),
+            caller: Address::ZERO,
+            target: Address::ZERO,
+            code_address: Address::ZERO,
+            input: Bytes::new(),
+            value: U256::ZERO,
+            result: None,
+            created_contract: false,
+            create_scheme: None,
+            bytecode: None,
+            target_label: None,
+            self_destruct: None,
+            events: vec![],
+            first_snapshot_id: None,
+        };
+        let entry2 = TraceEntry {
+            id: 1,
+            parent_id: Some(0),
+            depth: 1,
+            call_type: CallType::Create(CreateScheme::Create),
+            caller: Address::ZERO,
+            target: Address::ZERO,
+            code_address: Address::ZERO,
+            input: Bytes::new(),
+            value: U256::ZERO,
+            result: None,
+            created_contract: true,
+            create_scheme: Some(CreateScheme::Create),
+            bytecode: None,
+            target_label: None,
+            self_destruct: None,
+            events: vec![],
+            first_snapshot_id: None,
+        };
+
+        trace.push(entry1.clone());
+        trace.push(entry2.clone());
+
+        // Test shared reference iteration
+        let collected: Vec<_> = (&trace).into_iter().collect();
+        assert_eq!(collected.len(), 2);
+        assert_eq!(collected[0].id, 0);
+        assert_eq!(collected[1].id, 1);
+
+        // Test mutable reference iteration
+        for entry in &mut trace {
+            entry.depth += 10;
+        }
+        assert_eq!(trace[0].depth, 10);
+        assert_eq!(trace[1].depth, 11);
+
+        // Test owned iteration (consumes trace)
+        let collected: Vec<_> = trace.into_iter().collect();
+        assert_eq!(collected.len(), 2);
+        assert_eq!(collected[0].depth, 10);
+        assert_eq!(collected[1].depth, 11);
+    }
+
+    #[test]
+    fn test_trace_parent_child_relationships() {
+        let mut trace = Trace::new();
+
+        // Add parent entry
+        trace.push(TraceEntry {
+            id: 0,
+            parent_id: None,
+            depth: 0,
+            call_type: CallType::Call(CallScheme::Call),
+            caller: Address::ZERO,
+            target: Address::ZERO,
+            code_address: Address::ZERO,
+            input: Bytes::new(),
+            value: U256::ZERO,
+            result: None,
+            created_contract: false,
+            create_scheme: None,
+            bytecode: None,
+            target_label: None,
+            self_destruct: None,
+            events: vec![],
+            first_snapshot_id: None,
+        });
+
+        // Add child entries
+        for i in 1..=3 {
+            trace.push(TraceEntry {
+                id: i,
+                parent_id: Some(0),
+                depth: 1,
+                call_type: CallType::Call(CallScheme::Call),
+                caller: Address::ZERO,
+                target: Address::ZERO,
+                code_address: Address::ZERO,
+                input: Bytes::new(),
+                value: U256::ZERO,
+                result: None,
+                created_contract: false,
+                create_scheme: None,
+                bytecode: None,
+                target_label: None,
+                self_destruct: None,
+                events: vec![],
+                first_snapshot_id: None,
+            });
+        }
+
+        // Test get_parent
+        assert!(trace.get_parent(0).is_none()); // Root has no parent
+        assert_eq!(trace.get_parent(1).unwrap().id, 0);
+        assert_eq!(trace.get_parent(2).unwrap().id, 0);
+        assert_eq!(trace.get_parent(3).unwrap().id, 0);
+
+        // Test get_children
+        let children = trace.get_children(0);
+        assert_eq!(children.len(), 3);
+        let child_ids: HashSet<_> = children.iter().map(|c| c.id).collect();
+        assert_eq!(child_ids, HashSet::from([1, 2, 3]));
+
+        // Test getting children of leaf nodes
+        assert!(trace.get_children(1).is_empty());
+        assert!(trace.get_children(2).is_empty());
+        assert!(trace.get_children(3).is_empty());
+    }
+
+    #[test]
+    fn test_large_trace_serialization() {
+        let mut trace = Trace::new();
+
+        // Add many entries
+        for i in 0..1000 {
+            trace.push(TraceEntry {
+                id: i,
+                parent_id: if i > 0 { Some(i - 1) } else { None },
+                depth: i,
+                call_type: CallType::Call(CallScheme::Call),
+                caller: Address::ZERO,
+                target: Address::ZERO,
+                code_address: Address::ZERO,
+                input: Bytes::new(),
+                value: U256::from(i),
+                result: Some(CallResult::Success {
+                    output: Bytes::from_static(b"success"),
+                    result: InstructionResult::Return,
+                }),
+                created_contract: false,
+                create_scheme: None,
+                bytecode: None,
+                target_label: Some(format!("Entry{}", i)),
+                self_destruct: None,
+                events: vec![],
+                first_snapshot_id: Some(i),
+            });
+        }
+
+        let json = serde_json::to_string(&trace).expect("Failed to serialize large trace");
+        let deserialized: Trace =
+            serde_json::from_str(&json).expect("Failed to deserialize large trace");
+
+        assert_eq!(deserialized.len(), 1000);
+        assert_eq!(deserialized[0].id, 0);
+        assert_eq!(deserialized[999].id, 999);
+        assert_eq!(deserialized[999].value, U256::from(999));
+    }
+
+    #[test]
+    fn test_trace_entry_with_events_serialization() {
+        let event_data = LogData::new_unchecked(
+            vec![B256::from([1u8; 32]), B256::from([2u8; 32])],
+            Bytes::from_static(b"event_data"),
+        );
+
+        let entry = TraceEntry {
+            id: 0,
+            parent_id: None,
+            depth: 0,
+            call_type: CallType::Call(CallScheme::Call),
+            caller: address!("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+            target: address!("0x1234567890123456789012345678901234567890"),
+            code_address: address!("0x1234567890123456789012345678901234567890"),
+            input: Bytes::new(),
+            value: U256::ZERO,
+            result: None,
+            created_contract: false,
+            create_scheme: None,
+            bytecode: None,
+            target_label: None,
+            self_destruct: None,
+            events: vec![event_data.clone()],
+            first_snapshot_id: None,
+        };
+
+        let json = serde_json::to_string(&entry).expect("Failed to serialize entry with events");
+        let deserialized: TraceEntry =
+            serde_json::from_str(&json).expect("Failed to deserialize entry with events");
+
+        assert_eq!(deserialized.events.len(), 1);
+        assert_eq!(deserialized.events[0].topics(), event_data.topics());
+        assert_eq!(deserialized.events[0].data, event_data.data);
+    }
+
+    #[test]
+    fn test_trace_entry_with_self_destruct_serialization() {
+        let entry = TraceEntry {
+            id: 0,
+            parent_id: None,
+            depth: 0,
+            call_type: CallType::Call(CallScheme::Call),
+            caller: Address::ZERO,
+            target: Address::ZERO,
+            code_address: Address::ZERO,
+            input: Bytes::new(),
+            value: U256::ZERO,
+            result: None,
+            created_contract: false,
+            create_scheme: None,
+            bytecode: None,
+            target_label: None,
+            self_destruct: Some((
+                address!("0x1234567890123456789012345678901234567890"),
+                U256::from(1000),
+            )),
+            events: vec![],
+            first_snapshot_id: None,
+        };
+
+        let json =
+            serde_json::to_string(&entry).expect("Failed to serialize entry with self destruct");
+        let deserialized: TraceEntry =
+            serde_json::from_str(&json).expect("Failed to deserialize entry with self destruct");
+
+        assert!(deserialized.self_destruct.is_some());
+        let (addr, value) = deserialized.self_destruct.unwrap();
+        assert_eq!(addr, address!("0x1234567890123456789012345678901234567890"));
+        assert_eq!(value, U256::from(1000));
+    }
+
+    #[test]
+    fn test_helper_functions() {
+        // Test format_address_short
+        assert_eq!(format_address_short(Address::ZERO), "0x0");
+        let addr = address!("0x1234567890123456789012345678901234567890");
+        assert!(format_address_short(addr).starts_with("0x"));
+
+        // Test format_data_preview
+        assert_eq!(format_data_preview(&Bytes::new()), "0x");
+        assert_eq!(format_data_preview(&Bytes::from_static(b"1234")), "0x31323334");
+        let long_data = Bytes::from(vec![0xde, 0xad, 0xbe, 0xef, 0x12, 0x34]);
+        assert_eq!(format_data_preview(&long_data), "0xdeadbeef… [6 bytes]");
+
+        // Test format_ether
+        assert_eq!(format_ether(U256::ZERO), "0");
+        assert_eq!(format_ether(U256::from(1000000000000u64)), "0.000001"); // Less than 1 ETH
+    }
+
+    #[test]
+    fn test_create_scheme_serialization() {
+        let schemes = vec![CreateScheme::Create, CreateScheme::Create2 { salt: U256::from(42) }];
+
+        for scheme in schemes {
+            let call_type = CallType::Create(scheme);
+            let json = serde_json::to_string(&call_type).expect("Failed to serialize CreateScheme");
+            let deserialized: CallType =
+                serde_json::from_str(&json).expect("Failed to deserialize CreateScheme");
+            assert_eq!(deserialized, call_type);
+        }
+    }
+}

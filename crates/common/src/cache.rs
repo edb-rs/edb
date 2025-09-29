@@ -244,3 +244,292 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_chains::Chain;
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    struct TestData {
+        value: String,
+        number: u32,
+    }
+
+    #[test]
+    fn test_edb_cache_path_default() {
+        let cache_path = EdbCachePath::default();
+        assert!(cache_path.is_valid());
+
+        if let Some(cache_dir) = cache_path.edb_cache_dir() {
+            assert!(cache_dir.to_string_lossy().contains(".edb"));
+            assert!(cache_dir.to_string_lossy().contains("cache"));
+        }
+    }
+
+    #[test]
+    fn test_edb_cache_path_new_with_root() {
+        let temp_path = std::env::temp_dir().join("edb_test");
+        let cache_path = EdbCachePath::new(Some(&temp_path));
+
+        assert!(cache_path.is_valid());
+        assert_eq!(cache_path.edb_cache_dir(), Some(temp_path));
+    }
+
+    #[test]
+    fn test_edb_cache_path_empty() {
+        let cache_path = EdbCachePath::empty();
+        assert!(!cache_path.is_valid());
+        assert!(cache_path.edb_cache_dir().is_none());
+    }
+
+    #[test]
+    fn test_cache_path_directories() {
+        let temp_path = std::env::temp_dir().join("edb_test_2");
+        let cache_path = EdbCachePath::new(Some(&temp_path));
+
+        // Test RPC cache directories
+        let rpc_dir = cache_path.edb_rpc_cache_dir();
+        assert!(rpc_dir.is_some());
+        assert!(rpc_dir.unwrap().ends_with("rpc"));
+
+        let eth_rpc_dir = cache_path.rpc_chain_cache_dir(Chain::mainnet());
+        assert!(eth_rpc_dir.is_some());
+        assert!(eth_rpc_dir.unwrap().ends_with("mainnet"));
+
+        // Test Etherscan cache directories
+        let etherscan_dir = cache_path.etherscan_cache_dir();
+        assert!(etherscan_dir.is_some());
+        assert!(etherscan_dir.unwrap().ends_with("etherscan"));
+
+        let eth_etherscan_dir = cache_path.etherscan_chain_cache_dir(Chain::mainnet());
+        assert!(eth_etherscan_dir.is_some());
+        assert!(eth_etherscan_dir.unwrap().ends_with("mainnet"));
+
+        // Test compiler cache directories
+        let compiler_dir = cache_path.compiler_cache_dir();
+        assert!(compiler_dir.is_some());
+        assert!(compiler_dir.unwrap().ends_with("solc"));
+
+        let eth_compiler_dir = cache_path.compiler_chain_cache_dir(Chain::mainnet());
+        assert!(eth_compiler_dir.is_some());
+        assert!(eth_compiler_dir.unwrap().ends_with("mainnet"));
+    }
+
+    #[test]
+    fn test_cache_wrapper_no_ttl() {
+        let data = TestData { value: "test".to_string(), number: 42 };
+        let wrapper = CacheWrapper::new(data.clone(), None);
+
+        assert_eq!(wrapper.data, data);
+        assert_eq!(wrapper.expires_at, u64::MAX);
+        assert!(!wrapper.is_expired());
+    }
+
+    #[test]
+    fn test_cache_wrapper_with_ttl() {
+        let data = TestData { value: "test".to_string(), number: 42 };
+        let ttl = Duration::from_secs(3600); // 1 hour
+        let wrapper = CacheWrapper::new(data.clone(), Some(ttl));
+
+        assert_eq!(wrapper.data, data);
+        assert!(wrapper.expires_at > chrono::Utc::now().timestamp() as u64);
+        assert!(!wrapper.is_expired());
+    }
+
+    #[test]
+    fn test_cache_wrapper_expired() {
+        let data = TestData { value: "test".to_string(), number: 42 };
+        let ttl = Duration::from_secs(0);
+        let wrapper = CacheWrapper::new(data.clone(), Some(ttl));
+
+        // Since TTL is 0, it should be expired immediately
+        std::thread::sleep(Duration::from_millis(2000));
+        assert!(wrapper.is_expired());
+    }
+
+    #[test]
+    fn test_edb_cache_new_with_directory() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap();
+
+        assert!(cache.is_some());
+        let cache = cache.unwrap();
+        assert_eq!(cache.cache_dir(), &temp_path);
+        assert!(cache.cache_ttl().is_none());
+    }
+
+    #[test]
+    fn test_edb_cache_new_with_ttl() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let ttl = Duration::from_secs(3600);
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), Some(ttl)).unwrap();
+
+        assert!(cache.is_some());
+        let cache = cache.unwrap();
+        assert_eq!(cache.cache_ttl(), Some(ttl));
+    }
+
+    #[test]
+    fn test_edb_cache_new_no_directory() {
+        let cache = EdbCache::<TestData>::new(None::<&str>, None).unwrap();
+        assert!(cache.is_none());
+    }
+
+    #[test]
+    fn test_edb_cache_save_and_load() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap().unwrap();
+
+        let test_data = TestData { value: "hello".to_string(), number: 123 };
+        let label = "test_label";
+
+        // Save data
+        cache.save_cache(label, &test_data).unwrap();
+
+        // Load data
+        let loaded_data = cache.load_cache(label);
+        assert!(loaded_data.is_some());
+        assert_eq!(loaded_data.unwrap(), test_data);
+    }
+
+    #[test]
+    fn test_edb_cache_load_nonexistent() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap().unwrap();
+
+        let loaded_data = cache.load_cache("nonexistent");
+        assert!(loaded_data.is_none());
+    }
+
+    #[test]
+    fn test_edb_cache_expired_data() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let ttl = Duration::from_millis(10);
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), Some(ttl)).unwrap().unwrap();
+
+        let test_data = TestData { value: "expire_me".to_string(), number: 999 };
+        let label = "expire_test";
+
+        // Save data
+        cache.save_cache(label, &test_data).unwrap();
+
+        // Wait for expiration
+        std::thread::sleep(Duration::from_millis(2000));
+
+        // Try to load expired data
+        let loaded_data = cache.load_cache(label);
+        assert!(loaded_data.is_none());
+
+        // Cache file should be removed
+        let cache_file = &temp_path.join(format!("{}.json", label));
+        assert!(!cache_file.exists());
+    }
+
+    #[test]
+    fn test_edb_cache_corrupted_file() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap().unwrap();
+
+        let label = "corrupted";
+        let cache_file = &temp_path.join(format!("{}.json", label));
+
+        // Write corrupted data
+        fs::write(&cache_file, "invalid json").unwrap();
+
+        // Try to load corrupted data
+        let loaded_data = cache.load_cache(label);
+        assert!(loaded_data.is_none());
+
+        // Corrupted file should be removed
+        assert!(!cache_file.exists());
+    }
+
+    #[test]
+    fn test_option_cache_some() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap();
+
+        let test_data = TestData { value: "optional".to_string(), number: 456 };
+        let label = "option_test";
+
+        // Save through Option wrapper
+        cache.save_cache(label, &test_data).unwrap();
+
+        // Load through Option wrapper
+        let loaded_data = cache.load_cache(label);
+        assert!(loaded_data.is_some());
+        assert_eq!(loaded_data.unwrap(), test_data);
+    }
+
+    #[test]
+    fn test_option_cache_none() {
+        let cache: Option<EdbCache<TestData>> = None;
+        let test_data = TestData { value: "none".to_string(), number: 789 };
+
+        // Save should succeed but do nothing
+        let result = cache.save_cache("none_test", &test_data);
+        assert!(result.is_ok());
+
+        // Load should return None
+        let loaded_data = cache.load_cache("none_test");
+        assert!(loaded_data.is_none());
+    }
+
+    #[test]
+    fn test_option_cache_path_some() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache_path = EdbCachePath::new(Some(&temp_path));
+
+        assert!(cache_path.is_valid());
+        assert_eq!(cache_path.edb_cache_dir(), Some(temp_path));
+    }
+
+    #[test]
+    fn test_option_cache_path_none() {
+        let cache_path: Option<EdbCachePath> = None;
+        assert!(cache_path.edb_cache_dir().is_none());
+    }
+
+    #[test]
+    fn test_multiple_cache_operations() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap().unwrap();
+
+        // Save multiple items
+        for i in 0..10 {
+            let data = TestData { value: format!("item_{}", i), number: i as u32 };
+            cache.save_cache(format!("item_{}", i), &data).unwrap();
+        }
+
+        // Load and verify all items
+        for i in 0..10 {
+            let loaded = cache.load_cache(format!("item_{}", i));
+            assert!(loaded.is_some());
+            let loaded = loaded.unwrap();
+            assert_eq!(loaded.value, format!("item_{}", i));
+            assert_eq!(loaded.number, i as u32);
+        }
+    }
+
+    #[test]
+    fn test_cache_overwrite() {
+        let temp_path = std::env::temp_dir().join("edb_test_cache");
+        let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap().unwrap();
+
+        let label = "overwrite_test";
+
+        // Save initial data
+        let data1 = TestData { value: "original".to_string(), number: 1 };
+        cache.save_cache(label, &data1).unwrap();
+
+        // Overwrite with new data
+        let data2 = TestData { value: "updated".to_string(), number: 2 };
+        cache.save_cache(label, &data2).unwrap();
+
+        // Load should return the updated data
+        let loaded = cache.load_cache(label);
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap(), data2);
+    }
+}

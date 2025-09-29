@@ -179,3 +179,31 @@ where
         self.inner.block_hash_ref(number).map_err(EdbDBError::from_error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_relax_evm_tx_constraints() {
+        let mut tx = TxEnv::default();
+
+        relax_evm_tx_constraints(&mut tx);
+
+        assert_eq!(tx.gas_limit, u64::MAX);
+        assert_eq!(tx.gas_price, 0);
+        assert_eq!(tx.gas_priority_fee, Some(0));
+    }
+
+    #[test]
+    fn test_edb_db_error_new() {
+        let error = EdbDBError::new("test error");
+        assert_eq!(error.message, "test error");
+    }
+
+    #[test]
+    fn test_edb_db_error_display() {
+        let error = EdbDBError::new("display test");
+        assert_eq!(format!("{}", error), "EdbDB Error: display test");
+    }
+}
