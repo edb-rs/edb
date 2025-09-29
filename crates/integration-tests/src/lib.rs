@@ -16,4 +16,5 @@
 
 //! Integration tests utilities for EDB
 
+pub mod rpc_test_utils;
 pub mod test_utils;

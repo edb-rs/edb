@@ -1,103 +1,207 @@
-// EDB - Ethereum Debugger
-// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Affero General Public License for more details.
-//
-// You should have received a copy of the GNU Affero General Public License
-// along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-//! End-to-end integration tests for the EDB engine
+//! Comprehensive JSON-RPC API tests using shared analysis logic
 //!
-//! These tests verify the complete transaction replay workflow including:
-//! - Forking and preparing the blockchain state
-//! - Engine initialization and preparation
-//! - Error detection in logs during the process
+//! This test suite uses the same analysis functions for both baseline capture and validation,
+//! eliminating any possibility of implementation discrepancies.
 
-use alloy_primitives::TxHash;
-use edb_integration_tests::test_utils::{engine, init, proxy};
+use std::collections::HashMap;
+use std::fs;
+use std::time::Instant;
+
+use edb_integration_tests::rpc_test_utils::get_or_create_fixtures;
+use edb_integration_tests::rpc_test_utils::{
+    create_summary, BaselineMetadata, ComprehensiveBaseline,
+};
+use edb_integration_tests::test_utils::paths;
+use edb_integration_tests::{
+    rpc_test_utils::{analyze_transaction_comprehensive, get_or_create_fixture, BaselineLoader},
+    test_utils::{init, proxy},
+};
 use tracing::info;
 
-/// Test transaction hashes - PLACEHOLDER: Replace with actual transaction hashes
-mod test_transactions {
-    /// Simple transaction
-    pub const SIMPLE_TRANSACTION: &str =
-        "0x608d79d71287ca8a0351955a92fa4dce74d2c75cbfccfa08ed331b33de0ce4c2";
+/// Comprehensive baseline capture with detailed analysis for a single transaction
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Run manually to capture new baselines"]
+async fn capture_single_baseline() {
+    let tx_name = "uniswap_v4"; // Change this to capture different transactions
 
-    /// Large transaction
-    pub const LARGE_TRANSACTION: &str =
-        "0x0886e768f9310a753e360738e1aa6647847aca57c2ce05f09ca1333e8cf81e8c";
+    // Initialize test environment if needed
+    init::init_test_environment();
 
-    /// Uniswap V3 swap transaction
-    pub const UNISWAP_V3_SWAP: &str =
-        "0x1282e09bb5118f619da81b6a24c97999e7057ee9975628562c7cecbb4aa9f5af";
+    // Create fixture
+    let fixture = get_or_create_fixture(tx_name)
+        .await
+        .expect(&format!("Failed to create {} transaction fixture", tx_name));
 
-    /// Uniswap V4 pool manager transaction
-    pub const UNISWAP_V4_POOL_MANAGER: &str =
-        "0x258b5a643ae7ccb8e45a4ea1e308f708c8e0eb6e2f535ec68f678c944c98b402";
-}
+    info!("=== STARTING BASELINE CAPTURE FOR '{}' TRANSACTION ===", tx_name);
 
-async fn replay_transaction_and_analyze(tx_hash: &str) {
-    // Setup proxy for reliable testing
-    let proxy_url =
-        proxy::setup_test_proxy_configurable(3600).await.expect("Failed to setup test proxy");
-
-    proxy::register_with_proxy(&proxy_url).await.ok();
-
-    // Test with a simple ETH transfer
-    let tx_hash: TxHash = tx_hash.parse().expect("valid tx hash");
-
-    match engine::replay_transaction_test(tx_hash, &proxy_url, false, None).await {
-        Ok(result) => {
-            // Check that no errors were logged
-            if !result.success {
-                panic!("Errors found during replay: {:?}", result.errors);
-            }
-            info!("Transaction {tx_hash} replay completed without errors");
-        }
-        Err(e) => {
-            panic!("Failed to replay transaction: {e:?}");
-        }
+    // Create output directory
+    let output_dir = paths::get_baseline_dir();
+    if let Err(e) = fs::create_dir_all(&output_dir) {
+        println!("Creating output directory: {:?}", e);
     }
 
-    proxy::shutdown_test_proxy(&proxy_url).await.ok();
+    let start_time = Instant::now();
+
+    // Analyze the transaction comprehensively
+    let baseline = analyze_transaction_comprehensive(&fixture).await;
+
+    let capture_time = start_time.elapsed();
+    println!("✓ {} analysis completed in {:.2}s", tx_name, capture_time.as_secs_f64());
+
+    // Save individual transaction file
+    let tx_file = output_dir.join(format!("{}_baseline.json", tx_name));
+    let tx_json =
+        serde_json::to_string_pretty(&baseline).expect("Failed to serialize transaction data");
+    fs::write(&tx_file, tx_json).expect("Failed to write transaction file");
+    println!("💾 Saved {} baseline to: {:?}", tx_name, tx_file);
+
+    println!("=== BASELINE CAPTURE COMPLETE ===");
+    println!("Total time: {:.2}s", capture_time.as_secs_f64());
+    println!("Files saved to: {:?}", output_dir);
+
+    // Close the proxy to ensure cache files are written
+    proxy::shutdown_test_proxy(&fixture.proxy_url).await.ok();
+
+    // Always pass - this is just for capturing data
+    assert!(true);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_engine_replay_simple_transaction() {
+/// Comprehensive baseline capture with detailed analysis
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Run manually to capture new baselines"]
+async fn capture_all_baselines() {
+    // Initialize test environment if needed
     init::init_test_environment();
-    info!("Testing engine replay with simple transaction");
 
-    replay_transaction_and_analyze(test_transactions::SIMPLE_TRANSACTION).await;
+    let overall_start = Instant::now();
+    let fixtures = get_or_create_fixtures().await.expect("Failed to get fixtures");
+
+    println!("=== STARTING COMPREHENSIVE BASELINE CAPTURE ===");
+    println!("Transactions to analyze: {}", fixtures.len());
+
+    // Create output directory
+    let output_dir = paths::get_baseline_dir();
+    if let Err(e) = fs::create_dir_all(&output_dir) {
+        println!("Creating output directory: {:?}", e);
+    }
+
+    let mut comprehensive_baseline = ComprehensiveBaseline {
+        metadata: BaselineMetadata {
+            capture_timestamp: chrono::Utc::now().to_rfc3339(),
+            total_transactions: fixtures.len(),
+            edb_version: env!("CARGO_PKG_VERSION").to_string(),
+            test_environment: "comprehensive_integration_test".to_string(),
+            total_capture_time_ms: 0, // Will be filled later
+        },
+        transactions: HashMap::new(),
+    };
+
+    // Analyze each transaction comprehensively
+    for (tx_name, fixture) in fixtures.iter() {
+        let tx_start = Instant::now();
+        println!("=== ANALYZING {} TRANSACTION ===", tx_name.to_uppercase());
+
+        let baseline = analyze_transaction_comprehensive(fixture).await;
+        comprehensive_baseline.transactions.insert(tx_name.clone(), baseline);
+
+        let tx_time = tx_start.elapsed();
+        println!("✓ {} analysis completed in {:.2}s", tx_name, tx_time.as_secs_f64());
+
+        // Save individual transaction file
+        let tx_file = output_dir.join(format!("{}_baseline.json", tx_name));
+        let tx_json = serde_json::to_string_pretty(&comprehensive_baseline.transactions[tx_name])
+            .expect("Failed to serialize transaction data");
+        fs::write(&tx_file, tx_json).expect("Failed to write transaction file");
+        println!("💾 Saved {} baseline to: {:?}", tx_name, tx_file);
+    }
+
+    // Finalize metadata
+    comprehensive_baseline.metadata.total_capture_time_ms = overall_start.elapsed().as_millis();
+
+    let total_time = overall_start.elapsed();
+
+    println!("=== COMPREHENSIVE CAPTURE COMPLETE ===");
+    println!("Total time: {:.2}s", total_time.as_secs_f64());
+    println!("Files saved to: {:?}", output_dir);
+    println!("📊 Summary: {} transactions analyzed", fixtures.len());
+
+    let summary = create_summary(&comprehensive_baseline);
+    println!("=== ANALYSIS SUMMARY ===\n{}", serde_json::to_string_pretty(&summary).unwrap());
+
+    // Close the proxy to ensure cache files are written
+    for fixture in fixtures.values() {
+        proxy::shutdown_test_proxy(&fixture.proxy_url).await.ok();
+    }
+
+    // Always pass - this is just for capturing data
+    assert!(true);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_engine_replay_large_transaction() {
-    init::init_test_environment();
-    info!("Testing engine replay with large transaction");
-
-    replay_transaction_and_analyze(test_transactions::LARGE_TRANSACTION).await;
+/// Test comprehensive RPC analysis for simple transaction using shared logic
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+async fn test_comprehensive_simple() {
+    test_comprehensive_transaction("simple").await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_engine_replay_uniswap_v3_swap() {
-    init::init_test_environment();
-    info!("Testing engine replay with Uniswap V3 swap transaction");
-
-    replay_transaction_and_analyze(test_transactions::UNISWAP_V3_SWAP).await;
+/// Test comprehensive RPC analysis for large transaction using shared logic
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+async fn test_comprehensive_large() {
+    test_comprehensive_transaction("large").await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_engine_replay_uniswap_v4_pool_manager() {
-    init::init_test_environment();
-    info!("Testing engine replay with Uniswap V4 pool manager transaction");
+/// Test comprehensive RPC analysis for Uniswap V3 transaction using shared logic
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+async fn test_comprehensive_uniswap_v3() {
+    test_comprehensive_transaction("uniswap_v3").await;
+}
 
-    replay_transaction_and_analyze(test_transactions::UNISWAP_V4_POOL_MANAGER).await;
+/// Test comprehensive RPC analysis for Another Uniswap V3 transaction using shared logic
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+async fn test_comprehensive_another_uniswap_v3() {
+    test_comprehensive_transaction("uniswap_v3_alt").await;
+}
+
+/// Test comprehensive RPC analysis for Uniswap V4 transaction using shared logic
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+async fn test_comprehensive_uniswap_v4() {
+    test_comprehensive_transaction("uniswap_v4").await;
+}
+
+/// Core test function for comprehensive transaction analysis
+async fn test_comprehensive_transaction(tx_name: &str) {
+    info!("Starting comprehensive RPC test for {} transaction using shared logic...", tx_name);
+
+    // Initialize test environment if needed
+    init::init_test_environment();
+
+    // Verify baseline exists
+    let baseline_loader = BaselineLoader::new();
+    assert!(
+        baseline_loader.baseline_files_exist(),
+        "Baseline files must exist for comprehensive testing"
+    );
+
+    // Load expected baseline data as ComprehensiveAnalysisResult for direct comparison
+    let expected_analysis = baseline_loader
+        .load_comprehensive_analysis_result(tx_name)
+        .expect(&format!("Failed to load baseline analysis for {}", tx_name));
+
+    // Create fixture
+    let fixture = get_or_create_fixture(tx_name)
+        .await
+        .expect(&format!("Failed to create {} transaction fixture", tx_name));
+
+    // Perform comprehensive analysis using the SAME logic as baseline capture
+    let actual_analysis = analyze_transaction_comprehensive(&fixture).await;
+
+    // Compare actual vs expected using direct struct comparison (excludes performance metrics)
+    if actual_analysis != expected_analysis {
+        panic!("Comprehensive analysis mismatch for {tx_name}");
+    }
+
+    info!("Comprehensive analysis matches baseline for {}", tx_name);
+
+    info!("Comprehensive RPC test for {} completed successfully!", tx_name);
+
+    proxy::shutdown_test_proxy(&fixture.proxy_url).await.ok();
 }

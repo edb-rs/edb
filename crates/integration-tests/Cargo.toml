@@ -24,15 +24,20 @@ edb-engine.workspace = true
 # Test dependencies
 tokio = { workspace = true, features = ["full"] }
 serde_json.workspace = true
-chrono.workspace = true
+serde = { workspace = true, features = ["derive"] }
+chrono = { workspace = true, features = ["serde"] }
 eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 reqwest = { workspace = true, features = ["json"] }
+once_cell.workspace = true
+futures.workspace = true
 
 # Alloy for blockchain types
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-rpc-types = { workspace = true, features = ["eth"] }
+alloy-json-abi = { workspace = true }
+alloy-dyn-abi = { workspace = true }
 
 # REVM for hardfork specs
 revm = { workspace = true, features = ["std", "serde", "alloydb"] }

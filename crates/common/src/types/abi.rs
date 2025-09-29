@@ -50,7 +50,7 @@ pub struct CallableAbiEntry {
 }
 
 /// Contract type in terms of proxy pattern.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub enum ContractTy {
     /// A normal contract.
     Normal,

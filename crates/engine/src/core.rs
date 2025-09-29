@@ -330,11 +330,15 @@ impl Engine {
             // We use the default API key if none is provided
             let api_key = self.get_etherscan_api_key();
 
+            let cache_ttl = env::var("EDB_ETHERSCAN_CACHE_TTL").ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(DEFAULT_ETHERSCAN_CACHE_TTL);
+
             let etherscan = Client::builder()
                 .with_api_key(api_key)
                 .with_cache(
                     etherscan_cache_root.clone(),
-                    Duration::from_secs(DEFAULT_ETHERSCAN_CACHE_TTL),
+                    Duration::from_secs(cache_ttl),
                 ) // 24 hours
                 .chain(chain_id.into())?
                 .build()?;

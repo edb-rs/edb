@@ -165,7 +165,7 @@ mod transient_string_map {
         let string_map: HashMap<String, U256> = storage
             .iter()
             .map(|((addr, key), value)| {
-                let key_string = format!("{}:{}", addr, key);
+                let key_string = format!("{addr}:{key}");
                 (key_string, *value)
             })
             .collect();
@@ -183,17 +183,16 @@ mod transient_string_map {
             let parts: Vec<&str> = key_string.split(':').collect();
             if parts.len() != 2 {
                 return Err(serde::de::Error::custom(format!(
-                    "Invalid transient storage key format: {}",
-                    key_string
+                    "Invalid transient storage key format: {key_string}",
                 )));
             }
 
             let addr: Address = parts[0].parse().map_err(|e| {
-                serde::de::Error::custom(format!("Invalid address in key {}: {}", key_string, e))
+                serde::de::Error::custom(format!("Invalid address in key {key_string}: {e}"))
             })?;
 
             let key: U256 = parts[1].parse().map_err(|e| {
-                serde::de::Error::custom(format!("Invalid U256 in key {}: {}", key_string, e))
+                serde::de::Error::custom(format!("Invalid U256 in key {key_string}: {e}"))
             })?;
 
             transient_storage.insert((addr, key), value);

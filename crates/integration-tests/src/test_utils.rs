@@ -25,6 +25,17 @@ pub mod paths {
 
     use super::*;
 
+    /// Get the baseline directory path
+    pub fn get_baseline_dir() -> PathBuf {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        manifest_dir
+            .parent() // crates/
+            .and_then(|p| p.parent()) // workspace root
+            .expect("Failed to find workspace root")
+            .join("testdata")
+            .join("rpc_baseline")
+    }
+
     /// Get the testdata cache directory root path
     pub fn get_testdata_cache_root() -> PathBuf {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -36,7 +47,7 @@ pub mod paths {
             .join("cache")
     }
 
-    /// Setup the EDB_CACHE_DIR environment variable for tests
+    /// Setup the EDB_CACHE_DIR/EDB_ETHERSCAN_CACHE_TTL environment variable for tests
     /// This should be called at the beginning of each test to ensure consistent cache location
     pub fn setup_test_cache_dir() {
         let cache_dir = get_testdata_cache_root();
@@ -48,6 +59,9 @@ pub mod paths {
         if !cache_dir.exists() {
             std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
         }
+
+        // Set the EDB_ETHERSCAN_CACHE_TTL environment variable
+        env::set_var("EDB_ETHERSCAN_CACHE_TTL", format!("{}", u32::MAX)); // close to forever
 
         println!("Test cache directory set to: {}", cache_dir.display());
     }
