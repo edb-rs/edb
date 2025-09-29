@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve the cache mechanism to avoid redundant downloads ([#10](https://github.com/edb-rs/edb/issues/10))
 - Speed up health check in rpc proxy ([#11](https://github.com/edb-rs/edb/pull/11))
 - Remove Web UI code and dependencies ([#15](https://github.com/edb-rs/edb/pull/15))
+- Add more tests for common and rpc-proxy crates, and well as more end-to-end tests for engine crate
 
 ## [0.0.1] - 2024-09-19
 

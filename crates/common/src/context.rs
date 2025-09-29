@@ -204,6 +204,6 @@ mod tests {
     #[test]
     fn test_edb_db_error_display() {
         let error = EdbDBError::new("display test");
-        assert_eq!(format!("{}", error), "EdbDB Error: display test");
+        assert_eq!(format!("{error}"), "EdbDB Error: display test");
     }
 }

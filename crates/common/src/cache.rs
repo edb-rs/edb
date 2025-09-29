@@ -341,7 +341,7 @@ mod tests {
     fn test_cache_wrapper_expired() {
         let data = TestData { value: "test".to_string(), number: 42 };
         let ttl = Duration::from_secs(0);
-        let wrapper = CacheWrapper::new(data.clone(), Some(ttl));
+        let wrapper = CacheWrapper::new(data, Some(ttl));
 
         // Since TTL is 0, it should be expired immediately
         std::thread::sleep(Duration::from_millis(2000));
@@ -422,7 +422,7 @@ mod tests {
         assert!(loaded_data.is_none());
 
         // Cache file should be removed
-        let cache_file = &temp_path.join(format!("{}.json", label));
+        let cache_file = &temp_path.join(format!("{label}.json"));
         assert!(!cache_file.exists());
     }
 
@@ -432,10 +432,10 @@ mod tests {
         let cache = EdbCache::<TestData>::new(Some(&temp_path), None).unwrap().unwrap();
 
         let label = "corrupted";
-        let cache_file = &temp_path.join(format!("{}.json", label));
+        let cache_file = &temp_path.join(format!("{label}.json"));
 
         // Write corrupted data
-        fs::write(&cache_file, "invalid json").unwrap();
+        fs::write(cache_file, "invalid json").unwrap();
 
         // Try to load corrupted data
         let loaded_data = cache.load_cache(label);
@@ -498,16 +498,16 @@ mod tests {
 
         // Save multiple items
         for i in 0..10 {
-            let data = TestData { value: format!("item_{}", i), number: i as u32 };
-            cache.save_cache(format!("item_{}", i), &data).unwrap();
+            let data = TestData { value: format!("item_{i}"), number: i as u32 };
+            cache.save_cache(format!("item_{i}"), &data).unwrap();
         }
 
         // Load and verify all items
         for i in 0..10 {
-            let loaded = cache.load_cache(format!("item_{}", i));
+            let loaded = cache.load_cache(format!("item_{i}"));
             assert!(loaded.is_some());
             let loaded = loaded.unwrap();
-            assert_eq!(loaded.value, format!("item_{}", i));
+            assert_eq!(loaded.value, format!("item_{i}"));
             assert_eq!(loaded.number, i as u32);
         }
     }

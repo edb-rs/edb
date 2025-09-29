@@ -211,7 +211,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(i, ty)| Param {
-                    name: format!("param{}", i),
+                    name: format!("param{i}"),
                     ty: ty.to_string(),
                     internal_type: None,
                     components: Vec::new(),
@@ -221,7 +221,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(i, ty)| Param {
-                    name: format!("output{}", i),
+                    name: format!("output{i}"),
                     ty: ty.to_string(),
                     internal_type: None,
                     components: Vec::new(),
@@ -355,7 +355,7 @@ mod tests {
         let function = create_mock_function("transfer", vec!["address", "uint256"], vec!["bool"]);
         let entry = CallableAbiEntry::from(&function);
 
-        let display = format!("{}", entry);
+        let display = format!("{entry}");
         assert!(display.contains("[Function]"));
         assert!(display.contains("transfer"));
         assert!(display.contains("address, uint256"));
@@ -367,7 +367,7 @@ mod tests {
         let function = create_mock_function("burn", vec!["uint256"], vec![]);
         let entry = CallableAbiEntry::from(&function);
 
-        let display = format!("{}", entry);
+        let display = format!("{entry}");
         assert!(display.contains("[Function]"));
         assert!(display.contains("burn"));
         assert!(display.contains("uint256"));
@@ -379,7 +379,7 @@ mod tests {
         let function = create_mock_function("getInfo", vec![], vec!["string", "uint256", "bool"]);
         let entry = CallableAbiEntry::from(&function);
 
-        let display = format!("{}", entry);
+        let display = format!("{entry}");
         assert!(display.contains("[Function]"));
         assert!(display.contains("getInfo"));
         assert!(display.contains("return (string, uint256, bool)"));
@@ -397,8 +397,8 @@ mod tests {
             entries: vec![entry],
         };
 
-        let display = format!("{}", info);
-        assert!(display.contains(&format!("{}", address)));
+        let display = format!("{info}");
+        assert!(display.contains(&format!("{address}")));
         assert!(display.contains("Implementation"));
         assert!(display.contains("1 entries"));
         assert!(display.contains("test"));
@@ -452,8 +452,7 @@ mod tests {
 
         // Create many entries
         for i in 0..1000 {
-            let function =
-                create_mock_function(&format!("func{}", i), vec!["uint256"], vec!["bool"]);
+            let function = create_mock_function(&format!("func{i}"), vec!["uint256"], vec!["bool"]);
             entries.push(CallableAbiEntry::from(&function));
         }
 

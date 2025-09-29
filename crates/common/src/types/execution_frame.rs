@@ -75,13 +75,13 @@ mod tests {
     #[test]
     fn test_execution_frame_id_display() {
         let frame_id = ExecutionFrameId::new(123, 456);
-        assert_eq!(format!("{}", frame_id), "123.456");
+        assert_eq!(format!("{frame_id}"), "123.456");
 
         let zero_frame = ExecutionFrameId::new(0, 0);
-        assert_eq!(format!("{}", zero_frame), "0.0");
+        assert_eq!(format!("{zero_frame}"), "0.0");
 
         let max_frame = ExecutionFrameId::new(usize::MAX, usize::MAX);
-        assert_eq!(format!("{}", max_frame), format!("{}.{}", usize::MAX, usize::MAX));
+        assert_eq!(format!("{max_frame}"), format!("{}.{}", usize::MAX, usize::MAX));
     }
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn test_execution_frame_id_clone() {
         let frame = ExecutionFrameId::new(100, 200);
-        let cloned = frame.clone();
+        let cloned = frame;
 
         assert_eq!(frame, cloned);
         assert_eq!(cloned.trace_entry_id(), 100);
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn test_execution_frame_id_debug() {
         let frame = ExecutionFrameId::new(123, 456);
-        let debug_str = format!("{:?}", frame);
+        let debug_str = format!("{frame:?}");
         assert!(debug_str.contains("ExecutionFrameId"));
         assert!(debug_str.contains("123"));
         assert!(debug_str.contains("456"));

@@ -71,8 +71,10 @@ mod tests {
 
     #[test]
     fn test_opcode_info_with_codes() {
-        let mut info = OpcodeInfo::default();
-        info.bytecode_address = address!("1234567890123456789012345678901234567890");
+        let mut info = OpcodeInfo {
+            bytecode_address: address!("1234567890123456789012345678901234567890"),
+            codes: HashMap::new(),
+        };
         info.codes.insert(0, "PUSH1 0x60".to_string());
         info.codes.insert(2, "PUSH1 0x40".to_string());
         info.codes.insert(4, "MSTORE".to_string());
@@ -93,8 +95,10 @@ mod tests {
 
     #[test]
     fn test_source_info_with_sources() {
-        let mut info = SourceInfo::default();
-        info.bytecode_address = address!("abcdefabcdefabcdefabcdefabcdefabcdefabcd");
+        let mut info = SourceInfo {
+            bytecode_address: address!("abcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+            ..Default::default()
+        };
         info.sources.insert(
             PathBuf::from("contracts/Token.sol"),
             "pragma solidity ^0.8.0;\n\ncontract Token {}".to_string(),
@@ -112,8 +116,10 @@ mod tests {
 
     #[test]
     fn test_code_from_opcode_info() {
-        let mut opcode_info = OpcodeInfo::default();
-        opcode_info.bytecode_address = address!("1111111111111111111111111111111111111111");
+        let mut opcode_info = OpcodeInfo {
+            bytecode_address: address!("1111111111111111111111111111111111111111"),
+            ..Default::default()
+        };
         opcode_info.codes.insert(0, "PUSH1 0x01".to_string());
 
         let code = Code::from(opcode_info.clone());
@@ -131,8 +137,10 @@ mod tests {
 
     #[test]
     fn test_code_from_source_info() {
-        let mut source_info = SourceInfo::default();
-        source_info.bytecode_address = address!("2222222222222222222222222222222222222222");
+        let mut source_info = SourceInfo {
+            bytecode_address: address!("2222222222222222222222222222222222222222"),
+            ..Default::default()
+        };
         source_info.sources.insert(PathBuf::from("test.sol"), "contract Test {}".to_string());
 
         let code = Code::from(source_info.clone());
@@ -150,8 +158,10 @@ mod tests {
 
     #[test]
     fn test_code_bytecode_address_opcode() {
-        let mut opcode_info = OpcodeInfo::default();
-        opcode_info.bytecode_address = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let opcode_info = OpcodeInfo {
+            bytecode_address: address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            ..Default::default()
+        };
 
         let code = Code::Opcode(opcode_info);
         assert_eq!(code.bytecode_address(), address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
@@ -159,8 +169,10 @@ mod tests {
 
     #[test]
     fn test_code_bytecode_address_source() {
-        let mut source_info = SourceInfo::default();
-        source_info.bytecode_address = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let source_info = SourceInfo {
+            bytecode_address: address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            ..Default::default()
+        };
 
         let code = Code::Source(source_info);
         assert_eq!(code.bytecode_address(), address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
@@ -168,8 +180,10 @@ mod tests {
 
     #[test]
     fn test_opcode_info_serialization() {
-        let mut info = OpcodeInfo::default();
-        info.bytecode_address = address!("1234567890123456789012345678901234567890");
+        let mut info = OpcodeInfo {
+            bytecode_address: address!("1234567890123456789012345678901234567890"),
+            ..Default::default()
+        };
         info.codes.insert(0, "PUSH1 0x60".to_string());
         info.codes.insert(2, "PUSH1 0x40".to_string());
 
@@ -183,8 +197,10 @@ mod tests {
 
     #[test]
     fn test_source_info_serialization() {
-        let mut info = SourceInfo::default();
-        info.bytecode_address = address!("abcdefabcdefabcdefabcdefabcdefabcdefabcd");
+        let mut info = SourceInfo {
+            bytecode_address: address!("abcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+            ..Default::default()
+        };
         info.sources
             .insert(PathBuf::from("contracts/Token.sol"), "pragma solidity ^0.8.0;".to_string());
 
@@ -198,8 +214,10 @@ mod tests {
 
     #[test]
     fn test_code_opcode_serialization() {
-        let mut opcode_info = OpcodeInfo::default();
-        opcode_info.bytecode_address = address!("1111111111111111111111111111111111111111");
+        let mut opcode_info = OpcodeInfo {
+            bytecode_address: address!("1111111111111111111111111111111111111111"),
+            ..Default::default()
+        };
         opcode_info.codes.insert(0, "PUSH1 0x01".to_string());
 
         let code = Code::Opcode(opcode_info);
@@ -221,8 +239,10 @@ mod tests {
 
     #[test]
     fn test_code_source_serialization() {
-        let mut source_info = SourceInfo::default();
-        source_info.bytecode_address = address!("2222222222222222222222222222222222222222");
+        let mut source_info = SourceInfo {
+            bytecode_address: address!("2222222222222222222222222222222222222222"),
+            ..Default::default()
+        };
         source_info.sources.insert(PathBuf::from("test.sol"), "contract Test {}".to_string());
 
         let code = Code::Source(source_info);
@@ -291,12 +311,14 @@ mod tests {
 
     #[test]
     fn test_large_data_serialization() {
-        let mut info = OpcodeInfo::default();
-        info.bytecode_address = address!("ffffffffffffffffffffffffffffffffffffffff");
+        let mut info = OpcodeInfo {
+            bytecode_address: address!("ffffffffffffffffffffffffffffffffffffffff"),
+            ..Default::default()
+        };
 
         // Add many opcode entries
         for i in 0..1000 {
-            info.codes.insert(i * 2, format!("OPCODE_{}", i));
+            info.codes.insert(i * 2, format!("OPCODE_{i}"));
         }
 
         let json = serde_json::to_string(&info).expect("Failed to serialize large OpcodeInfo");
@@ -311,8 +333,10 @@ mod tests {
 
     #[test]
     fn test_source_info_large_content_serialization() {
-        let mut info = SourceInfo::default();
-        info.bytecode_address = address!("ffffffffffffffffffffffffffffffffffffffff");
+        let mut info = SourceInfo {
+            bytecode_address: address!("ffffffffffffffffffffffffffffffffffffffff"),
+            ..Default::default()
+        };
 
         let large_content = "// ".repeat(10000) + &"contract Test {}".repeat(100);
         info.sources.insert(PathBuf::from("large.sol"), large_content.clone());
@@ -355,8 +379,7 @@ mod tests {
         ];
 
         for addr in addresses {
-            let mut info = OpcodeInfo::default();
-            info.bytecode_address = addr;
+            let info = OpcodeInfo { bytecode_address: addr, ..Default::default() };
 
             let json = serde_json::to_string(&info).expect("Failed to serialize address");
             let deserialized: OpcodeInfo =
@@ -368,8 +391,10 @@ mod tests {
 
     #[test]
     fn test_code_clone() {
-        let mut opcode_info = OpcodeInfo::default();
-        opcode_info.bytecode_address = address!("1234567890123456789012345678901234567890");
+        let mut opcode_info = OpcodeInfo {
+            bytecode_address: address!("1234567890123456789012345678901234567890"),
+            ..Default::default()
+        };
         opcode_info.codes.insert(0, "PUSH1 0x60".to_string());
 
         let code = Code::Opcode(opcode_info);

@@ -886,8 +886,8 @@ mod tests {
             first_snapshot_id: None,
         };
 
-        trace.push(entry1.clone());
-        trace.push(entry2.clone());
+        trace.push(entry1);
+        trace.push(entry2);
 
         // Test shared reference iteration
         let collected: Vec<_> = (&trace).into_iter().collect();
@@ -998,7 +998,7 @@ mod tests {
                 created_contract: false,
                 create_scheme: None,
                 bytecode: None,
-                target_label: Some(format!("Entry{}", i)),
+                target_label: Some(format!("Entry{i}")),
                 self_destruct: None,
                 events: vec![],
                 first_snapshot_id: Some(i),
