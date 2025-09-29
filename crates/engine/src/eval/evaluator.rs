@@ -1443,25 +1443,25 @@ mod tests {
         let left = DynSolValue::Uint(U256::from(10), 256);
         let right = DynSolValue::Uint(U256::from(10), 256);
         let result = evaluator.apply_comparison_op(left, right, ComparisonOp::Equal);
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
 
         // Test inequality
         let left = DynSolValue::Uint(U256::from(10), 256);
         let right = DynSolValue::Uint(U256::from(20), 256);
         let result = evaluator.apply_comparison_op(left, right, ComparisonOp::NotEqual);
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
 
         // Test less than
         let left = DynSolValue::Uint(U256::from(10), 256);
         let right = DynSolValue::Uint(U256::from(20), 256);
         let result = evaluator.apply_comparison_op(left, right, ComparisonOp::Less);
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
 
         // Test greater than
         let left = DynSolValue::Uint(U256::from(30), 256);
         let right = DynSolValue::Uint(U256::from(20), 256);
         let result = evaluator.apply_comparison_op(left, right, ComparisonOp::Greater);
-        assert_eq!(result.unwrap(), true);
+        assert!(result.unwrap());
     }
 
     #[test]
@@ -1469,28 +1469,29 @@ mod tests {
         let evaluator = ExpressionEvaluator::new_default();
 
         // Test bool value
-        assert_eq!(evaluator.to_bool(&DynSolValue::Bool(true)).unwrap(), true);
-        assert_eq!(evaluator.to_bool(&DynSolValue::Bool(false)).unwrap(), false);
+        assert!(evaluator.to_bool(&DynSolValue::Bool(true)).unwrap());
+        assert!(!evaluator.to_bool(&DynSolValue::Bool(false)).unwrap());
 
         // Test uint values
-        assert_eq!(evaluator.to_bool(&DynSolValue::Uint(U256::from(1), 256)).unwrap(), true);
-        assert_eq!(evaluator.to_bool(&DynSolValue::Uint(U256::from(0), 256)).unwrap(), false);
-        assert_eq!(evaluator.to_bool(&DynSolValue::Uint(U256::from(100), 256)).unwrap(), true);
+        assert!(evaluator.to_bool(&DynSolValue::Uint(U256::from(1), 256)).unwrap());
+        assert!(!evaluator.to_bool(&DynSolValue::Uint(U256::from(0), 256)).unwrap());
+        assert!(evaluator.to_bool(&DynSolValue::Uint(U256::from(100), 256)).unwrap());
 
         // Test int values
-        assert_eq!(
-            evaluator.to_bool(&DynSolValue::Int(I256::from_raw(U256::from(1)), 256)).unwrap(),
-            true
+        assert!(
+            evaluator
+                .to_bool(&DynSolValue::Int(I256::from_raw(U256::from(1)), 256))
+                .unwrap()
         );
-        assert_eq!(
-            evaluator.to_bool(&DynSolValue::Int(I256::from_raw(U256::from(0)), 256)).unwrap(),
-            false
+        assert!(
+            !evaluator
+                .to_bool(&DynSolValue::Int(I256::from_raw(U256::from(0)), 256))
+                .unwrap()
         );
-        assert_eq!(
+        assert!(
             evaluator
                 .to_bool(&DynSolValue::Int(I256::from_raw(U256::from(1)).wrapping_neg(), 256))
-                .unwrap(),
-            true
+                .unwrap()
         );
     }
 
@@ -1561,14 +1562,14 @@ mod tests {
         let result = evaluator.eval("true", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test false
         let result = evaluator.eval("false", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
     }
 
@@ -1667,21 +1668,21 @@ mod tests {
         let result = evaluator.eval("!true", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
 
         // Test logical not on number (non-zero becomes false)
         let result = evaluator.eval("!42", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
 
         // Test logical not on zero (becomes true)
         let result = evaluator.eval("!0", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
     }
 
@@ -1693,48 +1694,48 @@ mod tests {
         let result = evaluator.eval("10 == 10", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         let result = evaluator.eval("10 == 20", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
 
         // Test inequality
         let result = evaluator.eval("10 != 20", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test less than
         let result = evaluator.eval("10 < 20", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test greater than
         let result = evaluator.eval("30 > 20", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test less than or equal
         let result = evaluator.eval("10 <= 10", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test greater than or equal
         let result = evaluator.eval("20 >= 10", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
     }
 
@@ -1746,39 +1747,39 @@ mod tests {
         let result = evaluator.eval("true && true", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         let result = evaluator.eval("true && false", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
 
         // Test logical OR
         let result = evaluator.eval("true || false", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         let result = evaluator.eval("false || false", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
 
         // Test short-circuit evaluation with numbers
         let result = evaluator.eval("0 && 42", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
 
         let result = evaluator.eval("1 || 0", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
     }
 
@@ -1859,7 +1860,7 @@ mod tests {
         let result = evaluator.eval("(5 > 3) && (2 == 2) || false", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test nested conditional expressions
@@ -1986,28 +1987,28 @@ mod tests {
         let result = evaluator.eval("bool(1)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Bool from uint (zero -> false)
         let result = evaluator.eval("bool(0)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false);
+            assert!(!b);
         }
 
         // Bool from large uint (non-zero -> true)
         let result = evaluator.eval("bool(0xFFFFFFFFFFFFFFFF)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Bool from int (positive -> true)
         let result = evaluator.eval("bool(int256(1))", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // ===== BYTES CASTING =====
@@ -2023,7 +2024,7 @@ mod tests {
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
             // 257 -> uint8(1) -> bool(true)
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Cast in arithmetic expression
@@ -2038,7 +2039,7 @@ mod tests {
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
             // 300 % 256 = 44, 44 % 256 = 44, so they're equal
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // ===== ERROR CASES =====
@@ -2072,7 +2073,7 @@ mod tests {
         let result = evaluator.eval("bool(1) && bool(0)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, false); // true && false = false
+            assert!(!b); // true && false = false
         }
 
         // Mixed type operations requiring implicit casting behavior
@@ -2087,7 +2088,7 @@ mod tests {
 
         // Test division by zero (should be caught during evaluation)
         let result = evaluator.eval("5 / 0", 0);
-        eprintln!("Error: {:?}", result);
+        eprintln!("Error: {result:?}");
         assert!(result.unwrap_err().to_string().to_lowercase().contains("division by zero"));
 
         // Test invalid operations
@@ -2359,7 +2360,7 @@ mod tests {
         let log = debug_handler.get_log();
         println!("Execution log:");
         for entry in &log {
-            println!("  {}", entry);
+            println!("  {entry}");
         }
 
         // Verify all operations were logged
@@ -2444,21 +2445,21 @@ mod tests {
         let result = evaluator.eval("(10 + 5) == 15", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test boolean in arithmetic context (through logical operations)
         let result = evaluator.eval("!(10 == 5)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
 
         // Test complex mixed expression
         let result = evaluator.eval("(2 * 3 > 5) && (10 / 2 == 5)", 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(b)) = result {
-            assert_eq!(b, true);
+            assert!(b);
         }
     }
 
@@ -2936,7 +2937,7 @@ mod tests {
 
         // Set up test data
         debug_handler.set_variable("testString", DynSolValue::String("Hello World".to_string()));
-        debug_handler.set_variable("emptyString", DynSolValue::String("".to_string()));
+        debug_handler.set_variable("emptyString", DynSolValue::String(String::new()));
         debug_handler.set_variable("myBytes", DynSolValue::Bytes(vec![1, 2, 3, 4, 5]));
         debug_handler.set_variable("emptyBytes", DynSolValue::Bytes(vec![]));
         debug_handler.set_variable(
@@ -3143,7 +3144,7 @@ mod tests {
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(is_valid)) = result {
             // This complex condition should evaluate based on our mock values
-            println!("Complex DeFi condition result: {}", is_valid);
+            println!("Complex DeFi condition result: {is_valid}");
         }
 
         // Complex Expression 2: Nested conditional with multiple function calls and arithmetic
@@ -3151,7 +3152,7 @@ mod tests {
 
         let result = evaluator.eval(complex_expr2, 0);
         assert!(result.is_ok());
-        println!("Complex ternary expression result: {:?}", result);
+        println!("Complex ternary expression result: {result:?}");
 
         // Complex Expression 3: Advanced protocol governance voting calculation
         let complex_expr3 = "((balanceOf() * (block.number - 18500000)) + (getUserBalance() * getSlippageTolerance())) >= ((totalSupply() / 100) * ((msg.value > 1000000000000000000) ? (calculateFee() + 500) : (calculateFee() - 200))) && (block.timestamp > 1700000000) && ((tx.origin == msg.sender) || (getPrice() > 1800))";
@@ -3159,7 +3160,7 @@ mod tests {
         let result = evaluator.eval(complex_expr3, 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(governance_valid)) = result {
-            println!("Complex governance voting condition: {}", governance_valid);
+            println!("Complex governance voting condition: {governance_valid}");
         }
 
         // Verify all operations were logged
@@ -3221,12 +3222,12 @@ mod tests {
                     ((block.number > 18500000) ? getMultiplier() : (getMultiplier() / 2))
                 ) / 100
             )
-        "#.replace('\n', "").replace(' ', "");
+        "#.replace(['\n', ' '], "");
 
         let result = evaluator.eval(&ultra_complex, 0);
         assert!(result.is_ok());
         if let Ok(DynSolValue::Bool(result_bool)) = result {
-            println!("Ultra complex yield farming condition: {}", result_bool);
+            println!("Ultra complex yield farming condition: {result_bool}");
         }
 
         // Verify extensive logging occurred
@@ -3234,11 +3235,11 @@ mod tests {
         let total_operations = log.len();
         assert!(
             total_operations >= 20,
-            "Ultra complex expression should generate many log entries, got: {}",
-            total_operations
+            "Ultra complex expression should generate many log entries, got: {total_operations}"
         );
 
-        println!("Total operations logged: {}", total_operations);
-        println!("Sample log entries: {:?}", log.iter().take(5).collect::<Vec<_>>());
+        println!("Total operations logged: {total_operations}");
+        let sample_entries = log.iter().take(5).collect::<Vec<_>>();
+        println!("Sample log entries: {sample_entries:?}");
     }
 }

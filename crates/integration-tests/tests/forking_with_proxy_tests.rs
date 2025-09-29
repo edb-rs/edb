@@ -48,9 +48,9 @@ async fn test_fork_with_proxy_cache() {
     let result = fork_and_prepare(&proxy_url, tx_hash, false).await;
     let duration = start.elapsed();
 
-    assert!(result.is_ok(), "Fork failed: {:?}", result.err());
+    assert!(result.is_ok(), "Fork failed: {error:?}", error = result.err());
 
-    println!("First fork took: {:?}", duration);
+    println!("First fork took: {duration:?}");
 
     if let Ok(fork_result) = result {
         assert_eq!(fork_result.fork_info.chain_id, 1);
@@ -61,9 +61,9 @@ async fn test_fork_with_proxy_cache() {
         let result2 = fork_and_prepare(&proxy_url, tx_hash, false).await;
         let duration2 = start2.elapsed();
 
-        assert!(result2.is_ok(), "Fork failed: {:?}", result2.err());
+        assert!(result2.is_ok(), "Fork failed: {error:?}", error = result2.err());
 
-        println!("Second fork took: {:?}", duration2);
+        println!("Second fork took: {duration2:?}");
 
         // Print cache statistics
         if let Ok(stats) = proxy::get_cache_stats(&proxy_url).await {
@@ -94,7 +94,8 @@ async fn test_multiple_transactions_with_cache() {
     for (i, tx_hash_str) in tx_hashes.iter().enumerate() {
         let tx_hash: TxHash = tx_hash_str.parse().expect("valid tx hash");
 
-        println!("Testing transaction {}: {}", i + 1, tx_hash_str);
+        let index = i + 1;
+        println!("Testing transaction {index}: {tx_hash_str}");
         let start = std::time::Instant::now();
 
         let result = fork_and_prepare(&proxy_url, tx_hash, false).await;
@@ -102,13 +103,12 @@ async fn test_multiple_transactions_with_cache() {
 
         match result {
             Ok(fork_result) => {
-                println!(
-                    "Block: {}, Chain: {}, Time: {:?}",
-                    fork_result.fork_info.block_number, fork_result.fork_info.chain_id, duration
-                );
+                let block = fork_result.fork_info.block_number;
+                let chain = fork_result.fork_info.chain_id;
+                println!("Block: {block}, Chain: {chain}, Time: {duration:?}");
             }
             Err(e) => {
-                panic!("Fork failed: {:?}", e);
+                panic!("Fork failed: {e:?}");
             }
         }
     }

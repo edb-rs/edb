@@ -32,7 +32,7 @@ fn test_default_config() {
 
     assert_eq!(config.rpc_proxy_url, "http://localhost:8545");
     assert_eq!(config.etherscan_api_key, None);
-    assert_eq!(config.quick, false);
+    assert!(!config.quick);
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn test_config_with_custom_values() {
 
     assert_eq!(config.rpc_proxy_url, "http://localhost:9545");
     assert_eq!(config.etherscan_api_key, Some("test_key".to_string()));
-    assert_eq!(config.quick, true);
+    assert!(config.quick);
 }
 
 #[test]
