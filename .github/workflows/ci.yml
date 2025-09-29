@@ -167,8 +167,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Cache SVM
+        uses: actions/cache@v4
+        with:
+          path: ~/.svm
+          key: ${{ runner.os }}-svm-${{ hashFiles('~/.svm/**') }}
+          restore-keys: |
+            ${{ runner.os }}-svm-
+
       - name: Run integration tests
-        run: cargo test -p edb-integration-tests --verbose
+        run: cargo test -p edb-integration-tests --verbose -- --nocapture
         env:
           EDB_TEST_PROXY_MODE: cache-only
           EDB_TEST_ETHERSCAN_MODE: cache-only
