@@ -1023,7 +1023,7 @@ mod tests {
         let num_entries = 6000; // This should create ~25MB of data
 
         for i in 0..num_entries {
-            let key = format!("large_key_{}", i);
+            let key = format!("large_key_{i}");
             let value = serde_json::json!({"data": large_data, "index": i});
             manager.set(key, value).await;
         }
@@ -1074,7 +1074,7 @@ mod tests {
 
         // Verify specific entries
         for i in [0, num_entries / 2, num_entries - 1] {
-            let key = format!("large_key_{}", i);
+            let key = format!("large_key_{i}");
             let value = manager2.get(&key).await.unwrap();
             assert_eq!(value["data"], large_data);
             assert_eq!(value["index"], i);
