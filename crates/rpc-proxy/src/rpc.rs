@@ -978,7 +978,7 @@ mod tests {
 
         for (request, expected) in test_cases {
             let result = handler.has_non_deterministic_block_params(&request);
-            assert_eq!(result, expected, "Failed for request: {:?}", request);
+            assert_eq!(result, expected, "Failed for request: {request:?}");
         }
     }
 
@@ -1379,8 +1379,7 @@ mod tests {
             let result = handler.is_rate_limit_response(status, text, json.as_ref());
             assert_eq!(
                 result, expected,
-                "Failed for status: {:?}, text: {}, json: {:?}",
-                status, text, json
+                "Failed for status: {status:?}, text: {text}, json: {json:?}"
             );
         }
     }
@@ -1489,7 +1488,7 @@ mod tests {
 
         for (response, expected) in test_cases {
             let result = handler.is_user_error(&response);
-            assert_eq!(result, expected, "Failed for response: {:?}", response);
+            assert_eq!(result, expected, "Failed for response: {response:?}");
         }
     }
 
@@ -1795,7 +1794,7 @@ mod tests {
 
         for (response, expected) in test_cases {
             let result = handler.is_valid_debug_trace_response(&response);
-            assert_eq!(result, expected, "Failed for response: {:?}", response);
+            assert_eq!(result, expected, "Failed for response: {response:?}");
         }
     }
 }

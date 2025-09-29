@@ -475,7 +475,7 @@ mod tests {
         // Test with HashSet
         use std::collections::HashSet;
         let mut set = HashSet::new();
-        set.insert(bp1.clone());
+        set.insert(bp1);
         assert!(!set.insert(bp2)); // Should return false as it's a duplicate
         assert!(set.insert(bp3)); // Should return true as it's different
     }

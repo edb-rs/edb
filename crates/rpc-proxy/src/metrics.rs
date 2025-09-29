@@ -913,13 +913,13 @@ mod tests {
             let collector_clone = Arc::clone(&collector);
             let handle = thread::spawn(move || {
                 for j in 0..100 {
-                    collector_clone.record_cache_hit(&format!("method_{}", i), j as u64);
+                    collector_clone.record_cache_hit(&format!("method_{i}"), j as u64);
 
                     // Record cache miss and forwarded request
                     collector_clone.record_cache_miss();
                     collector_clone.record_request(
-                        &format!("method_{}", i),
-                        &format!("provider_{}", i),
+                        &format!("method_{i}"),
+                        &format!("provider_{i}"),
                         (j * 2) as u64,
                         true,
                     );
@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(stats.len(), 10); // 10 different methods
 
         for i in 0..10 {
-            let method_name = format!("method_{}", i);
+            let method_name = format!("method_{i}");
             let method_stat = stats.get(&method_name).unwrap();
             assert_eq!(method_stat.hits, 100);
             assert_eq!(method_stat.misses, 100);
@@ -955,7 +955,7 @@ mod tests {
         assert_eq!(usage.len(), 10); // 10 different providers
 
         for i in 0..10 {
-            let provider_name = format!("provider_{}", i);
+            let provider_name = format!("provider_{i}");
             let provider_usage = usage.get(&provider_name).unwrap();
             assert_eq!(provider_usage.request_count, 100);
             assert_eq!(provider_usage.success_count, 100);
@@ -986,10 +986,12 @@ mod tests {
 
     #[test]
     fn test_metrics_serialization() {
-        let mut method_stats = MethodStats::default();
-        method_stats.hits = 10;
-        method_stats.total_requests = 15;
-        method_stats.avg_response_time_ms = 150.5;
+        let method_stats = MethodStats {
+            hits: 10,
+            total_requests: 15,
+            avg_response_time_ms: 150.5,
+            ..Default::default()
+        };
 
         // Test serialization to JSON
         let json = serde_json::to_string(&method_stats).unwrap();

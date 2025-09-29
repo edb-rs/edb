@@ -50,7 +50,7 @@ async fn test_fork_with_proxy_cache() {
 
     assert!(result.is_ok(), "Fork failed: {:?}", result.err());
 
-    println!("First fork took: {:?}", duration);
+    println!("First fork took: {duration:?}");
 
     if let Ok(fork_result) = result {
         assert_eq!(fork_result.fork_info.chain_id, 1);
@@ -63,7 +63,7 @@ async fn test_fork_with_proxy_cache() {
 
         assert!(result2.is_ok(), "Fork failed: {:?}", result2.err());
 
-        println!("Second fork took: {:?}", duration2);
+        println!("Second fork took: {duration2:?}");
 
         // Print cache statistics
         if let Ok(stats) = proxy::get_cache_stats(&proxy_url).await {
@@ -108,7 +108,7 @@ async fn test_multiple_transactions_with_cache() {
                 );
             }
             Err(e) => {
-                panic!("Fork failed: {:?}", e);
+                panic!("Fork failed: {e:?}");
             }
         }
     }

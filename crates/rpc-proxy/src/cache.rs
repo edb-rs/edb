@@ -544,7 +544,7 @@ mod tests {
 
         // Fill cache to capacity with delays to ensure different timestamps
         for i in 0..3 {
-            let key = format!("key_{}", i);
+            let key = format!("key_{i}");
             let value = serde_json::json!({"data": i});
             manager.set(key, value).await;
             sleep(Duration::from_secs(1)).await;
@@ -704,7 +704,7 @@ mod tests {
         {
             let manager = CacheManager::new(10, cache_path.clone()).unwrap();
             for i in 0..5 {
-                manager.set(format!("disk_key_{}", i), serde_json::json!({"data": i})).await;
+                manager.set(format!("disk_key_{i}"), serde_json::json!({"data": i})).await;
             }
             manager.save_to_disk().await.unwrap();
         }
@@ -745,7 +745,7 @@ mod tests {
         let manager2 = CacheManager::new(6, cache_path.clone()).unwrap(); // max 6 items
         for i in 0..4 {
             manager2
-                .set(format!("memory_key_{}", i), serde_json::json!({"data": format!("mem{}", i)}))
+                .set(format!("memory_key_{i}"), serde_json::json!({"data": format!("mem{}", i)}))
                 .await;
         }
 

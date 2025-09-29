@@ -30,14 +30,14 @@ async fn capture_single_baseline() {
     // Create fixture
     let fixture = get_or_create_fixture(tx_name)
         .await
-        .expect(&format!("Failed to create {} transaction fixture", tx_name));
+        .unwrap_or_else(|_| panic!("Failed to create {tx_name} transaction fixture"));
 
     info!("=== STARTING BASELINE CAPTURE FOR '{}' TRANSACTION ===", tx_name);
 
     // Create output directory
     let output_dir = paths::get_baseline_dir();
     if let Err(e) = fs::create_dir_all(&output_dir) {
-        println!("Creating output directory: {:?}", e);
+        println!("Creating output directory: {e:?}");
     }
 
     let start_time = Instant::now();
@@ -49,21 +49,18 @@ async fn capture_single_baseline() {
     println!("✓ {} analysis completed in {:.2}s", tx_name, capture_time.as_secs_f64());
 
     // Save individual transaction file
-    let tx_file = output_dir.join(format!("{}_baseline.json", tx_name));
+    let tx_file = output_dir.join(format!("{tx_name}_baseline.json"));
     let tx_json =
         serde_json::to_string_pretty(&baseline).expect("Failed to serialize transaction data");
     fs::write(&tx_file, tx_json).expect("Failed to write transaction file");
-    println!("💾 Saved {} baseline to: {:?}", tx_name, tx_file);
+    println!("💾 Saved {tx_name} baseline to: {tx_file:?}");
 
     println!("=== BASELINE CAPTURE COMPLETE ===");
     println!("Total time: {:.2}s", capture_time.as_secs_f64());
-    println!("Files saved to: {:?}", output_dir);
+    println!("Files saved to: {output_dir:?}");
 
     // Close the proxy to ensure cache files are written
     proxy::shutdown_test_proxy(&fixture.proxy_url).await.ok();
-
-    // Always pass - this is just for capturing data
-    assert!(true);
 }
 
 /// Comprehensive baseline capture with detailed analysis
@@ -82,7 +79,7 @@ async fn capture_all_baselines() {
     // Create output directory
     let output_dir = paths::get_baseline_dir();
     if let Err(e) = fs::create_dir_all(&output_dir) {
-        println!("Creating output directory: {:?}", e);
+        println!("Creating output directory: {e:?}");
     }
 
     let mut comprehensive_baseline = ComprehensiveBaseline {
@@ -108,11 +105,11 @@ async fn capture_all_baselines() {
         println!("✓ {} analysis completed in {:.2}s", tx_name, tx_time.as_secs_f64());
 
         // Save individual transaction file
-        let tx_file = output_dir.join(format!("{}_baseline.json", tx_name));
+        let tx_file = output_dir.join(format!("{tx_name}_baseline.json"));
         let tx_json = serde_json::to_string_pretty(&comprehensive_baseline.transactions[tx_name])
             .expect("Failed to serialize transaction data");
         fs::write(&tx_file, tx_json).expect("Failed to write transaction file");
-        println!("💾 Saved {} baseline to: {:?}", tx_name, tx_file);
+        println!("💾 Saved {tx_name} baseline to: {tx_file:?}");
     }
 
     // Finalize metadata
@@ -122,7 +119,7 @@ async fn capture_all_baselines() {
 
     println!("=== COMPREHENSIVE CAPTURE COMPLETE ===");
     println!("Total time: {:.2}s", total_time.as_secs_f64());
-    println!("Files saved to: {:?}", output_dir);
+    println!("Files saved to: {output_dir:?}");
     println!("📊 Summary: {} transactions analyzed", fixtures.len());
 
     let summary = create_summary(&comprehensive_baseline);
@@ -132,9 +129,6 @@ async fn capture_all_baselines() {
     for fixture in fixtures.values() {
         proxy::shutdown_test_proxy(&fixture.proxy_url).await.ok();
     }
-
-    // Always pass - this is just for capturing data
-    assert!(true);
 }
 
 /// Test comprehensive RPC analysis for simple transaction using shared logic
@@ -184,12 +178,12 @@ async fn test_comprehensive_transaction(tx_name: &str) {
     // Load expected baseline data as ComprehensiveAnalysisResult for direct comparison
     let expected_analysis = baseline_loader
         .load_comprehensive_analysis_result(tx_name)
-        .expect(&format!("Failed to load baseline analysis for {}", tx_name));
+        .unwrap_or_else(|_| panic!("Failed to load baseline analysis for {tx_name}"));
 
     // Create fixture
     let fixture = get_or_create_fixture(tx_name)
         .await
-        .expect(&format!("Failed to create {} transaction fixture", tx_name));
+        .unwrap_or_else(|_| panic!("Failed to create {tx_name} transaction fixture"));
 
     // Perform comprehensive analysis using the SAME logic as baseline capture
     let actual_analysis = analyze_transaction_comprehensive(&fixture).await;

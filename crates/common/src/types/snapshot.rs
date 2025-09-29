@@ -249,8 +249,8 @@ mod transient_string_map {
             assert_eq!(obj.len(), 2);
 
             // Check specific key-value pairs
-            let key1_str = format!("{}:{}", addr1, key1);
-            let key2_str = format!("{}:{}", addr2, key2);
+            let key1_str = format!("{addr1}:{key1}");
+            let key2_str = format!("{addr2}:{key2}");
             assert_eq!(obj.get(&key1_str).unwrap(), &serde_json::to_value(value1).unwrap());
             assert_eq!(obj.get(&key2_str).unwrap(), &serde_json::to_value(value2).unwrap());
 
