@@ -86,17 +86,18 @@ pub struct EngineFixture {
     pub rpc_handle: Arc<engine::ReplayTestResult>,
 }
 
+type FixtureMap = Lazy<Arc<RwLock<HashMap<String, Arc<Mutex<Option<EngineFixture>>>>>>>;
+
 /// Thread-safe storage for engine fixtures with fine-grained locking
 /// Each fixture has its own lock to allow independent creation
-static ENGINE_FIXTURES: Lazy<Arc<RwLock<HashMap<String, Arc<Mutex<Option<EngineFixture>>>>>>> =
-    Lazy::new(|| {
-        let mut map = HashMap::new();
-        // Pre-populate with empty entries for known transactions
-        for (name, _) in test_transactions::all() {
-            map.insert(name.to_string(), Arc::new(Mutex::new(None)));
-        }
-        Arc::new(RwLock::new(map))
-    });
+static ENGINE_FIXTURES: FixtureMap = Lazy::new(|| {
+    let mut map = HashMap::new();
+    // Pre-populate with empty entries for known transactions
+    for (name, _) in test_transactions::all() {
+        map.insert(name.to_string(), Arc::new(Mutex::new(None)));
+    }
+    Arc::new(RwLock::new(map))
+});
 
 /// Get or create a single engine fixture for a specific transaction
 pub async fn get_or_create_fixture(name: &str) -> Result<EngineFixture> {
@@ -721,7 +722,7 @@ impl BaselineLoader {
 
     /// Load baseline data for a specific transaction
     pub fn load_transaction_baseline(&self, tx_name: &str) -> Result<Value> {
-        let file_path = self.baseline_dir.join(format!("{}_baseline.json", tx_name));
+        let file_path = self.baseline_dir.join(format!("{tx_name}_baseline.json"));
         let content = fs::read_to_string(&file_path)?;
         let baseline: Value = serde_json::from_str(&content)?;
         Ok(baseline)
@@ -927,7 +928,7 @@ async fn analyze_snapshots_comprehensive(
             let start = Instant::now();
             let snapshot = client.get_snapshot_info(idx).await.unwrap();
             let snapshot_json = serde_json::to_value(&snapshot).unwrap();
-            sample_snapshots.insert(format!("{}_{}", label, idx), snapshot_json);
+            sample_snapshots.insert(format!("{label}_{idx}"), snapshot_json);
 
             // Track frame patterns
             let frame_pattern = format!("{}.{}", snapshot.frame_id.0, snapshot.frame_id.1);
@@ -960,9 +961,9 @@ async fn analyze_code_comprehensive(
     let start = Instant::now();
     let code = client.get_code(0).await.unwrap();
     let address = code.bytecode_address();
-    let addr_str = format!("{:?}", address);
+    let addr_str = format!("{address:?}");
 
-    let contract_info = analyze_contract_code(&client, address, &code, perf).await;
+    let contract_info = analyze_contract_code(client, address, &code, perf).await;
     if contract_info.verification_status == "verified" {
         verified_count += 1;
     }
@@ -979,7 +980,7 @@ async fn analyze_contract_code(
     code: &Code,
     perf: &mut PerformanceMetrics,
 ) -> ContractCodeInfo {
-    let addr_str = format!("{:?}", address);
+    let addr_str = format!("{address:?}");
 
     let (code_type, opcode_count, source_count, first_pc, last_pc) = match code {
         Code::Opcode(info) => {
@@ -1039,11 +1040,11 @@ async fn analyze_storage_comprehensive(
         let slot = U256::from(i);
         let start = Instant::now();
         let value = client.get_storage(0, slot).await.unwrap();
-        let value_str = format!("{:?}", value);
-        slot_samples.insert(format!("slot_{}", i), value_str.clone());
+        let value_str = format!("{value:?}");
+        slot_samples.insert(format!("slot_{i}"), value_str.clone());
 
         if value != U256::ZERO {
-            non_zero_slots.insert(format!("slot_{}", i));
+            non_zero_slots.insert(format!("slot_{i}"));
         }
 
         record_rpc_call(perf, "edb_getStorage", start, 32);
@@ -1057,7 +1058,7 @@ async fn analyze_storage_comprehensive(
         if snapshot_idx < snapshot_count {
             let start = Instant::now();
             let diff = client.get_storage_diff(snapshot_idx).await.unwrap();
-            storage_diffs.insert(format!("snapshot_{}", snapshot_idx), diff.len());
+            storage_diffs.insert(format!("snapshot_{snapshot_idx}"), diff.len());
             record_rpc_call(
                 perf,
                 "edb_getStorageDiff",
@@ -1112,7 +1113,7 @@ async fn analyze_expressions_comprehensive(
             continue;
         }
 
-        let snap_key = format!("snapshot_{}", snap_idx);
+        let snap_key = format!("snapshot_{snap_idx}");
         let mut snap_success = HashMap::new();
         let mut snap_failed = HashMap::new();
 
@@ -1144,7 +1145,7 @@ async fn analyze_expressions_comprehensive(
                     }
                 }
                 Err(e) => {
-                    snap_failed.insert(expr.to_string(), format!("RPC Error: {}", e));
+                    snap_failed.insert(expr.to_string(), format!("RPC Error: {e}"));
                 }
             }
 
@@ -1205,7 +1206,7 @@ async fn analyze_navigation_comprehensive(
             continue;
         }
 
-        let snap_key = format!("snapshot_{}", snap_idx);
+        let snap_key = format!("snapshot_{snap_idx}");
 
         // Test next call
         let start = Instant::now();
@@ -1251,7 +1252,7 @@ async fn analyze_abi_comprehensive(
     let mut total_functions = 0;
     let mut total_events = 0;
 
-    for (addr_str, _contract_info) in &code_analysis.contracts {
+    for addr_str in code_analysis.contracts.keys() {
         let address = addr_str.parse::<Address>().unwrap();
         // Test contract ABI
         let start = Instant::now();
@@ -1410,7 +1411,7 @@ pub fn create_summary(baseline: &ComprehensiveBaseline) -> Value {
     summary["overview"]["total_contracts"] = json!(total_contracts);
     summary["overview"]["verified_contracts"] = json!(verified_contracts);
 
-    summary["performance"]["avg_analysis_time_ms"] = json!(if baseline.transactions.len() > 0 {
+    summary["performance"]["avg_analysis_time_ms"] = json!(if !baseline.transactions.is_empty() {
         total_analysis_time / baseline.transactions.len() as u128
     } else {
         0
