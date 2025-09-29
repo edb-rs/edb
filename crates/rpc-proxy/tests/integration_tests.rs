@@ -210,65 +210,67 @@ async fn test_proxy_cache_stats_endpoint() {
 
 #[tokio::test]
 async fn test_proxy_active_instances_endpoint() {
-    let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
+    let (proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
+    let proxy_addr = start_proxy_server(proxy).await;
 
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
 
-    // First, register a couple of EDB instances
-    let register_request1 = json!({
-        "jsonrpc": "2.0",
-        "method": "edb_register",
-        "params": [12345, 1234567890],
-        "id": 1
-    });
-
-    // Mock the eth_chainId call that happens during cache path setup
-    Mock::given(method("POST"))
-        .and(path("/"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": "0x1"
-        })))
-        .mount(&mock_server)
-        .await;
-
-    let register_request2 = json!({
-        "jsonrpc": "2.0",
-        "method": "edb_register",
-        "params": [54321, 1234567891],
-        "id": 2
-    });
-
-    // Register both instances
-    client.post(&proxy_url).json(&register_request1).send().await.unwrap();
-    client.post(&proxy_url).json(&register_request2).send().await.unwrap();
-
-    // Now test the active instances endpoint
+    // First call to edb_active_instances should return empty list
     let active_instances_request = json!({
         "jsonrpc": "2.0",
         "method": "edb_active_instances",
         "id": 3
     });
 
+    // Verify response structure
     let response = client.post(&proxy_url).json(&active_instances_request).send().await.unwrap();
-
     assert_eq!(response.status(), 200);
     let body: Value = response.json().await.unwrap();
-
-    // Verify response structure
     let result = &body["result"];
     assert!(result["active_instances"].is_array());
-    assert_eq!(result["count"], 2);
+    assert_eq!(result["count"], 0);
+
+    // Then, we register an EDB instance
+    let pid = std::process::id() as u64;
+    let register_request1 = json!({
+        "jsonrpc": "2.0",
+        "method": "edb_register",
+        "params": [pid, 1234567890],
+        "id": 1
+    });
+    client.post(&proxy_url).json(&register_request1).send().await.unwrap();
+
+    // Verify response structure
+    let response = client.post(&proxy_url).json(&active_instances_request).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    let result = &body["result"];
+    assert!(result["active_instances"].is_array());
+    assert_eq!(result["count"], 1);
+
+    // Then, we register an EDB instance with invalid PID
+    let register_request2 = json!({
+        "jsonrpc": "2.0",
+        "method": "edb_register",
+        "params": [1234567890, 1234567891],
+        "id": 2
+    });
+    client.post(&proxy_url).json(&register_request2).send().await.unwrap();
+
+    // Verify response structure
+    let response = client.post(&proxy_url).json(&active_instances_request).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    let body: Value = response.json().await.unwrap();
+    let result = &body["result"];
+    assert!(result["active_instances"].is_array());
+    assert_eq!(result["count"], 1);
 
     let active_pids = result["active_instances"].as_array().unwrap();
     let pids: Vec<u64> = active_pids.iter().map(|v| v.as_u64().unwrap()).collect();
 
-    // Should contain both registered PIDs
-    assert!(pids.contains(&12345));
-    assert!(pids.contains(&54321));
+    assert!(pids.len() == 1);
+    assert!(pids.contains(&pid));
 }
 
 #[tokio::test]

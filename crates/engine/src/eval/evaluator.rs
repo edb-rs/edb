@@ -1478,17 +1478,11 @@ mod tests {
         assert!(evaluator.to_bool(&DynSolValue::Uint(U256::from(100), 256)).unwrap());
 
         // Test int values
-        assert!(
-            evaluator.to_bool(&DynSolValue::Int(I256::from_raw(U256::from(1)), 256)).unwrap()
-        );
-        assert!(
-            !evaluator.to_bool(&DynSolValue::Int(I256::from_raw(U256::from(0)), 256)).unwrap()
-        );
-        assert!(
-            evaluator
-                .to_bool(&DynSolValue::Int(I256::from_raw(U256::from(1)).wrapping_neg(), 256))
-                .unwrap()
-        );
+        assert!(evaluator.to_bool(&DynSolValue::Int(I256::from_raw(U256::from(1)), 256)).unwrap());
+        assert!(!evaluator.to_bool(&DynSolValue::Int(I256::from_raw(U256::from(0)), 256)).unwrap());
+        assert!(evaluator
+            .to_bool(&DynSolValue::Int(I256::from_raw(U256::from(1)).wrapping_neg(), 256))
+            .unwrap());
     }
 
     // ========== Direct eval() method tests ==========

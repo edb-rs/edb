@@ -124,9 +124,10 @@ mod tests {
         assert_eq!(get_mainnet_spec_id(15_537_394), SpecId::MERGE);
         assert_eq!(get_mainnet_spec_id(17_034_870), SpecId::SHANGHAI);
         assert_eq!(get_mainnet_spec_id(19_426_589), SpecId::CANCUN);
+        assert_eq!(get_mainnet_spec_id(22_431_084), SpecId::PRAGUE);
 
-        // Test future blocks
+        // Test random blocks
         assert_eq!(get_mainnet_spec_id(20_000_000), SpecId::CANCUN);
-        assert_eq!(get_mainnet_spec_id(u64::MAX), SpecId::CANCUN);
+        assert_eq!(get_mainnet_spec_id(u64::MAX), SpecId::PRAGUE);
     }
 }

@@ -1026,7 +1026,7 @@ mod tests {
             ],
         };
         let result = struct_with_addresses.format_value(&ctx);
-        let expected = "{\n  from: 0x742d35...34000a,\n  to: 0x0000000000000000\n}";
+        let expected = "{\n  from: 0x742d35...34000A,\n  to: 0x0000000000000000\n}";
         assert_eq!(result, expected);
     }
 
@@ -1046,7 +1046,7 @@ mod tests {
             ],
         };
         let result = complex_struct.format_value(&ctx);
-        let expected = "Transaction{\n  from: address(0x742d35...34000a),\n  to: address(0x123f68...a0c2ac),\n  values: [\n    uint256(1),\n    uint256(2),\n    uint256(3),\n    ...[10 items]\n  ]\n}";
+        let expected = "Transaction{\n  from: address(0x742d35...34000A),\n  to: address(0x123F68...A0c2AC),\n  values: [\n    uint256(1),\n    uint256(2),\n    uint256(3),\n    ...[10 items]\n  ]\n}";
         assert_eq!(result, expected);
     }
 }
