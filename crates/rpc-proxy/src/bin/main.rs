@@ -74,7 +74,7 @@ struct ServerArgs {
     cache_dir: Option<String>,
 
     /// Cache save interval in minutes (0 = save only on shutdown)
-    #[arg(long, default_value = "5")]
+    #[arg(long, default_value = "15")]
     cache_save_interval: u64,
 
     // ========== Provider Health Check Configuration ==========
