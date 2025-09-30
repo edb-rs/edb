@@ -334,7 +334,7 @@ impl Engine {
 
             async move {
                 let short_addr = &address.to_string()[2..10]; // Skip 0x, take 8 chars
-                pb.set_message(format!("Downloading: 0x{}...", short_addr));
+                pb.set_message(format!("Downloading: 0x{short_addr}..."));
 
                 let etherscan = Client::builder()
                     .with_api_key(api_key)
@@ -344,16 +344,16 @@ impl Engine {
 
                 let result = match compiler.compile(&etherscan, *address).await {
                     Ok(Some(artifact)) => {
-                        pb.set_message(format!("✅ 0x{}... compiled", short_addr));
+                        pb.set_message(format!("✅ 0x{short_addr}... compiled"));
                         Some(artifact)
                     }
                     Ok(None) => {
-                        pb.set_message(format!("⚠️  0x{}... no source", short_addr));
+                        pb.set_message(format!("⚠️  0x{short_addr}... no source"));
                         debug!("No source code available for contract {}", address);
                         None
                     }
                     Err(e) => {
-                        pb.set_message(format!("❌ 0x{}... failed", short_addr));
+                        pb.set_message(format!("❌ 0x{short_addr}... failed"));
                         warn!("Failed to compile contract {}: {:?}", address, e);
                         None
                     }
@@ -490,7 +490,7 @@ impl Engine {
             .map(|(address, artifact)| {
                 let pb = progress_bar.clone();
                 let short_addr = &address.to_string()[2..10]; // Skip 0x, take 8 chars
-                pb.set_message(format!("Instrumenting: 0x{}...", short_addr));
+                pb.set_message(format!("Instrumenting: 0x{short_addr}..."));
 
                 let result = (|| -> Result<Artifact> {
                     let compiler_version =
