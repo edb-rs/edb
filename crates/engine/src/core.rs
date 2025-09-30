@@ -47,13 +47,15 @@
 //! - **Comprehensive inspection**: Opcode and source-level snapshot collection
 
 use alloy_primitives::{Address, Bytes, TxHash};
-use eyre::Result;
+use eyre::{bail, Result};
 use foundry_block_explorers::Client;
 use foundry_compilers::{
     artifacts::{Contract, SolcInput},
     solc::Solc,
 };
+use futures::future::join_all;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use revm::{
     context::{
         result::{ExecutionResult, HaltReason},
@@ -306,10 +308,6 @@ impl Engine {
         let etherscan_cache_root =
             EdbCachePath::new(env::var("EDB_CACHE_DIR").ok()).etherscan_chain_cache_dir(chain_id);
 
-        // Create fancy progress bar with blockchain-themed styling
-        // NOTE: For multi-threaded usage, wrap in Arc<ProgressBar> to share across threads
-        // Example: let console_bar = Arc::new(ProgressBar::new(...));
-        // Then clone the Arc for each thread: let bar_clone = console_bar.clone();
         let addresses: Vec<_> = replay_result.visited_addresses.keys().copied().collect();
         let total_contracts = addresses.len();
 
@@ -322,41 +320,61 @@ impl Engine {
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
         );
 
-        let mut artifacts = HashMap::new();
-        for (i, address) in addresses.iter().enumerate() {
-            let short_addr = &address.to_string()[2..10]; // Skip 0x, take 8 chars
-            console_bar.set_message(format!("contract {}: 0x{}...", i + 1, short_addr));
+        let cache_ttl = env::var("EDB_ETHERSCAN_CACHE_TTL")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_ETHERSCAN_CACHE_TTL);
 
-            // We use the default API key if none is provided
+        // Create all download futures
+        let download_futures = addresses.iter().map(|address| {
+            let pb = console_bar.clone();
             let api_key = self.get_etherscan_api_key();
+            let etherscan_cache_root = etherscan_cache_root.clone();
+            let compiler = compiler.clone();
 
-            let cache_ttl = env::var("EDB_ETHERSCAN_CACHE_TTL")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(DEFAULT_ETHERSCAN_CACHE_TTL);
+            async move {
+                let short_addr = &address.to_string()[2..10]; // Skip 0x, take 8 chars
+                pb.set_message(format!("Downloading: 0x{}...", short_addr));
 
-            let etherscan = Client::builder()
-                .with_api_key(api_key)
-                .with_cache(etherscan_cache_root.clone(), Duration::from_secs(cache_ttl)) // 24 hours
-                .chain(chain_id.into())?
-                .build()?;
+                let etherscan = Client::builder()
+                    .with_api_key(api_key)
+                    .with_cache(etherscan_cache_root, Duration::from_secs(cache_ttl))
+                    .chain(chain_id.into())?
+                    .build()?;
 
-            match compiler.compile(&etherscan, *address).await {
-                Ok(Some(artifact)) => {
-                    console_bar.set_message(format!("✅ 0x{short_addr}... compiled"));
-                    artifacts.insert(*address, artifact);
-                }
-                Ok(None) => {
-                    console_bar.set_message(format!("⚠️  0x{short_addr}... no source"));
-                    debug!("No source code available for contract {}", address);
-                }
-                Err(e) => {
-                    console_bar.set_message(format!("❌ 0x{short_addr}... failed"));
-                    warn!("Failed to compile contract {}: {:?}", address, e);
-                }
+                let result = match compiler.compile(&etherscan, *address).await {
+                    Ok(Some(artifact)) => {
+                        pb.set_message(format!("✅ 0x{}... compiled", short_addr));
+                        Some(artifact)
+                    }
+                    Ok(None) => {
+                        pb.set_message(format!("⚠️  0x{}... no source", short_addr));
+                        debug!("No source code available for contract {}", address);
+                        None
+                    }
+                    Err(e) => {
+                        pb.set_message(format!("❌ 0x{}... failed", short_addr));
+                        warn!("Failed to compile contract {}: {:?}", address, e);
+                        None
+                    }
+                };
+
+                pb.inc(1);
+                Ok::<(Address, Option<Artifact>), eyre::Error>((*address, result))
             }
+        });
 
-            console_bar.inc(1);
+        // Wait for all downloads to complete
+        let results = join_all(download_futures).await;
+
+        // Process results into HashMap
+        let mut artifacts = HashMap::new();
+        for result in results {
+            if let Ok((address, Some(artifact))) = result {
+                artifacts.insert(address, artifact);
+            } else if let Err(e) = result {
+                error!("Error during source code download: {:?}", e);
+            }
         }
 
         console_bar.finish_with_message(format!(
@@ -457,64 +475,144 @@ impl Engine {
     ) -> Result<HashMap<Address, Artifact>> {
         info!("Instrumenting source code based on analysis results");
 
-        let mut recompiled_artifacts = HashMap::new();
-        for (address, artifact) in artifacts {
-            let compiler_version =
-                Version::parse(artifact.compiler_version().trim_start_matches('v'))?;
+        let progress_bar = std::sync::Arc::new(ProgressBar::new(artifacts.len() as u64));
+        progress_bar.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} 🔧 Instrumenting contracts [{bar:40.cyan/blue}] {pos:>3}/{len:3} {msg}"
+            )?
+            .progress_chars("🟩🟦⬜")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+        );
 
-            let analysis = analysis_result
-                .get(address)
-                .ok_or_else(|| eyre::eyre!("No analysis result found for address {}", address))?;
+        // Parallel process all contracts
+        let results: Vec<_> = artifacts
+            .par_iter()
+            .map(|(address, artifact)| {
+                let pb = progress_bar.clone();
+                let short_addr = &address.to_string()[2..10]; // Skip 0x, take 8 chars
+                pb.set_message(format!("Instrumenting: 0x{}...", short_addr));
 
-            let input = instrument(&compiler_version, &artifact.input, analysis)?;
-            let meta = artifact.meta.clone();
+                let result = (|| -> Result<Artifact> {
+                    let compiler_version =
+                        Version::parse(artifact.compiler_version().trim_start_matches('v'))?;
 
-            // prepare the compiler
-            let version = meta.compiler_version()?;
-            let compiler = Solc::find_or_install(&version)?;
+                    let analysis = analysis_result
+                        .get(address)
+                        .ok_or_else(|| eyre::eyre!("No analysis result found for address {}", address))?;
 
-            // compile the source code
-            let output = match compiler.compile_exact(&input) {
-                Ok(output) => output,
-                Err(e) => {
-                    // Dump source code for debugging
-                    let (original_dir, instrumented_dir) =
-                        dump_source_for_debugging(address, &artifact.input, &input)?;
+                    let input = instrument(&compiler_version, &artifact.input, analysis)?;
+                    let meta = artifact.meta.clone();
 
-                    return Err(eyre::eyre!(
-                        "Failed to recompile contract {}\n\nCompiler error: {}\n\nDebug info:\n  Original source: {}\n  Instrumented source: {}",
+                    // prepare the compiler
+                    let version = meta.compiler_version()?;
+                    let compiler = Solc::find_or_install(&version)?;
+
+                    // compile the source code
+                    let output = match compiler.compile_exact(&input) {
+                        Ok(output) => output,
+                        Err(compiler_error) => {
+                            // Dump source code immediately for debugging
+                            let (original_dir, instrumented_dir) =
+                                dump_source_for_debugging(address, &artifact.input, &input)?;
+
+                            // Write compiler error to file
+                            let error_file = instrumented_dir.parent()
+                                .unwrap_or(&instrumented_dir)
+                                .join("compilation_errors.txt");
+
+                            let error_content = format!(
+                                "Compiler Error for Contract {}\n{}\n\n{}",
+                                address,
+                                "=".repeat(60),
+                                compiler_error
+                            );
+
+                            fs::write(&error_file, &error_content)?;
+
+                            bail!(
+                                "Compilation failed\n  Error details: {error_file:?}\n  Original source: {original_dir:?}\n  Instrumented source: {instrumented_dir:?}",
+                            );
+                        }
+                    };
+
+                    // Check for compilation errors
+                    if output.errors.iter().any(|e| e.is_error()) {
+                        // Dump source code immediately for debugging
+                        let (original_dir, instrumented_dir) =
+                            dump_source_for_debugging(address, &artifact.input, &input)?;
+
+                        // Format errors with better source location info
+                        let formatted_errors = format_compiler_errors(&output.errors, &instrumented_dir);
+
+                        // Write formatted errors to file
+                        let error_file = instrumented_dir.parent()
+                            .unwrap_or(&instrumented_dir)
+                            .join("compilation_errors.txt");
+
+                        let error_content = format!(
+                            "Compilation Errors for Contract {address}\n{}\n\n{formatted_errors}",
+                            "=".repeat(60),
+                        );
+
+                        fs::write(&error_file, &error_content)?;
+
+                        bail!(
+                            "Compilation failed\n  Error details: {error_file:?}\n  Original source: {original_dir:?}\n  Instrumented source: {instrumented_dir:?}",
+                        );
+                    }
+
+                    debug!(
+                        "Recompiled Contract {}: {} vs {}",
                         address,
-                        e,
-                        original_dir.display(),
-                        instrumented_dir.display()
-                    ));
+                        artifact.output.contracts.len(),
+                        output.contracts.len()
+                    );
+
+                    Ok(Artifact { meta, input, output })
+                })();
+
+                match &result {
+                    Ok(_) => pb.set_message(format!("✅ 0x{short_addr}... instrumented")),
+                    Err(_) => pb.set_message(format!("❌ 0x{short_addr}... failed")),
                 }
-            };
-            if output.errors.iter().any(|e| e.is_error()) {
-                // Dump source code for debugging
-                let (original_dir, instrumented_dir) =
-                    dump_source_for_debugging(address, &artifact.input, &input)?;
 
-                // Format errors with better source location info
-                let formatted_errors = format_compiler_errors(&output.errors, &instrumented_dir);
+                pb.inc(1);
+                (*address, result)
+            })
+            .collect();
 
-                return Err(eyre::eyre!(
-                    "Recompilation failed for contract {}\n\nCompilation errors:{}\n\nDebug info:\n  Original source: {}\n  Instrumented source: {}",
-                    address,
-                    formatted_errors,
-                    original_dir.display(),
-                    instrumented_dir.display()
-                ));
+        progress_bar.finish_with_message("✨ Instrumentation complete!");
+
+        // Process results and collect errors
+        let mut recompiled_artifacts = HashMap::new();
+        let mut all_errors = Vec::new();
+
+        for (address, result) in results {
+            match result {
+                Ok(artifact) => {
+                    recompiled_artifacts.insert(address, artifact);
+                }
+                Err(e) => {
+                    all_errors.push((address, e));
+                }
             }
+        }
 
-            debug!(
-                "Recompiled Contract {}: {} vs {}",
-                address,
-                artifact.output.contracts.len(),
-                output.contracts.len()
+        // If any errors occurred, create a comprehensive error message
+        if !all_errors.is_empty() {
+            let mut error_msg = format!(
+                "Failed to instrument {} contract(s). Debug information saved to:\n\n",
+                all_errors.len()
             );
 
-            recompiled_artifacts.insert(*address, Artifact { meta, input, output });
+            for (i, (addr, err)) in all_errors.iter().enumerate() {
+                // This already contains the paths from the error creation above
+                error_msg.push_str(&format!("{}. Contract {addr}:\n{err}\n\n", i + 1,));
+            }
+
+            error_msg.push_str("Please check the error details files for full compilation errors.");
+
+            bail!("{error_msg}");
         }
 
         Ok(recompiled_artifacts)

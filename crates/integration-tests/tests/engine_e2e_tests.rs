@@ -14,7 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-
 //! Comprehensive JSON-RPC API tests using shared analysis logic
 //!
 //! This test suite uses the same analysis functions for both baseline capture and validation,
