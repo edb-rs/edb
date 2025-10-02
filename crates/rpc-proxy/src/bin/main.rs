@@ -187,7 +187,7 @@ async fn run_server(args: ServerArgs) -> Result<()> {
     let cache_manager = proxy.cache_manager().clone();
 
     // Start the server
-    let ip = IpAddr::from_str(&args.bind_address)?;
+    let ip = IpAddr::from_str(&args.host)?;
     let addr = SocketAddr::from((ip, args.port));
 
     if args.tui {
