@@ -54,6 +54,9 @@ pub use artifact::*;
 mod ast_prune;
 pub use ast_prune::*;
 
+mod errors;
+pub use errors::*;
+
 pub mod disasm;
 pub use disasm::*;
 

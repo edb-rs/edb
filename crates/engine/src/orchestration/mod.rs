@@ -14,16 +14,13 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! Contract instrumentation and code generation utilities.
-//! This module provides functionalities for instrumenting Solidity contracts
-//! to enable detailed execution tracing and debugging. It includes tools for
-//! modifying source code, generating additional bytecode, and managing
-//! instrumentation artifacts.
+//! Orchestration module that coordinates the main steps of the EDB debugging process.
+//! This includes transaction replay, source code analysis, bytecode tweaking,
+//! and snapshot generation.
+pub mod analysis;
+pub mod artifact;
+pub mod snapshot;
 
-mod common;
-pub use common::*;
-
-mod codegen;
-
-mod modification;
-pub use modification::*;
+pub use analysis::*;
+pub use artifact::*;
+pub use snapshot::*;

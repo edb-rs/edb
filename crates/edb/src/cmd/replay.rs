@@ -18,7 +18,7 @@
 
 use alloy_primitives::TxHash;
 use edb_common::fork_and_prepare;
-use edb_engine::{Engine, EngineConfig};
+use edb_engine::{Engine, EngineConfig, RpcServerHandle};
 use eyre::Result;
 
 /// Replay an existing transaction following the correct architecture
@@ -26,7 +26,7 @@ pub async fn replay_transaction(
     tx_hash: TxHash,
     cli: &crate::Cli,
     rpc_url: &str,
-) -> Result<edb_engine::rpc::RpcServerHandle> {
+) -> Result<RpcServerHandle> {
     tracing::info!("Starting transaction replay workflow");
 
     // Step 1: Fork the chain and replay earlier transactions in the block
@@ -49,6 +49,6 @@ pub async fn replay_transaction(
     tracing::info!("Calling engine::prepare with prepared inputs");
 
     // Create the engine and run preparation
-    let engine = Engine::new(engine_config);
+    let mut engine = Engine::new(engine_config);
     engine.prepare(fork_result).await
 }

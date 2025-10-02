@@ -18,6 +18,7 @@
 
 use crate::cmd::replay::replay_transaction;
 use alloy_primitives::TxHash;
+use edb_engine::RpcServerHandle;
 use eyre::Result;
 
 /// Debug a Foundry test case
@@ -26,7 +27,7 @@ pub async fn debug_foundry_test(
     block: Option<u64>,
     cli: &crate::Cli,
     rpc_url: &str,
-) -> Result<edb_engine::rpc::RpcServerHandle> {
+) -> Result<RpcServerHandle> {
     tracing::info!("Starting Foundry test debug workflow at block {block:?}");
 
     // Step 1: Find the transaction hash for the test

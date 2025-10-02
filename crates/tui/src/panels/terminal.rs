@@ -750,7 +750,7 @@ impl TerminalPanel {
                     self.add_output("Breakpoint types:");
                     self.add_output("  • Location only: Stops when execution reaches the location");
                     self.add_output(
-                        "  • Condition only: Data breakpoint - stops when expression is true",
+                        "  • Condition only: Watchpoint - stops when expression is true",
                     );
                     self.add_output(
                         "  • Both: Stops when location is reached AND condition is true",
@@ -990,7 +990,7 @@ impl TerminalPanel {
                             "  • Location only: Stops when execution reaches the location",
                         );
                         self.add_output(
-                            "  • Condition only: Data breakpoint - stops when expression is true",
+                            "  • Condition only: Watchpoint - stops when expression is true",
                         );
                         self.add_output(
                             "  • Both: Stops when location is reached AND condition is true",
@@ -1104,7 +1104,7 @@ impl TerminalPanel {
         self.add_output("  break clear                     - Clear all breakpoints");
         self.add_output("");
         self.add_output("  Types: - Location-only (stops at location)");
-        self.add_output("         - Condition-only (data breakpoint)");
+        self.add_output("         - Condition-only (watchpoint)");
         self.add_output("         - Both (location AND condition)");
         self.add_output("         - Neither (invalid)");
         self.add_output("");

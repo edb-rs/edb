@@ -2103,6 +2103,7 @@ dependencies = [
  "foundry-block-explorers",
  "foundry-compilers",
  "foundry-solang-parser",
+ "futures",
  "hex",
  "indicatif",
  "itertools 0.14.0",

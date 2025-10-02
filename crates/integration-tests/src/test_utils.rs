@@ -383,7 +383,7 @@ pub mod engine {
         info!("Calling engine::prepare with prepared inputs");
 
         // Create the engine and run preparation
-        let engine = Engine::new(engine_config);
+        let mut engine = Engine::new(engine_config);
         let rpc_handle = engine.prepare(fork_result).await?;
 
         info!("Engine preparation completed successfully");

@@ -48,6 +48,7 @@ solang-parser = { workspace = true }
 
 # async
 tokio = { workspace = true, features = ["full"] }
+futures.workspace = true
 
 # serialization
 serde = { workspace = true, features = ["derive"] }

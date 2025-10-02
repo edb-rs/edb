@@ -40,7 +40,7 @@ This document outlines the development roadmap for EDB (Ethereum Debugger), orga
   - Implement alternative collection methods for non-ABI-encodable types
   - Add nested type inspection capabilities
 
-- [ ] **Conditional Breakpoints**
+- [x] **Conditional Breakpoints**
   - Implement expression-based breakpoint conditions
   - Support state-dependent breakpoints
   - Add breakpoint management UI
