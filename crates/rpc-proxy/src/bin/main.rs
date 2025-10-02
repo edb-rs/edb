@@ -24,7 +24,9 @@ use clap::{Parser, Subcommand};
 use edb_common::init_file_only_logging;
 use edb_common::init_logging;
 use eyre::Result;
+use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use tracing::{info, warn};
 
 use edb_rpc_proxy::proxy;
@@ -40,6 +42,10 @@ use proxy::ProxyServerBuilder;
 struct Args {
     #[command(subcommand)]
     command: Commands,
+
+    /// Verbosity level (repeat for more: -v, -vv, -vvv)
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
+    verbose: u8,
 }
 
 /// Available commands
@@ -55,6 +61,11 @@ enum Commands {
 #[derive(Parser, Debug)]
 struct ServerArgs {
     // ========== General Configuration ==========
+    /// Address to bind to
+    /// Example: --host 0.0.0.0
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+
     /// Port to listen on
     #[arg(long, default_value = "8546")]
     port: u16,
@@ -120,6 +131,17 @@ struct MonitorArgs {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    // Set RUST_LOG based on verbosity
+    if std::env::var("RUST_LOG").is_err() {
+        let level = match args.verbose {
+            0 => "warn",
+            1 => "info",
+            2 => "debug",
+            _ => "trace",
+        };
+        std::env::set_var("RUST_LOG", level);
+    }
+
     match args.command {
         Commands::Server(server_args) => run_server(server_args).await,
         Commands::Monitor(monitor_args) => run_monitor(monitor_args).await,
@@ -165,7 +187,8 @@ async fn run_server(args: ServerArgs) -> Result<()> {
     let cache_manager = proxy.cache_manager().clone();
 
     // Start the server
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    let ip = IpAddr::from_str(&args.host)?;
+    let addr = SocketAddr::from((ip, args.port));
 
     if args.tui {
         // TUI mode - start TUI interface
