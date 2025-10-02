@@ -62,9 +62,9 @@ enum Commands {
 struct ServerArgs {
     // ========== General Configuration ==========
     /// Address to bind to
-    /// Example: --bind 0.0.0.0
+    /// Example: --host 0.0.0.0
     #[arg(long, default_value = "127.0.0.1")]
-    bind_address: String,
+    host: String,
 
     /// Port to listen on
     #[arg(long, default_value = "8546")]
