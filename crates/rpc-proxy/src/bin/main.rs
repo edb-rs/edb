@@ -165,7 +165,7 @@ async fn run_server(args: ServerArgs) -> Result<()> {
     let cache_manager = proxy.cache_manager().clone();
 
     // Start the server
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
 
     if args.tui {
         // TUI mode - start TUI interface
