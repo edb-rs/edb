@@ -96,7 +96,6 @@ pub fn generate_variable_update_hook(
 /// * `Option<String>` - The generated view function code, or None if user-defined types are present
 pub fn generate_view_method(state_variable: &VariableRef) -> Option<String> {
     if state_variable
-        .read()
         .contract()
         .map(|c| c.definition().kind != ContractKind::Contract)
         .unwrap_or(true)

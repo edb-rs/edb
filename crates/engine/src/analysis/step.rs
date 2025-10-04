@@ -14,13 +14,6 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{
-    // collections::BTreeMap,
-    sync::Arc,
-};
-
-// use derive_more::{Deref, DerefMut};
-use delegate::delegate;
 use foundry_compilers::artifacts::{
     ast::SourceLocation,
     BlockOrStatement,
@@ -35,94 +28,42 @@ use foundry_compilers::artifacts::{
     TryStatement,
     WhileStatement, // SourceUnit,
 };
-use once_cell::sync::OnceCell;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{macros::universal_id, VariableRef, VariableScopeRef, UFID};
+use crate::analysis::{
+    macros::{define_ref, universal_id},
+    VariableRef, VariableScopeRef, UFID,
+};
 
 universal_id! {
     /// A Universal Step Identifier (USID) is a unique identifier for a step in contract execution.
     USID => 0
 }
 
-/// A reference-counted pointer to a Step for efficient sharing across multiple contexts.
-///
-/// This type alias provides thread-safe reference counting for Step instances,
-/// allowing them to be shared between different parts of the analysis system
-/// without copying the entire step data.
-#[derive(Debug, Clone)]
-pub struct StepRef {
-    inner: Arc<RwLock<Step>>,
-    /* cached readonly fields*/
-    usid: OnceCell<USID>,
-    ufid: OnceCell<UFID>,
-    variant: OnceCell<StepVariant>,
-    function_calls: OnceCell<usize>,
-}
-
-impl From<Step> for StepRef {
-    fn from(step: Step) -> Self {
-        Self::new(step)
-    }
-}
-
-impl Serialize for StepRef {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Serialize the inner Step directly
-        self.inner.read().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for StepRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize as Step and wrap it in StepRef
-        let step = Step::deserialize(deserializer)?;
-        Ok(Self::new(step))
+define_ref! {
+    /// A reference-counted pointer to a Step for efficient sharing across multiple contexts.
+    ///
+    /// This type alias provides thread-safe reference counting for Step instances,
+    /// allowing them to be shared between different parts of the analysis system
+    /// without copying the entire step data.
+    StepRef(Step) {
+        clone_field: {
+            usid: USID,
+            ufid: UFID,
+            src: SourceLocation,
+        }
+        cached_field: {
+            variant: StepVariant,
+            updated_variables: Vec<VariableRef>,
+            accessible_variables: Vec<VariableRef>,
+        }
+        additional_cache: {
+            function_calls: usize,
+        }
     }
 }
 
 impl StepRef {
-    /// Creates a new StepRef from a Step.
-    pub fn new(inner: Step) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(inner)),
-            usid: OnceCell::new(),
-            ufid: OnceCell::new(),
-            variant: OnceCell::new(),
-            function_calls: OnceCell::new(),
-        }
-    }
-
-    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Step> {
-        self.inner.read()
-    }
-
-    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Step> {
-        self.inner.write()
-    }
-
-    /// Returns the USID of this step.
-    pub fn usid(&self) -> USID {
-        *self.usid.get_or_init(|| self.inner.read().usid)
-    }
-
-    /// Returns the UFID of this step.
-    pub fn ufid(&self) -> UFID {
-        *self.ufid.get_or_init(|| self.inner.read().ufid)
-    }
-
-    /// Returns the variant of this step.
-    pub fn variant(&self) -> &StepVariant {
-        self.variant.get_or_init(|| self.inner.read().variant.clone())
-    }
-
     /// Returns the number of function calls made in this step.
     pub fn function_calls(&self) -> usize {
         // XXX (ZZ): a relatively hacky way to handle corner cases
@@ -191,13 +132,6 @@ impl StepRef {
             }
             // Other variants will do tag a return as a single step
             _ => false,
-        }
-    }
-}
-
-impl StepRef {
-    delegate! {
-        to self.inner.read() {
         }
     }
 }
