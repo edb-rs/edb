@@ -41,6 +41,9 @@ pub use types::*;
 mod variable;
 pub use variable::*;
 
+mod variable2;
+pub use variable2::*;
+
 mod annotation;
 pub use annotation::*;
 
@@ -53,7 +56,7 @@ use foundry_compilers::artifacts::{
     ast::SourceLocation, ContractKind, Mutability, StorageLocation, TypeName, VariableDeclaration,
 };
 
-use crate::SourceRange;
+use crate::ast::SourceRange;
 
 mod macros {
     macro_rules! universal_id {

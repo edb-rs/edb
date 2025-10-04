@@ -185,15 +185,15 @@ impl IVariable for VariableRef {
     type Contract = ContractRef;
 
     fn id(&self) -> UVID {
-        todo!()
+        self.id()
     }
 
     fn unnamed(&self) -> bool {
-        todo!()
+        self.base().declaration().name.is_empty()
     }
 
     fn name(&self) -> String {
-        todo!()
+        self.base().declaration().name.clone()
     }
 
     fn is_param(&self) -> bool {

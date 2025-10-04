@@ -2,9 +2,8 @@ use itertools::Either;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::BlkOrStmt;
-
 use super::Blk;
+use super::BlkOrStmt;
 use super::SourceRange;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

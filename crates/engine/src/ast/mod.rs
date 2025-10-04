@@ -3,6 +3,9 @@
 mod blk;
 pub use blk::*;
 
+mod decl;
+pub use decl::*;
+
 mod func;
 pub use func::*;
 
@@ -11,3 +14,6 @@ pub use source::*;
 
 mod stmt;
 pub use stmt::*;
+
+mod types;
+pub use types::*;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Blk;
+use super::Blk;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Func {

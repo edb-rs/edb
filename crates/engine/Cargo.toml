@@ -61,6 +61,7 @@ tower-http = { workspace = true, features = ["cors"] }
 # misc
 auto_impl.workspace = true
 delegate.workspace = true
+dyn-clone.workspace = true
 eyre.workspace = true
 hex.workspace = true
 lazy_static.workspace = true
@@ -78,3 +79,4 @@ once_cell.workspace = true
 rand.workspace = true
 indicatif.workspace = true
 itertools.workspace = true
+typetag.workspace = true

@@ -18,11 +18,12 @@ use std::{collections::BTreeMap, fmt::Display, sync::Arc};
 
 use crate::{
     analysis::{stmt_src, AnalysisTypes, IStep, IVariable, SourceAnalysis, StepKind, VariableRef},
+    ast::{BlkOrStmt, Stmt},
     find_index_of_first_statement_in_block, find_index_of_first_statement_in_block_or_statement,
     find_next_index_of_last_statement_in_block, find_next_index_of_source_location,
     find_next_index_of_statement,
     instrumentation::codegen,
-    BlkOrStmt, Stmt, USID, UVID,
+    USID, UVID,
 };
 
 use eyre::Result;

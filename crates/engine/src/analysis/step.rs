@@ -44,7 +44,7 @@ use crate::{
         macros::universal_id, ContractRef, FunctionRef, IStep, SourceRange, VariableRef,
         VariableScopeRef, UFID,
     },
-    Func, IfStmt, LoopStmt, Stmt, TryStmt,
+    ast::{Func, IfStmt, LoopStmt, Stmt, TryStmt},
 };
 
 universal_id! {
