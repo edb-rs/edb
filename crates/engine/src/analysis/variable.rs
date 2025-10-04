@@ -28,18 +28,13 @@
 //! The module is designed to work with the broader analysis framework to provide
 //! comprehensive variable tracking and type information during contract analysis.
 
-use delegate::delegate;
-use derive_more::From;
-use foundry_compilers::artifacts::{
-    ast::SourceLocation, Block, ContractDefinition, Expression, ForStatement, FunctionDefinition,
-    ModifierDefinition, SourceUnit, TypeName, UncheckedBlock, VariableDeclaration,
-};
-use once_cell::sync::OnceCell;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use foundry_compilers::artifacts::{Expression, TypeName, VariableDeclaration};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
-use crate::analysis::{macros::universal_id, ContractRef, FunctionRef};
+use crate::analysis::{
+    macros::{define_ref, universal_id},
+    ContractRef, FunctionRef,
+};
 
 // use crate::{
 //     // Visitor, Walk
@@ -73,62 +68,28 @@ universal_id! {
     UVID => EDB_RUNTIME_VALUE_OFFSET
 }
 
-/// A reference-counted pointer to a Variable.
-///
-/// This type alias provides shared ownership of Variable instances, allowing
-/// multiple parts of the analysis system to reference the same variable
-/// without copying the data.
-#[derive(Clone, derive_more::Debug)]
-#[allow(unused)]
-pub struct VariableRef {
-    inner: Arc<RwLock<Variable>>,
-    /* cached readonly fields*/
-    #[debug(ignore)]
-    name: OnceCell<String>,
-    #[debug(ignore)]
-    declaration: OnceCell<VariableDeclaration>,
-}
-
-impl From<Variable> for VariableRef {
-    fn from(variable: Variable) -> Self {
-        Self::new(variable)
+define_ref! {
+    /// A reference-counted pointer to a Variable.
+    ///
+    /// This type alias provides shared ownership of Variable instances, allowing
+    /// multiple parts of the analysis system to reference the same variable
+    /// without copying the data.
+    #[allow(unused)]
+    VariableRef(Variable) {
+        cached_method: {
+            declaration: VariableDeclaration,
+            type_name: Option<TypeName>,
+        }
+        delegate: {
+            fn id(&self) -> UVID;
+            fn contract(&self) -> Option<ContractRef>;
+            fn function(&self) -> Option<FunctionRef>;
+        }
     }
 }
 
 #[allow(unused)]
 impl VariableRef {
-    /// Creates a new VariableRef from a Variable.
-    pub fn new(inner: Variable) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(inner)),
-            declaration: OnceCell::new(),
-            name: OnceCell::new(),
-        }
-    }
-
-    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Variable> {
-        self.inner.read()
-    }
-
-    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Variable> {
-        self.inner.write()
-    }
-
-    /// Returns the unique identifier of this variable.
-    pub fn id(&self) -> UVID {
-        self.inner.read().id()
-    }
-
-    /// Returns the declaration of this variable.
-    pub fn declaration(&self) -> &VariableDeclaration {
-        self.declaration.get_or_init(|| self.inner.read().declaration())
-    }
-
-    /// Returns the type name of this variable.
-    pub fn type_name(&self) -> Option<&TypeName> {
-        self.declaration().type_name.as_ref()
-    }
-
     /// Returns the base variable of this variable.
     pub fn base(&self) -> Self {
         let inner = self.inner.read();
@@ -137,37 +98,6 @@ impl VariableRef {
         } else {
             self.clone()
         }
-    }
-
-    /// Returns the function of this variable.
-    pub fn function(&self) -> Option<FunctionRef> {
-        self.inner.read().function()
-    }
-
-    /// Returns the contract of this variable.
-    pub fn contract(&self) -> Option<ContractRef> {
-        self.inner.read().contract()
-    }
-}
-
-impl Serialize for VariableRef {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Serialize the inner Variable directly
-        self.inner.read().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for VariableRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize as Variable and wrap it in VariableRef
-        let variable = Variable::deserialize(deserializer)?;
-        Ok(Self::new(variable))
     }
 }
 
@@ -246,6 +176,11 @@ impl Variable {
         }
     }
 
+    /// Returns the type name of this variable.
+    pub fn type_name(&self) -> Option<TypeName> {
+        self.declaration().type_name
+    }
+
     /// Returns the declaration of this variable.
     pub fn declaration(&self) -> VariableDeclaration {
         match self {
@@ -289,312 +224,6 @@ impl Variable {
                     Some(base.clone())
                 }
             }
-        }
-    }
-
-    /// Returns a human-readable string representation of the variable.
-    ///
-    /// This method provides a concise display format for variables:
-    /// - Plain variables show their declaration name
-    /// - Member access shows `base.member`
-    /// - Index access shows `base[.]`
-    /// - Index range shows `base[..]`
-    pub fn pretty_display(&self) -> String {
-        match self {
-            Self::Plain { declaration, .. } => declaration.name.clone(),
-            Self::Member { base, member } => format!("{}.{}", base.read().pretty_display(), member),
-            Self::Index { base, .. } => format!("{}[.]", base.read().pretty_display()),
-            Self::IndexRange { base, .. } => {
-                format!("{}[..]", base.read().pretty_display())
-            }
-        }
-    }
-}
-
-/// A reference-counted pointer to a VariableScope.
-#[derive(Clone, derive_more::Debug)]
-pub struct VariableScopeRef {
-    inner: Arc<RwLock<VariableScope>>,
-
-    #[debug(ignore)]
-    children: OnceCell<Vec<VariableScopeRef>>,
-    #[debug(ignore)]
-    variables: OnceCell<Vec<VariableRef>>,
-    #[debug(ignore)]
-    variables_recursive: OnceCell<Vec<VariableRef>>,
-}
-
-impl From<VariableScope> for VariableScopeRef {
-    fn from(scope: VariableScope) -> Self {
-        Self::new(scope)
-    }
-}
-
-impl VariableScopeRef {
-    /// Creates a new VariableScopeRef from a VariableScope.
-    pub fn new(inner: VariableScope) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(inner)),
-            variables_recursive: OnceCell::new(),
-            variables: OnceCell::new(),
-            children: OnceCell::new(),
-        }
-    }
-
-    pub(crate) fn read(&self) -> RwLockReadGuard<'_, VariableScope> {
-        self.inner.read()
-    }
-
-    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, VariableScope> {
-        self.inner.write()
-    }
-}
-
-/* Direct read methods */
-impl VariableScopeRef {
-    delegate! {
-        to self.inner.read() {
-            /// Returns the node ID of the AST node that corresponds to this scope.
-            pub fn ast_id(&self) -> usize;
-            /// Returns the source location of this scope's AST node.
-            pub fn src(&self) -> SourceLocation;
-            /// Returns a human-readable string representation of the scope hierarchy.
-            pub fn pretty_display(&self) -> String;
-        }
-    }
-}
-
-/* Cached read methods */
-impl VariableScopeRef {
-    /// Clears the cached variables and children.
-    pub fn clear_cache(&mut self) {
-        self.variables_recursive.take();
-        self.variables.take();
-        self.children.take();
-    }
-
-    /// Returns the children of this scope.
-    pub fn children(&self) -> &Vec<Self> {
-        self.children.get_or_init(|| self.inner.read().children.clone())
-    }
-
-    /// Returns the variables of this scope.
-    pub fn variables(&self) -> &Vec<VariableRef> {
-        self.variables.get_or_init(|| self.inner.read().variables.clone())
-    }
-
-    /// Returns all variables in this scope and its parent scopes recursively. The variables are cached.
-    pub fn variables_recursive(&self) -> &Vec<VariableRef> {
-        self.variables_recursive.get_or_init(|| {
-            let mut variables = self.variables().clone();
-            variables.extend(
-                self.inner
-                    .read()
-                    .parent
-                    .as_ref()
-                    .map_or(vec![], |parent| parent.variables_recursive().clone()),
-            );
-            variables
-        })
-    }
-}
-
-impl Serialize for VariableScopeRef {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // Serialize the inner VariableScope directly
-        self.inner.read().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for VariableScopeRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // Deserialize as VariableScope and wrap it in VariableScopeRef
-        let scope = VariableScope::deserialize(deserializer)?;
-        Ok(Self::new(scope))
-    }
-}
-/// Represents the scope and visibility information for a variable.
-///
-/// This structure contains information about where a variable is defined
-/// and how it can be accessed. Currently, this is a placeholder structure
-/// that can be extended with additional scope-related information as needed.
-///
-/// # Future Extensions
-///
-/// This structure may be extended to include:
-/// - Function scope information
-/// - Contract scope information
-/// - Visibility modifiers (public, private, internal, external)
-/// - Storage location (storage, memory, calldata)
-#[derive(Clone, Serialize, Deserialize, derive_more::Debug)]
-#[non_exhaustive]
-pub struct VariableScope {
-    /// The AST node that defines this scope
-    pub node: ScopeNode,
-    /// Variables declared in this scope, mapped by their UVID
-    pub variables: Vec<VariableRef>,
-    /// Parent scope
-    pub parent: Option<VariableScopeRef>,
-    /// Child scopes contained within this scope
-    pub children: Vec<VariableScopeRef>,
-}
-
-impl VariableScope {
-    /// Returns the unique identifier of this scope, i.e., the node ID of the AST node that corresponds to this scope.
-    pub fn ast_id(&self) -> usize {
-        self.node.ast_id()
-    }
-
-    /// Returns the source location of this scope's AST node.
-    pub fn src(&self) -> SourceLocation {
-        self.node.src()
-    }
-
-    /// Returns all variables in this scope and its parent scopes recursively. The variables are not cached.
-    pub fn variables_recursive(&self) -> Vec<VariableRef> {
-        let mut variables = self.variables.clone();
-        variables.extend(
-            self.parent.clone().map_or(vec![], |parent| parent.read().variables_recursive()),
-        );
-        variables
-    }
-
-    /// Returns a human-readable string representation of the scope hierarchy.
-    ///
-    /// This method displays the scope and all its child scopes in a tree-like format,
-    /// showing the variables contained in each scope.
-    pub fn pretty_display(&self) -> String {
-        self.pretty_display_with_indent(0)
-    }
-
-    fn pretty_display_with_indent(&self, indent_level: usize) -> String {
-        let mut result = String::new();
-        let indent = "  ".repeat(indent_level);
-
-        // Print current scope's variables
-        if self.variables.is_empty() {
-            result.push_str(&format!("{}Scope({}): {{}}", indent, self.node.variant_name()));
-        } else {
-            let mut variable_names: Vec<String> =
-                self.variables.iter().map(|var| var.read().pretty_display()).collect();
-            variable_names.sort(); // Sort for consistent output
-            result.push_str(&format!(
-                "{}Scope({}): {{{}}}",
-                indent,
-                self.node.variant_name(),
-                variable_names.join(", ")
-            ));
-        }
-
-        // Print children scopes recursively with increased indentation
-        for child in &self.children {
-            result.push('\n');
-            result.push_str(&child.read().pretty_display_with_indent(indent_level + 1));
-        }
-
-        result
-    }
-}
-
-/// Represents the type of a smart contract variable.
-///
-/// This enum covers the basic Solidity types that are commonly used in
-/// smart contract analysis. The types are designed to be extensible for
-/// future additions.
-///
-/// # Examples
-///
-/// ```rust
-/// use edb::analysis::variable::VariableType;
-///
-/// let uint_type = VariableType::Uint(256);
-/// let address_type = VariableType::Address;
-/// let bool_type = VariableType::Bool;
-/// ```
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum VariableType {
-    /// A `uint` type variable. The number of bits is specified by the parameter.
-    ///
-    /// For instance, `Uint(8)` denotes a `uint8` Solidity type, while `Uint(256)`
-    /// represents a `uint256` (the default uint type in Solidity).
-    Uint(u8),
-    /// An `address` type variable representing an Ethereum address.
-    ///
-    /// This type is used for variables that store 20-byte Ethereum addresses.
-    Address,
-    /// A `bool` type variable representing a boolean value.
-    ///
-    /// This type is used for variables that can be either `true` or `false`.
-    Bool,
-}
-
-/// Represents different types of AST nodes that can define variable scopes.
-///
-/// This enum wraps various Solidity AST node types that create new variable scopes,
-/// allowing the variable analyzer to track scope boundaries and variable visibility.
-#[derive(Debug, Clone, From, Serialize, Deserialize)]
-#[allow(clippy::large_enum_variant)]
-pub enum ScopeNode {
-    /// A source unit scope (file-level).
-    SourceUnit(#[from] SourceUnit),
-    /// A block statement scope.
-    Block(#[from] Block),
-    /// An unchecked block scope.
-    UncheckedBlock(#[from] UncheckedBlock),
-    /// A for loop scope.
-    ForStatement(#[from] ForStatement),
-    /// A contract definition scope.
-    ContractDefinition(#[from] ContractDefinition),
-    /// A function definition scope.
-    FunctionDefinition(#[from] FunctionDefinition),
-    /// A modifier definition scope.
-    ModifierDefinition(#[from] ModifierDefinition),
-}
-
-impl ScopeNode {
-    /// Returns the node ID of the AST node.
-    pub fn ast_id(&self) -> usize {
-        match self {
-            Self::SourceUnit(source_unit) => source_unit.id,
-            Self::Block(block) => block.id,
-            Self::UncheckedBlock(unchecked_block) => unchecked_block.id,
-            Self::ForStatement(for_statement) => for_statement.id,
-            Self::ContractDefinition(contract_definition) => contract_definition.id,
-            Self::FunctionDefinition(function_definition) => function_definition.id,
-            Self::ModifierDefinition(modifier_definition) => modifier_definition.id,
-        }
-    }
-
-    /// Returns the source location of the wrapped AST node.
-    pub fn src(&self) -> SourceLocation {
-        match self {
-            Self::SourceUnit(source_unit) => source_unit.src,
-            Self::Block(block) => block.src,
-            Self::UncheckedBlock(unchecked_block) => unchecked_block.src,
-            Self::ForStatement(for_statement) => for_statement.src,
-            Self::ContractDefinition(contract_definition) => contract_definition.src,
-            Self::FunctionDefinition(function_definition) => function_definition.src,
-            Self::ModifierDefinition(modifier_definition) => modifier_definition.src,
-        }
-    }
-
-    /// Returns a string representation of the scope node variant name.
-    pub fn variant_name(&self) -> &'static str {
-        match self {
-            Self::SourceUnit(_) => "SourceUnit",
-            Self::Block(_) => "Block",
-            Self::UncheckedBlock(_) => "UncheckedBlock",
-            Self::ForStatement(_) => "ForStatement",
-            Self::ContractDefinition(_) => "ContractDefinition",
-            Self::FunctionDefinition(_) => "FunctionDefinition",
-            Self::ModifierDefinition(_) => "ModifierDefinition",
         }
     }
 }

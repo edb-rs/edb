@@ -141,8 +141,7 @@ where
             })?;
 
             // Get step details
-            let step = step_ref.read();
-            let source_location = &step.src;
+            let source_location = step_ref.src();
 
             // Find the source analysis using the source index
             let source_index = source_location.index.unwrap_or(0) as u32;

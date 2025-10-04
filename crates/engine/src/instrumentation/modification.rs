@@ -533,7 +533,7 @@ impl SourceModifications {
     ) -> Result<()> {
         let source_id = self.source_id;
         for step in &analysis.steps {
-            let updated_variables = &step.read().updated_variables;
+            let updated_variables = step.updated_variables();
             let locs: Vec<usize> = match step.variant() {
                 crate::analysis::StepVariant::FunctionEntry(function_definition) => {
                     // the variable update hook should be instrumented before the first statement of the function

@@ -14,18 +14,17 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::BTreeMap, path::PathBuf};
+use std::path::PathBuf;
 
 use foundry_compilers::artifacts::{
     ast::SourceLocation, Assignment, Block, ContractDefinition, EnumDefinition, ErrorDefinition,
     EventDefinition, Expression, ForStatement, FunctionCall, FunctionCallKind, FunctionDefinition,
-    ModifierDefinition, Mutability, PragmaDirective, Source, SourceUnit, StateMutability,
-    Statement, StructDefinition, TypeName, UncheckedBlock, UserDefinedValueTypeDefinition,
+    ModifierDefinition, Mutability, PragmaDirective, SourceUnit, StateMutability, Statement,
+    StructDefinition, TypeName, UncheckedBlock, UserDefinedValueTypeDefinition,
     VariableDeclaration, Visibility,
 };
 use std::collections::HashMap;
 
-use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, error};
@@ -68,8 +67,6 @@ pub struct SourceAnalysis {
     pub path: PathBuf,
     /// Processed source unit ready for analysis
     pub unit: SourceUnit,
-    /// Version requirement for the source file. The source file may not declare the solidity version.
-    pub version_req: Option<VersionReq>,
     /// Global variable scope of the source file
     pub global_scope: VariableScopeRef,
     /// List of analyzed execution steps in this file
@@ -104,7 +101,7 @@ impl SourceAnalysis {
     pub fn variable_table(&self) -> HashMap<UVID, VariableRef> {
         let mut table = HashMap::default();
         fn walk_scope(scope: &VariableScopeRef, table: &mut HashMap<UVID, VariableRef>) {
-            for variable in scope.variables() {
+            for variable in scope.declared_variables() {
                 table.insert(variable.read().id(), variable.clone());
             }
             for child in scope.children() {
@@ -169,273 +166,6 @@ impl SourceAnalysis {
             table.insert(user_defined_type.ast_id(), user_defined_type.clone());
         }
         table
-    }
-
-    /// Prints the analysis results in a human-readable format.
-    ///
-    /// This method displays a comprehensive overview of the source analysis,
-    /// including file information, variable scopes, execution steps, and
-    /// recommendations for code improvements.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use edb_engine::analysis::{Analyzer, SourceAnalysis};
-    /// use foundry_compilers::artifacts::Artifact;
-    ///
-    /// // Assuming you have a compiled artifact
-    /// let artifact: Artifact = /* your compiled artifact */;
-    ///
-    /// // Analyze the artifact
-    /// let analyses = Analyzer::analyze(&artifact).unwrap();
-    ///
-    /// // Print the analysis results for each source file
-    /// for analysis in analyses {
-    ///     analysis.pretty_display();
-    /// }
-    /// ```
-    ///
-    /// This will output something like:
-    /// ```
-    /// === Source Analysis Report ===
-    /// File ID: 1
-    /// Path: contract.sol
-    /// Source Content Length: 1234 characters
-    ///
-    /// === Variable Scopes ===
-    /// Scope(SourceUnit): {}
-    ///   Scope(ContractDefinition): {balance, owner}
-    ///     Scope(Block): {amount}
-    ///
-    /// === Execution Steps (5 total) ===
-    /// Step 1 (USID: 0):
-    ///   Type: Variable Declaration
-    ///   Location: 45:12
-    ///   Source: uint256 balance = 0;
-    ///   Declared variables: balance (state): uint256 (Private)
-    ///
-    /// Step 2 (USID: 1):
-    ///   Type: Expression
-    ///   Location: 50:15
-    ///   Source: transfer(amount);
-    ///   Function calls: transfer(1 args)
-    ///
-    /// === Recommendations ===
-    /// Private state variables that should be made public:
-    ///   - balance (visibility: Private)
-    /// === End Report ===
-    /// ```
-    pub fn pretty_display(&self, sources: &BTreeMap<u32, Source>) {
-        println!("=== Source Analysis Report ===");
-        println!("File ID: {}", self.id);
-        println!("Path: {}", self.path.display());
-        println!();
-
-        // Display variable scope information
-        println!("=== Variable Scopes ===");
-        println!("{}", self.global_scope.pretty_display());
-        println!();
-
-        // Display execution steps
-        println!("=== Execution Steps ({} total) ===", self.steps.len());
-        for (i, step) in self.steps.iter().enumerate() {
-            println!("Step {} (USID: {}):", i + 1, step.read().usid);
-            println!("  Type: {}", self.step_variant_name(&step.read().variant));
-            println!(
-                "  Location: {}:{}",
-                step.read().src.start.map(|s| s.to_string()).unwrap_or_else(|| "?".to_string()),
-                step.read().src.length.map(|l| l.to_string()).unwrap_or_else(|| "?".to_string())
-            );
-
-            // Display source code
-            if let Some(source_code) = self.extract_source_code(sources, &step.read().src) {
-                println!("  Source: {}", source_code.trim());
-            }
-
-            // Display function calls
-            if !step.read().function_calls.is_empty() {
-                println!(
-                    "  Function calls: {}",
-                    self.format_function_calls(&step.read().function_calls)
-                );
-            }
-
-            // Display declared variables
-            if !step.read().declared_variables.is_empty() {
-                println!(
-                    "  Declared variables: {}",
-                    self.format_declared_variables(
-                        step.read()
-                            .declared_variables
-                            .iter()
-                            .map(|v| v.declaration().clone())
-                            .collect::<Vec<_>>()
-                            .as_slice()
-                    )
-                );
-            }
-
-            // Display accessible variables
-            if !step.read().accessible_variables.is_empty() {
-                println!(
-                    "  Accessible variables: {}",
-                    self.format_updated_variables(&step.read().accessible_variables)
-                );
-            }
-
-            // Display updated variables
-            if !step.read().updated_variables.is_empty() {
-                println!(
-                    "  Updated variables: {}",
-                    self.format_updated_variables(&step.read().updated_variables)
-                );
-            }
-            println!();
-        }
-
-        // Display recommendations
-        self.display_recommendations();
-        println!("=== End Report ===");
-    }
-
-    /// Returns a human-readable name for the step variant.
-    fn step_variant_name(&self, variant: &StepVariant) -> String {
-        match variant {
-            StepVariant::FunctionEntry(_) => "Function Entry".to_string(),
-            StepVariant::ModifierEntry(_) => "Modifier Entry".to_string(),
-            StepVariant::Statement(stmt) => self.statement_name(stmt),
-            StepVariant::Statements(_) => "Multiple Statements".to_string(),
-            StepVariant::IfCondition(_) => "If Condition".to_string(),
-            StepVariant::ForLoop(_) => "For Loop".to_string(),
-            StepVariant::WhileLoop(_) => "While Loop".to_string(),
-            StepVariant::DoWhileLoop(_) => "Do-While Loop".to_string(),
-            StepVariant::Try(_) => "Try Statement".to_string(),
-        }
-    }
-
-    /// Returns a human-readable name for a statement.
-    fn statement_name(&self, stmt: &Statement) -> String {
-        match stmt {
-            Statement::Block(_) => "Block".to_string(),
-            Statement::Break(_) => "Break".to_string(),
-            Statement::Continue(_) => "Continue".to_string(),
-            Statement::DoWhileStatement(_) => "Do-While".to_string(),
-            Statement::EmitStatement(_) => "Emit".to_string(),
-            Statement::ExpressionStatement(_) => "Expression".to_string(),
-            Statement::ForStatement(_) => "For".to_string(),
-            Statement::IfStatement(_) => "If".to_string(),
-            Statement::InlineAssembly(_) => "Inline Assembly".to_string(),
-            Statement::PlaceholderStatement(_) => "Placeholder".to_string(),
-            Statement::Return(_) => "Return".to_string(),
-            Statement::RevertStatement(_) => "Revert".to_string(),
-            Statement::TryStatement(_) => "Try".to_string(),
-            Statement::UncheckedBlock(_) => "Unchecked Block".to_string(),
-            Statement::VariableDeclarationStatement(_) => "Variable Declaration".to_string(),
-            Statement::WhileStatement(_) => "While".to_string(),
-        }
-    }
-
-    /// Formats a list of function calls with detailed information.
-    fn format_function_calls(&self, calls: &[FunctionCall]) -> String {
-        calls
-            .iter()
-            .map(|call| {
-                let args = call.arguments.len();
-                // The expression field contains the function being called
-                // We'll use a simple representation since extracting the name is complex
-                format!("function_call({args} args)")
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// Formats a list of declared variables with detailed information.
-    fn format_declared_variables(&self, variables: &[VariableDeclaration]) -> String {
-        variables
-            .iter()
-            .map(|var| {
-                let name = &var.name;
-                name.to_string()
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-
-    /// Formats a list of updated variables with detailed information.
-    fn format_updated_variables(&self, variables: &[VariableRef]) -> String {
-        variables.iter().map(|var| var.read().pretty_display()).collect::<Vec<_>>().join(", ")
-    }
-
-    /// Extracts the source code for a given source location.
-    fn extract_source_code(
-        &self,
-        sources: &BTreeMap<u32, Source>,
-        src: &SourceLocation,
-    ) -> Option<String> {
-        let start = src.start?;
-        let length = src.length?;
-        let index = src.index?;
-
-        if let Some(source) = sources.get(&(index as u32)) {
-            if start + length <= source.content.len() {
-                Some(source.content[start..start + length].to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Displays recommendations for code improvements.
-    fn display_recommendations(&self) {
-        let mut has_recommendations = false;
-
-        if !self.private_state_variables.is_empty() {
-            if !has_recommendations {
-                println!("=== Recommendations ===");
-                has_recommendations = true;
-            }
-            println!("Private state variables that should be made public:");
-            for var in &self.private_state_variables {
-                println!(
-                    "  - {} (visibility: {:?})",
-                    var.declaration().name,
-                    var.declaration().visibility
-                );
-            }
-        }
-
-        if !self.private_functions.is_empty() {
-            if !has_recommendations {
-                println!("=== Recommendations ===");
-                has_recommendations = true;
-            }
-            println!("Private functions that should be made public:");
-            for func in &self.private_functions {
-                println!("  - {} (visibility: {:?})", func.name(), func.visibility());
-            }
-        }
-
-        if !self.immutable_functions.is_empty() {
-            if !has_recommendations {
-                println!("=== Recommendations ===");
-                has_recommendations = true;
-            }
-            println!("Functions that should be made mutable:");
-            for func in &self.immutable_functions {
-                let mutability = func
-                    .state_mutability()
-                    .as_ref()
-                    .map(|m| format!("{m:?}"))
-                    .unwrap_or_else(|| "None".to_string());
-                println!("  - {} (mutability: {})", func.name(), mutability);
-            }
-        }
-
-        if has_recommendations {
-            println!();
-        }
     }
 }
 
@@ -544,16 +274,6 @@ impl Analyzer {
 
         assert!(self.scope_stack.len() == 1, "scope stack should have exactly one scope");
         assert!(self.current_step.is_none(), "current step should be none");
-        let version_req = if !self.version_requirements.is_empty() {
-            let compact_version_req = self.version_requirements.join(",");
-            VersionReq::parse(&compact_version_req)
-                .inspect_err(|err| {
-                    error!(source_id, ?source_path, %err, "failed to parse version requirements");
-                })
-                .ok()
-        } else {
-            None
-        };
         let global_scope = self.scope_stack.pop().expect("global scope should not be empty");
         let steps = self.finished_steps;
         let functions = self.functions;
@@ -561,7 +281,6 @@ impl Analyzer {
             id: source_id,
             path: source_path.clone(),
             unit: source_unit.clone(),
-            version_req,
             global_scope,
             steps,
             contracts: self.contracts,
@@ -585,7 +304,7 @@ impl Analyzer {
     fn enter_new_scope(&mut self, node: ScopeNode) -> eyre::Result<()> {
         let new_scope = VariableScope {
             node,
-            variables: Vec::default(),
+            declared_variables: Vec::default(),
             children: vec![],
             parent: self.scope_stack.last().cloned(),
         }
@@ -628,7 +347,7 @@ impl Analyzer {
         if state_variable {
             self.state_variables.push(variable.clone());
         }
-        scope.write().variables.push(variable.clone());
+        scope.write().declared_variables.push(variable.clone());
 
         // add the variable to the variable_declarations map
         self.variables.insert(declaration.id, variable.clone());
@@ -1480,8 +1199,10 @@ pub enum AnalysisError {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::collections::BTreeMap;
+
     use foundry_compilers::{
-        artifacts::{Severity, Sources},
+        artifacts::{Severity, Source, Sources},
         solc::{SolcCompiler, SolcLanguage, SolcSettings, SolcVersionedInput},
         CompilationError, Compiler, CompilerInput,
     };
@@ -1592,7 +1313,6 @@ contract TestContract {
 
         // Use utility function to compile and analyze
         let (_sources, analysis) = compile_and_analyze(source);
-        analysis.pretty_display(&_sources);
 
         // Assert that we have two statement steps
         assert!(count_step_by_variant!(analysis, Statement()) == 2);
@@ -1701,7 +1421,6 @@ contract TestContract {
 
         // Use utility function to compile and analyze
         let (_sources, analysis) = compile_and_analyze(source);
-        analysis.pretty_display(&_sources);
 
         // Assert that we have one if step, and one statement step
         assert!(count_step_by_variant!(analysis, IfCondition()) == 1);
@@ -1990,27 +1709,6 @@ contract TestContract {
             .expect("bar function should be found");
         assert!(foo_func.read().contract.is_none());
         assert!(bar_func.read().contract.as_ref().is_some_and(|c| c.name() == "TestContract"));
-    }
-
-    #[test]
-    fn test_solidity_version() {
-        let source = r#"
-        pragma solidity ^0.8.0;
-        pragma solidity ^0.8.1;
-        pragma solidity >=0.7 .1 0;
-        contract C {}
-        "#;
-        let (_sources, analysis) = compile_and_analyze(source);
-        assert_eq!(
-            analysis.version_req,
-            Some(VersionReq::parse("^0.8.0,^0.8.1,>=0.7.1,0").unwrap())
-        );
-
-        let source = r#"
-        contract C {}
-        "#;
-        let (_sources, analysis) = compile_and_analyze(source);
-        assert_eq!(analysis.version_req, None);
     }
 
     #[test]
