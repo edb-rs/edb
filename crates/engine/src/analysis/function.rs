@@ -14,74 +14,34 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::sync::Arc;
-
 use foundry_compilers::artifacts::{
     ast::SourceLocation, FunctionDefinition, FunctionTypeName, ModifierDefinition, StateMutability,
     Visibility,
 };
-use once_cell::sync::OnceCell;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{macros::universal_id, ContractRef, StepRef};
+use crate::analysis::{macros::{universal_id, define_ref}, ContractRef, StepRef};
 
 universal_id! {
     /// A Universal Function Identifier (UFID) is a unique identifier for a function in contract execution.
     UFID => 0
 }
 
-/// A reference-counted pointer to a Function for efficient sharing across multiple contexts.
-///
-/// This type alias provides thread-safe reference counting for Function instances,
-/// allowing them to be shared between different parts of the analysis system
-/// without copying the entire function data.
-#[derive(Debug, Clone)]
-pub struct FunctionRef {
-    inner: Arc<RwLock<Function>>,
-    /* cached readonly fields*/
-    ufid: OnceCell<UFID>,
-    contract: OnceCell<Option<ContractRef>>,
-}
-
-impl From<Function> for FunctionRef {
-    fn from(function: Function) -> Self {
-        Self::new(function)
-    }
-}
-
-impl FunctionRef {
-    /// Creates a new FunctionRef from a Function.
-    pub fn new(inner: Function) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(inner)),
-            ufid: OnceCell::new(),
-            contract: OnceCell::new(),
+define_ref! {
+    /// A reference-counted pointer to a Function for efficient sharing across multiple contexts.
+    ///
+    /// This type alias provides thread-safe reference counting for Function instances,
+    /// allowing them to be shared between different parts of the analysis system
+    /// without copying the entire function data.
+    FunctionRef(Function) {
+        clone_field: {
+            ufid: UFID,
+            contract: Option<ContractRef>,
         }
     }
 }
 
 impl FunctionRef {
-    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Function> {
-        self.inner.read()
-    }
-
-    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, Function> {
-        self.inner.write()
-    }
-}
-
-impl FunctionRef {
-    /// Returns the UFID of this function.
-    pub fn ufid(&self) -> UFID {
-        *self.ufid.get_or_init(|| self.inner.read().ufid)
-    }
-
-    /// Returns the contract that this function belongs to.
-    pub fn contract(&self) -> Option<ContractRef> {
-        self.contract.get_or_init(|| self.inner.read().contract.clone()).clone()
-    }
-
     /// Returns the name of this function.
     pub fn name(&self) -> String {
         self.read().definition.name().to_string()
@@ -103,92 +63,18 @@ impl FunctionRef {
     }
 }
 
-impl Serialize for FunctionRef {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.inner.read().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for FunctionRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let function = Function::deserialize(deserializer)?;
-        Ok(Self::new(function))
-    }
-}
-
-/// A reference-counted pointer to a FunctionTypeName for efficient sharing across multiple contexts.
-///
-/// This type alias provides thread-safe reference counting for FunctionTypeName instances,
-/// allowing them to be shared between different parts of the analysis system
-/// without copying the entire function data.
-#[derive(Debug, Clone)]
-pub struct FunctionTypeNameRef {
-    inner: Arc<RwLock<FunctionTypeName>>,
-}
-
-impl From<FunctionTypeName> for FunctionTypeNameRef {
-    fn from(function_type: FunctionTypeName) -> Self {
-        Self::new(function_type)
-    }
-}
-
-impl FunctionTypeNameRef {
-    /// Creates a new FunctionTypeNameRef from a FunctionTypeName.
-    pub fn new(inner: FunctionTypeName) -> Self {
-        Self { inner: Arc::new(RwLock::new(inner)) }
-    }
-}
-
-#[allow(unused)]
-impl FunctionTypeNameRef {
-    pub(crate) fn read(&self) -> RwLockReadGuard<'_, FunctionTypeName> {
-        self.inner.read()
-    }
-
-    pub(crate) fn write(&self) -> RwLockWriteGuard<'_, FunctionTypeName> {
-        self.inner.write()
-    }
-}
-
-impl FunctionTypeNameRef {
-    /// Returns the visibility of this function type.
-    pub fn visibility(&self) -> Visibility {
-        self.read().visibility.clone()
-    }
-
-    /// Returns the state mutability of this function type.
-    pub fn state_mutability(&self) -> StateMutability {
-        self.read().state_mutability.clone()
-    }
-
-    /// Returns the source location of this function type.
-    pub fn src(&self) -> SourceLocation {
-        self.read().src
-    }
-}
-
-impl Serialize for FunctionTypeNameRef {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.inner.read().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for FunctionTypeNameRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let function_type = FunctionTypeName::deserialize(deserializer)?;
-        Ok(Self::new(function_type))
+define_ref! {
+    /// A reference-counted pointer to a FunctionTypeName for efficient sharing across multiple contexts.
+    ///
+    /// This type alias provides thread-safe reference counting for FunctionTypeName instances,
+    /// allowing them to be shared between different parts of the analysis system
+    /// without copying the entire function data.
+    FunctionTypeNameRef(FunctionTypeName) {
+        clone_field: {
+            visibility: Visibility,
+            state_mutability: StateMutability,
+            src: SourceLocation,
+        }
     }
 }
 

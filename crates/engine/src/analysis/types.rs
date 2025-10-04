@@ -243,7 +243,7 @@ mod tests {
         "#;
         let (_sources, analysis) = compile_and_analyze(source);
         let var = analysis.state_variables.first().unwrap();
-        let ty = var.type_name().unwrap();
+        let ty = var.type_name().as_ref().unwrap();
         let dyn_ty = dyn_sol_type(&analysis.user_defined_types(), ty).unwrap();
         assert_eq!(
             dyn_ty,
