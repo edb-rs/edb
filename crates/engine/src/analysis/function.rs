@@ -20,7 +20,10 @@ use foundry_compilers::artifacts::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{macros::{universal_id, define_ref}, ContractRef, StepRef};
+use crate::analysis::{
+    macros::{define_ref, universal_id},
+    ContractRef, StepRef,
+};
 
 universal_id! {
     /// A Universal Function Identifier (UFID) is a unique identifier for a function in contract execution.
