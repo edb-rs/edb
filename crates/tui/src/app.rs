@@ -198,7 +198,7 @@ You can click panels to focus and use scroll to navigate.
 
 Text selection, copy, and paste are disabled in this mode.
 
-Press M to turn off Mouse Mode and re-enable text selection."#;
+Press '\' to turn off Mouse Mode and re-enable text selection."#;
             Some(PopupType::Notification(message.to_string()))
         } else {
             None
@@ -674,8 +674,8 @@ Press M to turn off Mouse Mode and re-enable text selection."#;
                 self.help_overlay.reset_scroll();
                 Ok(EventResponse::Handled)
             }
-            KeyCode::Char('m') | KeyCode::Char('M') => {
-                // Toggle mouse mode with 'm' or 'M'
+            KeyCode::Char('\\') => {
+                // Toggle mouse mode with '\'
                 if let Err(e) = self.toggle_mouse_mode() {
                     self.popup =
                         Some(PopupType::Error(format!("Failed to toggle mouse mode: {e}")));

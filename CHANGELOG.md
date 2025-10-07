@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a popup window when errors occur in TUI
 - Add mouse interaction support in TUI ([#16](https://github.com/edb-rs/edb/issues/16))
 - Support conditional, unconditional, and data breakpoints ([#9](https://github.com/edb-rs/edb/issues/9))
+- Tracking transient storage changes in source-level snapshots
 
 ### Changed
 - Improved horizontal scrolling support in terminal panel vim mode
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Speed up health check in rpc proxy ([#11](https://github.com/edb-rs/edb/pull/11))
 - Remove Web UI code and dependencies ([#15](https://github.com/edb-rs/edb/pull/15))
 - Add more tests for common and rpc-proxy crates, and well as more end-to-end tests for engine crate
+- Optimized snapshot memory usage and processing speed by selectively storing calldata/memory/storage changes only when necessary and using persistent data structures for stack.
 
 ## [0.0.1] - 2024-09-19
 
