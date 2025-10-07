@@ -79,8 +79,9 @@ where
     pub calldata: Arc<Bytes>,
     /// Database state (shared via Arc within same context)
     pub database: Arc<CacheDB<DB>>,
-    /// Transition storage
-    pub transient_storage: Arc<TransientStorage>, // TODO: add serde_with
+    /// Transient storage
+    #[serde(with = "edb_common::types::arc_transient_string_map")]
+    pub transient_storage: Arc<TransientStorage>,
 }
 
 /// Collection of opcode snapshots

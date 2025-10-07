@@ -84,7 +84,8 @@ where
     /// Database state at the hook point
     pub database: Arc<CacheDB<DB>>,
     /// Transient storage
-    pub transient_storage: Arc<TransientStorage>, // TODO: add serde_with
+    #[serde(with = "edb_common::types::arc_transient_string_map")]
+    pub transient_storage: Arc<TransientStorage>,
     /// Value of accessible local variables
     pub locals: HashMap<String, Option<Arc<EdbSolValue>>>,
     /// Value of state variables at this point (e.g., code address)
