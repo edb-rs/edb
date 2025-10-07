@@ -71,3 +71,6 @@ pub use source::*;
 
 mod abi;
 pub use abi::*;
+
+mod persistent_data;
+pub use persistent_data::*;

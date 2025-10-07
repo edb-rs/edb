@@ -114,7 +114,7 @@ where
                     pc: opcode_snapshot.pc,
                     opcode: opcode_snapshot.opcode,
                     memory: opcode_snapshot.memory.as_ref().clone(),
-                    stack: opcode_snapshot.stack.clone(),
+                    stack: opcode_snapshot.stack.to_vec(),
                     calldata: opcode_snapshot.calldata.as_ref().clone(),
                     transient_storage: opcode_snapshot.transient_storage.as_ref().clone(),
                 }),

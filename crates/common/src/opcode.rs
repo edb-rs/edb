@@ -88,6 +88,12 @@ impl OpcodeTr for OpCode {
             Self::CALL |       // External call that can transfer ETH
             Self::CALLCODE |   // Call with current account context (deprecated)
 
+            // Note: DELEGATECALL and STATICCALL do not transfer value.
+            // At the same time, we do not care about gas modifications.
+            // We hence do not consider them as state-modifying opcodes.
+            // Self::DELEGATECALL | // Call with caller's context (no value transfer)
+            // Self::STATICCALL |   // Static call (no state modifications)
+
             // Log emissions - add entries to transaction receipt logs
             Self::LOG0 | Self::LOG1 | Self::LOG2 | Self::LOG3 | Self::LOG4
         )

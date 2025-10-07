@@ -29,6 +29,7 @@
 
 use alloy_primitives::{Address, Bytes, U256};
 use edb_common::{
+    edb_assert_eq,
     types::{ExecutionFrameId, Trace},
     EdbContext, OpcodeTr,
 };
@@ -52,6 +53,8 @@ use std::{
 };
 use tracing::error;
 
+use crate::Stack;
+
 /// Single opcode execution snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpcodeSnapshot<DB>
@@ -70,8 +73,8 @@ where
     pub opcode: u8,
     /// Memory state (shared via Arc when unchanged)
     pub memory: Arc<Vec<u8>>,
-    /// Stack state (always cloned as most opcodes modify it)
-    pub stack: Vec<U256>,
+    /// Stack state (persistent stack)
+    pub stack: Stack,
     /// Call data for this execution context (shared via Arc within same context)
     pub calldata: Arc<Bytes>,
     /// Database state (shared via Arc within same context)
@@ -135,6 +138,13 @@ struct FrameState {
     last_calldata: Arc<Bytes>,
 }
 
+/// Trace state tracking for stack
+#[derive(Debug, Clone, Default)]
+struct TraceState {
+    /// Current persistent stack
+    stack: Stack,
+}
+
 /// Inspector that records detailed opcode execution snapshots
 #[derive(Debug)]
 pub struct OpcodeSnapshotInspector<'a, DB>
@@ -161,6 +171,9 @@ where
     /// Frame state for each active frame (for memory optimization)
     frame_states: HashMap<ExecutionFrameId, FrameState>,
 
+    /// Trace state
+    trace_state: HashMap<usize, TraceState>,
+
     /// Database context
     database: Arc<CacheDB<DB>>,
 
@@ -186,6 +199,7 @@ where
             frame_stack: Vec::new(),
             current_trace_id: 0,
             frame_states: HashMap::new(),
+            trace_state: HashMap::new(),
             database: Arc::new(ctx.db().clone()),
             transition_storage: Arc::new(TransientStorage::default()),
             last_opcode: None,
@@ -215,6 +229,49 @@ where
     /// Check if we should record steps for the given address
     fn should_record(&self, address: Address) -> bool {
         !self.excluded_addresses.contains(&address)
+    }
+
+    /// Update the persistent stack based on the interpreter's current stack
+    fn update_stack(&mut self, interp: &Interpreter, _ctx: &mut EdbContext<DB>) {
+        let Some(opcode) = self.last_opcode else { return };
+        let opcode_info = opcode.info();
+
+        let Some(frame_id) = self.frame_stack.last() else { return };
+        let trace_state = self.trace_state.entry(frame_id.trace_entry_id()).or_default();
+
+        if opcode_info.inputs() == 0 && opcode_info.outputs() == 0 {
+            // No stack change
+            return;
+        }
+
+        let mut new_stack = trace_state.stack.clone();
+        for _ in 0..opcode_info.inputs() {
+            let (_popped, new_stack_popped) =
+                new_stack.pop().unwrap_or_else(|| panic!("Stack underflow ({opcode})"));
+            new_stack = new_stack_popped;
+        }
+        if !opcode.is_call() {
+            // For call opcodes, the stack will only be updated after the call returns
+            for i in (0..opcode_info.outputs()).rev() {
+                let value = interp
+                    .stack
+                    .peek(i as usize)
+                    .unwrap_or_else(|e| panic!("Stack underflow ({opcode}): {e:?}"));
+                new_stack = new_stack.push(value);
+            }
+        }
+
+        edb_assert_eq!(
+            new_stack.len(),
+            interp.stack.len(),
+            "Stack length mismatch after executing {opcode} (in {}, out {}): expected {}, got {}",
+            opcode_info.inputs(),
+            opcode_info.outputs(),
+            interp.stack.len(),
+            new_stack.len()
+        );
+
+        trace_state.stack = new_stack;
     }
 
     /// Update storage
@@ -302,7 +359,11 @@ where
             target_address: entry.map(|t| t.target).unwrap_or(address),
             opcode: opcode.get(),
             memory: memory.clone(),
-            stack: interp.stack.data().clone(),
+            stack: self
+                .trace_state
+                .get(&frame_id.trace_entry_id())
+                .map(|s| s.stack.clone())
+                .unwrap_or_default(),
             calldata: calldata.clone(),
             database: self.database.clone(),
             transient_storage: self.transition_storage.clone(),
@@ -378,6 +439,7 @@ where
     fn step_end(&mut self, interp: &mut Interpreter, context: &mut EdbContext<DB>) {
         // Record snapshot AFTER executing the opcode
         self.update_storage(interp, context);
+        self.update_stack(interp, context);
     }
 
     fn call(
@@ -402,13 +464,31 @@ where
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
+        edb_assert_eq!(
+            entry.result,
+            Some(outcome.into()),
+            "Call outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+            entry.result
+        );
         if entry.result != Some(outcome.into()) {
             // Mismatch in expected outcome, log error
             error!(
-                "Call outcome mismatch in frame {:?}: expected {:?}, got {:?}",
-                frame_id, entry.result, outcome
+                "Call outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+                entry.result
             );
         }
+
+        // Update the stack after the call returns
+        let Some(trace_state) = self
+            .frame_stack
+            .last()
+            .and_then(|frame_id| self.trace_state.get_mut(&frame_id.trace_entry_id()))
+        else {
+            return;
+        };
+
+        let success = if outcome.result.is_ok() { U256::ONE } else { U256::ZERO };
+        trace_state.stack = trace_state.stack.push(success);
     }
 
     fn create(
@@ -433,13 +513,31 @@ where
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
+        edb_assert_eq!(
+            entry.result,
+            Some(outcome.into()),
+            "Create outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+            entry.result
+        );
         if entry.result != Some(outcome.into()) {
             // Mismatch in expected outcome, log error
             error!(
-                "Create outcome mismatch in frame {:?}: expected {:?}, got {:?}",
-                frame_id, entry.result, outcome
+                "Create outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+                entry.result
             );
         }
+
+        // Update the stack after the create returns
+        let Some(trace_state) = self
+            .frame_stack
+            .last()
+            .and_then(|frame_id| self.trace_state.get_mut(&frame_id.trace_entry_id()))
+        else {
+            return;
+        };
+
+        let address_bytes = outcome.address.unwrap_or_default().into_word();
+        trace_state.stack = trace_state.stack.push(U256::from_be_slice(address_bytes.as_slice()));
     }
 }
 
