@@ -280,9 +280,9 @@ where
 
         let mut new_stack = trace_state.stack.clone();
         for _ in 0..opcode_info.inputs() {
-            let (_popped, new_stack_popped) =
+            let (_popped, stack_after_pop) =
                 new_stack.pop().unwrap_or_else(|| panic!("Stack underflow ({opcode})"));
-            new_stack = new_stack_popped;
+            new_stack = stack_after_pop;
         }
         if !opcode.is_message_call() {
             // For call opcodes, the stack will only be updated after the call returns
