@@ -125,7 +125,7 @@ alloy-trie = "0.9"
 
 # foundry - matching Foundry's versions exactly
 foundry-block-explorers = { version = "0.22.0", default-features = false }
-foundry-compilers = { version = "0.19.1", default-features = false, features = [
+foundry-compilers = { version = "0.19.5", default-features = false, features = [
     "rustls",
     "svm-solc",
 ] }
