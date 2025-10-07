@@ -80,7 +80,7 @@ where
     /// Database state (shared via Arc within same context)
     pub database: Arc<CacheDB<DB>>,
     /// Transition storage
-    pub transient_storage: Arc<TransientStorage>,
+    pub transient_storage: Arc<TransientStorage>, // TODO: add serde_with
 }
 
 /// Collection of opcode snapshots
@@ -207,8 +207,8 @@ where
     /// Database context
     database: Arc<CacheDB<DB>>,
 
-    /// Transition storage
-    transition_storage: Arc<TransientStorage>,
+    /// Transient storage
+    transient_storage: Arc<TransientStorage>,
 
     /// Last opcode
     last_opcode: Option<OpCode>,
@@ -231,7 +231,7 @@ where
             frame_states: HashMap::new(),
             trace_state: HashMap::new(),
             database: Arc::new(ctx.db().clone()),
-            transition_storage: Arc::new(TransientStorage::default()),
+            transient_storage: Arc::new(TransientStorage::default()),
             last_opcode: None,
         }
     }
@@ -345,7 +345,7 @@ where
                 .unwrap_or(force_update)
         {
             let transient_storage = ctx.journal().transient_storage.clone();
-            self.transition_storage = Arc::new(transient_storage);
+            self.transient_storage = Arc::new(transient_storage);
         }
     }
 
@@ -403,7 +403,7 @@ where
                 .unwrap_or_default(),
             calldata,
             database: self.database.clone(),
-            transient_storage: self.transition_storage.clone(),
+            transient_storage: self.transient_storage.clone(),
         };
 
         // Add to snapshots for this frame

@@ -120,8 +120,12 @@ where
         let db = CacheDB::new(CacheDB::new(snapshot.db()));
         let cfg = self.cfg.clone();
         let block = self.block.clone();
+        let transient_storage = snapshot.transient_storage();
 
-        let mut ctx = Context::mainnet().with_db(db).with_cfg(cfg).with_block(block);
+        let mut ctx =
+            Context::mainnet().with_db(db).with_cfg(cfg).with_block(block).modify_journal_chained(
+                |journal| journal.transient_storage.extend(transient_storage.iter()),
+            );
         relax_evm_context_constraints(&mut ctx);
         disable_nonce_check(&mut ctx);
 

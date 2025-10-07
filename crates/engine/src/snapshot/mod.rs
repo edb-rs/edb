@@ -40,7 +40,7 @@ use std::{
 };
 
 use edb_common::types::ExecutionFrameId;
-use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
+use revm::{database::CacheDB, state::TransientStorage, Database, DatabaseCommit, DatabaseRef};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 
@@ -156,6 +156,14 @@ where
         match &self.detail {
             SnapshotDetail::Opcode(snapshot) => snapshot.database.clone(),
             SnapshotDetail::Hook(snapshot) => snapshot.database.clone(),
+        }
+    }
+
+    /// Get transient storage
+    pub fn transient_storage(&self) -> Arc<TransientStorage> {
+        match &self.detail {
+            SnapshotDetail::Opcode(snapshot) => snapshot.transient_storage.clone(),
+            SnapshotDetail::Hook(snapshot) => snapshot.transient_storage.clone(),
         }
     }
 

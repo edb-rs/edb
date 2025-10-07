@@ -153,11 +153,12 @@ pub struct OpcodeSnapshotInfoDetail {
 
 /// Custom serialization module for transient storage
 /// Converts HashMap<(Address, U256), U256> to HashMap<String, U256> for JSON serialization
-mod transient_string_map {
+pub mod transient_string_map {
     use super::*;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::collections::HashMap;
 
+    /// Serialize the given transient storage
     pub fn serialize<S>(storage: &TransientStorage, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -172,6 +173,7 @@ mod transient_string_map {
         string_map.serialize(serializer)
     }
 
+    /// Deserialize the given transient storage
     pub fn deserialize<'de, D>(deserializer: D) -> Result<TransientStorage, D::Error>
     where
         D: Deserializer<'de>,

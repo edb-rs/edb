@@ -106,7 +106,7 @@ where
 
     info!("Collecting hook snapshots for source code contracts");
 
-    let mut inspector = HookSnapshotInspector::new(trace, analysis_results);
+    let mut inspector = HookSnapshotInspector::new(&ctx, trace, analysis_results);
     inspector.with_creation_hooks(creation_hooks)?;
     let mut evm = ctx.build_mainnet_with_inspector(&mut inspector);
 
