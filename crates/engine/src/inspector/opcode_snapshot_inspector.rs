@@ -136,6 +136,16 @@ struct FrameState {
     last_memory: Arc<Vec<u8>>,
 }
 
+impl FrameState {
+    fn from_interp(interp: &Interpreter) -> Self {
+        Self { last_memory: Arc::new(interp.memory.borrow().context_memory().to_vec()) }
+    }
+
+    fn update_with_interp(&mut self, interp: &Interpreter) {
+        self.last_memory = Arc::new(interp.memory.borrow().context_memory().to_vec());
+    }
+}
+
 /// Trace state tracking for stack
 #[derive(Debug, Clone, Default)]
 struct TraceState {
@@ -273,7 +283,7 @@ where
                 new_stack.pop().unwrap_or_else(|| panic!("Stack underflow ({opcode})"));
             new_stack = new_stack_popped;
         }
-        if !opcode.is_call() {
+        if !opcode.is_message_call() {
             // For call opcodes, the stack will only be updated after the call returns
             for i in (0..opcode_info.outputs()).rev() {
                 let value = interp
@@ -297,6 +307,20 @@ where
         trace_state.stack = new_stack;
     }
 
+    /// Update memory
+    fn update_memory(&mut self, interp: &Interpreter) {
+        let Some(frame_id) = self.frame_stack.last() else { return };
+
+        self.frame_states
+            .entry(*frame_id)
+            .and_modify(|state| {
+                if self.last_opcode.map(|c| c.modifies_memory()).unwrap_or_default() {
+                    state.update_with_interp(interp);
+                }
+            })
+            .or_insert(FrameState::from_interp(interp));
+    }
+
     /// Update storage
     fn update_storage(&mut self, ctx: &mut EdbContext<DB>, force_update: bool) {
         // When the last opcode is_call, we do not update storage, since the
@@ -304,7 +328,7 @@ where
         if force_update
             || self
                 .last_opcode
-                .map(|c| c.modifies_evm_state() && !c.is_call())
+                .map(|c| c.modifies_evm_state() && !c.is_message_call())
                 .unwrap_or(force_update)
         {
             let mut inner = ctx.journal().to_inner();
@@ -317,7 +341,7 @@ where
         if force_update
             || self
                 .last_opcode
-                .map(|c| c.modifies_transient_storage() && !c.is_call())
+                .map(|c| c.modifies_transient_storage() && !c.is_message_call())
                 .unwrap_or(force_update)
         {
             let transient_storage = ctx.journal().transient_storage.clone();
@@ -348,25 +372,14 @@ where
         let address = interp.input.target_address();
 
         // Get or create frame state
-        let frame_state = self.frame_states.get(&frame_id);
-
-        // Get memory - reuse Arc if unchanged
-        let memory = if let Some(state) = frame_state {
-            let mem_ref = interp.memory.borrow();
-            let current_memory = mem_ref.context_memory();
-            if current_memory.len() == state.last_memory.len()
-                && &*current_memory == state.last_memory.as_slice()
-            {
-                // Memory unchanged, reuse Arc
-                state.last_memory.clone()
-            } else {
-                // Memory changed, create new Arc
-                Arc::new(current_memory.to_vec())
-            }
-        } else {
-            // First snapshot in frame
-            Arc::new(interp.memory.borrow().context_memory().to_vec())
-        };
+        let frame_state =
+            self.frame_states.entry(frame_id).or_insert(FrameState::from_interp(interp));
+        let memory = frame_state.last_memory.clone();
+        edb_assert_eq!(
+            memory.len(),
+            interp.memory.borrow().context_memory().len(),
+            "inconsistent memory"
+        );
 
         // Get or create trace state
         let trace_state = self
@@ -382,7 +395,7 @@ where
             bytecode_address: entry.map(|t| t.code_address).unwrap_or(address),
             target_address: entry.map(|t| t.target).unwrap_or(address),
             opcode: opcode.get(),
-            memory: memory.clone(),
+            memory,
             stack: self
                 .trace_state
                 .get(&frame_id.trace_entry_id())
@@ -395,9 +408,6 @@ where
 
         // Add to snapshots for this frame
         self.snapshots.entry(frame_id).or_default().push(snapshot);
-
-        // Update frame state for next snapshot
-        self.frame_states.insert(frame_id, FrameState { last_memory: memory });
     }
 
     /// Start tracking a new execution frame
@@ -463,6 +473,7 @@ where
         // Record snapshot AFTER executing the opcode
         self.update_storage(context, false);
         self.update_stack(interp, context);
+        self.update_memory(interp);
     }
 
     fn call(
