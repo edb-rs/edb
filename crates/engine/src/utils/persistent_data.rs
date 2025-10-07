@@ -66,6 +66,9 @@ impl Stack {
     }
 
     /// Convert the stack to a Vec<U256>.
+    ///
+    /// The returned vector is in stack order: the first element is the bottom of the stack,
+    /// and the last element is the top. This may differ from the typical LIFO order representation.
     pub fn to_vec(&self) -> Vec<U256> {
         self.v.iter().copied().collect()
     }
