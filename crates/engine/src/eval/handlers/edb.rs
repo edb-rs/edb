@@ -461,7 +461,7 @@ where
             if idx >= stack.len() {
                 bail!("Index {} out of bounds for stack with {} elements", idx, stack.len());
             }
-            Ok(stack[stack.len() - 1 - idx].into())
+            stack.peek(idx).ok_or(eyre!("Failed to peek stack")).map(|v| DynSolValue::Uint(*v, 256))
         }
         _ => {
             bail!("Invalid argument to edb_stack: expected u256, got {:?}", index);

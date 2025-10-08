@@ -21,14 +21,15 @@
 //! - Contract address
 //! - Current opcode  
 //! - Memory state (with Arc sharing for unchanged memory)
-//! - Stack state (always cloned as most opcodes modify it)
-//! - Call data (with Arc sharing across same execution context)
+//! - Stack state (using persistent data for efficient clone)
+//! - Call data (with Arc sharing across the same trace entry)
 //!
 //! Memory optimization: Uses Arc to share memory and calldata when unchanged,
 //! reducing memory usage for large execution traces.
 
 use alloy_primitives::{Address, Bytes, U256};
 use edb_common::{
+    edb_debug_assert_eq,
     types::{ExecutionFrameId, Trace},
     EdbContext, OpcodeTr,
 };
@@ -52,6 +53,8 @@ use std::{
 };
 use tracing::error;
 
+use crate::Stack;
+
 /// Single opcode execution snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpcodeSnapshot<DB>
@@ -70,13 +73,14 @@ where
     pub opcode: u8,
     /// Memory state (shared via Arc when unchanged)
     pub memory: Arc<Vec<u8>>,
-    /// Stack state (always cloned as most opcodes modify it)
-    pub stack: Vec<U256>,
+    /// Stack state (persistent stack)
+    pub stack: Stack,
     /// Call data for this execution context (shared via Arc within same context)
     pub calldata: Arc<Bytes>,
     /// Database state (shared via Arc within same context)
     pub database: Arc<CacheDB<DB>>,
-    /// Transition storage
+    /// Transient storage
+    #[serde(with = "edb_common::types::arc_transient_string_map")]
     pub transient_storage: Arc<TransientStorage>,
 }
 
@@ -131,8 +135,45 @@ where
 struct FrameState {
     /// Last captured memory state
     last_memory: Arc<Vec<u8>>,
-    /// Last captured calldata
+}
+
+impl FrameState {
+    fn from_interp(interp: &Interpreter) -> Self {
+        Self { last_memory: Arc::new(interp.memory.borrow().context_memory().to_vec()) }
+    }
+
+    fn update_with_interp(&mut self, interp: &Interpreter) {
+        self.last_memory = Arc::new(interp.memory.borrow().context_memory().to_vec());
+    }
+}
+
+/// Trace state tracking for stack
+#[derive(Debug, Clone, Default)]
+struct TraceState {
+    /// Current persistent stack
+    stack: Stack,
+    /// Current calldata
     last_calldata: Arc<Bytes>,
+}
+
+impl TraceState {
+    fn from_evm<DB>(interp: &Interpreter, ctx: &EdbContext<DB>) -> Self
+    where
+        DB: Database + DatabaseCommit + DatabaseRef + Clone,
+        <CacheDB<DB> as Database>::Error: Clone,
+        <DB as Database>::Error: Clone,
+    {
+        let calldata = match interp.input.input() {
+            revm::interpreter::CallInput::SharedBuffer(range) => Arc::new(
+                ctx.local()
+                    .shared_memory_buffer_slice(range.clone())
+                    .map(|slice| Bytes::from(slice.to_vec()))
+                    .unwrap_or_else(Bytes::new),
+            ),
+            revm::interpreter::CallInput::Bytes(bytes) => Arc::new(bytes.clone()),
+        };
+        Self { last_calldata: calldata, stack: Stack::default() }
+    }
 }
 
 /// Inspector that records detailed opcode execution snapshots
@@ -161,11 +202,14 @@ where
     /// Frame state for each active frame (for memory optimization)
     frame_states: HashMap<ExecutionFrameId, FrameState>,
 
+    /// Trace state
+    trace_state: HashMap<usize, TraceState>,
+
     /// Database context
     database: Arc<CacheDB<DB>>,
 
-    /// Transition storage
-    transition_storage: Arc<TransientStorage>,
+    /// Transient storage
+    transient_storage: Arc<TransientStorage>,
 
     /// Last opcode
     last_opcode: Option<OpCode>,
@@ -186,8 +230,9 @@ where
             frame_stack: Vec::new(),
             current_trace_id: 0,
             frame_states: HashMap::new(),
+            trace_state: HashMap::new(),
             database: Arc::new(ctx.db().clone()),
-            transition_storage: Arc::new(TransientStorage::default()),
+            transient_storage: Arc::new(TransientStorage::default()),
             last_opcode: None,
         }
     }
@@ -217,11 +262,76 @@ where
         !self.excluded_addresses.contains(&address)
     }
 
-    /// Update storage
-    fn update_storage(&mut self, _interp: &Interpreter, ctx: &mut EdbContext<DB>) {
-        let Some(last_opcode) = self.last_opcode else { return };
+    /// Update the persistent stack based on the interpreter's current stack
+    fn update_stack(&mut self, interp: &Interpreter, ctx: &mut EdbContext<DB>) {
+        let Some(opcode) = self.last_opcode else { return };
+        let opcode_info = opcode.info();
 
-        if last_opcode.modifies_evm_state() {
+        let Some(frame_id) = self.frame_stack.last() else { return };
+        let trace_state = self
+            .trace_state
+            .entry(frame_id.trace_entry_id())
+            .or_insert(TraceState::from_evm(interp, ctx));
+
+        if opcode_info.inputs() == 0 && opcode_info.outputs() == 0 {
+            // No stack change
+            return;
+        }
+
+        let mut new_stack = trace_state.stack.clone();
+        for _ in 0..opcode_info.inputs() {
+            let (_popped, stack_after_pop) =
+                new_stack.pop().unwrap_or_else(|| panic!("Stack underflow ({opcode})"));
+            new_stack = stack_after_pop;
+        }
+        if !opcode.is_message_call() {
+            // For call opcodes, the stack will only be updated after the call returns
+            for i in (0..opcode_info.outputs()).rev() {
+                let value = interp
+                    .stack
+                    .peek(i as usize)
+                    .unwrap_or_else(|e| panic!("Stack underflow ({opcode}): {e:?}"));
+                new_stack = new_stack.push(value);
+            }
+        }
+
+        edb_debug_assert_eq!(
+            new_stack.len(),
+            interp.stack.len(),
+            "Stack length mismatch after executing {opcode} (in {}, out {}): expected {}, got {}",
+            opcode_info.inputs(),
+            opcode_info.outputs(),
+            interp.stack.len(),
+            new_stack.len()
+        );
+
+        trace_state.stack = new_stack;
+    }
+
+    /// Update memory
+    fn update_memory(&mut self, interp: &Interpreter) {
+        let Some(frame_id) = self.frame_stack.last() else { return };
+
+        self.frame_states
+            .entry(*frame_id)
+            .and_modify(|state| {
+                if self.last_opcode.map(|c| c.modifies_memory()).unwrap_or_default() {
+                    state.update_with_interp(interp);
+                }
+            })
+            .or_insert(FrameState::from_interp(interp));
+    }
+
+    /// Update storage
+    fn update_storage(&mut self, ctx: &mut EdbContext<DB>, force_update: bool) {
+        // When the last opcode is_call, we do not update storage, since the
+        // storage will be updated in call()/create()/call_end()/create_end()
+        if force_update
+            || self
+                .last_opcode
+                .map(|c| c.modifies_evm_state() && !c.is_message_call())
+                .unwrap_or(force_update)
+        {
             let mut inner = ctx.journal().to_inner();
             let changes = inner.finalize();
             let mut snap = ctx.db().clone();
@@ -229,9 +339,14 @@ where
             self.database = Arc::new(snap);
         }
 
-        if last_opcode.modifies_transient_storage() {
+        if force_update
+            || self
+                .last_opcode
+                .map(|c| c.modifies_transient_storage() && !c.is_message_call())
+                .unwrap_or(force_update)
+        {
             let transient_storage = ctx.journal().transient_storage.clone();
-            self.transition_storage = Arc::new(transient_storage);
+            self.transient_storage = Arc::new(transient_storage);
         }
     }
 
@@ -258,41 +373,21 @@ where
         let address = interp.input.target_address();
 
         // Get or create frame state
-        let frame_state = self.frame_states.get(&frame_id);
+        let frame_state =
+            self.frame_states.entry(frame_id).or_insert(FrameState::from_interp(interp));
+        let memory = frame_state.last_memory.clone();
+        edb_debug_assert_eq!(
+            memory.len(),
+            interp.memory.borrow().context_memory().len(),
+            "inconsistent memory"
+        );
 
-        // Get memory - reuse Arc if unchanged
-        let memory = if let Some(state) = frame_state {
-            let mem_ref = interp.memory.borrow();
-            let current_memory = mem_ref.context_memory();
-            if current_memory.len() == state.last_memory.len()
-                && &*current_memory == state.last_memory.as_slice()
-            {
-                // Memory unchanged, reuse Arc
-                state.last_memory.clone()
-            } else {
-                // Memory changed, create new Arc
-                Arc::new(current_memory.to_vec())
-            }
-        } else {
-            // First snapshot in frame
-            Arc::new(interp.memory.borrow().context_memory().to_vec())
-        };
-
-        // Get calldata - reuse Arc if in same frame
-        let calldata = if let Some(state) = frame_state {
-            state.last_calldata.clone()
-        } else {
-            // First snapshot in frame, get calldata
-            match interp.input.input() {
-                revm::interpreter::CallInput::SharedBuffer(range) => Arc::new(
-                    ctx.local()
-                        .shared_memory_buffer_slice(range.clone())
-                        .map(|slice| Bytes::from(slice.to_vec()))
-                        .unwrap_or_else(Bytes::new),
-                ),
-                revm::interpreter::CallInput::Bytes(bytes) => Arc::new(bytes.clone()),
-            }
-        };
+        // Get or create trace state
+        let trace_state = self
+            .trace_state
+            .entry(frame_id.trace_entry_id())
+            .or_insert(TraceState::from_evm(interp, ctx));
+        let calldata = trace_state.last_calldata.clone();
 
         // Create snapshot (stack is always cloned as it changes frequently)
         let entry = self.trace.get(frame_id.trace_entry_id());
@@ -301,19 +396,19 @@ where
             bytecode_address: entry.map(|t| t.code_address).unwrap_or(address),
             target_address: entry.map(|t| t.target).unwrap_or(address),
             opcode: opcode.get(),
-            memory: memory.clone(),
-            stack: interp.stack.data().clone(),
-            calldata: calldata.clone(),
+            memory,
+            stack: self
+                .trace_state
+                .get(&frame_id.trace_entry_id())
+                .map(|s| s.stack.clone())
+                .unwrap_or_default(),
+            calldata,
             database: self.database.clone(),
-            transient_storage: self.transition_storage.clone(),
+            transient_storage: self.transient_storage.clone(),
         };
 
         // Add to snapshots for this frame
         self.snapshots.entry(frame_id).or_default().push(snapshot);
-
-        // Update frame state for next snapshot
-        self.frame_states
-            .insert(frame_id, FrameState { last_memory: memory, last_calldata: calldata });
     }
 
     /// Start tracking a new execution frame
@@ -377,23 +472,26 @@ where
 
     fn step_end(&mut self, interp: &mut Interpreter, context: &mut EdbContext<DB>) {
         // Record snapshot AFTER executing the opcode
-        self.update_storage(interp, context);
+        self.update_storage(context, false);
+        self.update_stack(interp, context);
+        self.update_memory(interp);
     }
 
     fn call(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         _inputs: &mut CallInputs,
     ) -> Option<CallOutcome> {
         // Start tracking new execution frame
         self.push_frame(self.current_trace_id);
         self.current_trace_id += 1;
+        self.update_storage(context, true);
         None
     }
 
     fn call_end(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         _inputs: &CallInputs,
         outcome: &mut CallOutcome,
     ) {
@@ -402,29 +500,51 @@ where
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
+        edb_debug_assert_eq!(
+            entry.result,
+            Some(outcome.into()),
+            "Call outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+            entry.result
+        );
         if entry.result != Some(outcome.into()) {
             // Mismatch in expected outcome, log error
             error!(
-                "Call outcome mismatch in frame {:?}: expected {:?}, got {:?}",
-                frame_id, entry.result, outcome
+                "Call outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+                entry.result
             );
         }
+
+        // Update storage
+        self.update_storage(context, true);
+
+        // Update the stack after the call returns
+        let Some(trace_state) = self
+            .frame_stack
+            .last()
+            .and_then(|frame_id| self.trace_state.get_mut(&frame_id.trace_entry_id()))
+        else {
+            return;
+        };
+
+        let success = if outcome.result.is_ok() { U256::ONE } else { U256::ZERO };
+        trace_state.stack = trace_state.stack.push(success);
     }
 
     fn create(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         _inputs: &mut CreateInputs,
     ) -> Option<CreateOutcome> {
         // Start tracking new execution frame for contract creation
         self.push_frame(self.current_trace_id);
         self.current_trace_id += 1;
+        self.update_storage(context, true);
         None
     }
 
     fn create_end(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         _inputs: &CreateInputs,
         outcome: &mut CreateOutcome,
     ) {
@@ -433,13 +553,34 @@ where
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
+        edb_debug_assert_eq!(
+            entry.result,
+            Some(outcome.into()),
+            "Create outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+            entry.result
+        );
         if entry.result != Some(outcome.into()) {
             // Mismatch in expected outcome, log error
             error!(
-                "Create outcome mismatch in frame {:?}: expected {:?}, got {:?}",
-                frame_id, entry.result, outcome
+                "Create outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
+                entry.result
             );
         }
+
+        // Update storage
+        self.update_storage(context, true);
+
+        // Update the stack after the create returns
+        let Some(trace_state) = self
+            .frame_stack
+            .last()
+            .and_then(|frame_id| self.trace_state.get_mut(&frame_id.trace_entry_id()))
+        else {
+            return;
+        };
+
+        let address_bytes = outcome.address.unwrap_or_default().into_word();
+        trace_state.stack = trace_state.stack.push(U256::from_be_slice(address_bytes.as_slice()));
     }
 }
 

@@ -29,7 +29,7 @@ use alloy_dyn_abi::{DynSolType, DynSolValue};
 use alloy_primitives::{Address, Bytes, U256};
 use edb_common::{
     types::{CallResult, EdbSolValue, ExecutionFrameId, Trace},
-    EdbContext,
+    EdbContext, OpcodeTr,
 };
 use eyre::Result;
 use foundry_compilers::{artifacts::Contract, Artifact};
@@ -41,6 +41,7 @@ use revm::{
         interpreter_types::{InputsTr, Jumps},
         CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter,
     },
+    state::TransientStorage,
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use serde::{Deserialize, Serialize};
@@ -82,6 +83,9 @@ where
     pub bytecode_address: Address,
     /// Database state at the hook point
     pub database: Arc<CacheDB<DB>>,
+    /// Transient storage
+    #[serde(with = "edb_common::types::arc_transient_string_map")]
+    pub transient_storage: Arc<TransientStorage>,
     /// Value of accessible local variables
     pub locals: HashMap<String, Option<Arc<EdbSolValue>>>,
     /// Value of state variables at this point (e.g., code address)
@@ -239,6 +243,15 @@ where
 
     /// The latest value of each UVID encountered (for variable tracking)
     uvid_values: HashMap<UVID, Arc<EdbSolValue>>,
+
+    /// Last opcode
+    last_opcode: Option<OpCode>,
+
+    /// The current database
+    database: Arc<CacheDB<DB>>,
+
+    /// The current transient storage
+    transient_storage: Arc<TransientStorage>,
 }
 
 impl<'a, DB> HookSnapshotInspector<'a, DB>
@@ -248,7 +261,11 @@ where
     <DB as Database>::Error: Clone,
 {
     /// Create a new hook snapshot inspector
-    pub fn new(trace: &'a Trace, analysis: &'a HashMap<Address, AnalysisResult>) -> Self {
+    pub fn new(
+        ctx: &EdbContext<DB>,
+        trace: &'a Trace,
+        analysis: &'a HashMap<Address, AnalysisResult>,
+    ) -> Self {
         Self {
             trace,
             analysis,
@@ -257,6 +274,9 @@ where
             current_trace_id: 0,
             creation_hooks: Vec::new(),
             uvid_values: HashMap::new(),
+            last_opcode: None,
+            database: Arc::new(ctx.db().clone()),
+            transient_storage: Arc::new(TransientStorage::default()),
         }
     }
 
@@ -322,12 +342,40 @@ where
         }
     }
 
+    /// Update database when storage is changed
+    fn update_database(&mut self, ctx: &EdbContext<DB>, force_update: bool) {
+        if force_update
+            || self
+                .last_opcode
+                .map(|c| c.modifies_evm_state() && !c.is_message_call())
+                .unwrap_or(force_update)
+        {
+            // Clone current database state
+            let mut inner = ctx.journal().to_inner();
+            let changes = inner.finalize();
+            let mut snap = ctx.db().clone();
+            snap.commit(changes);
+
+            self.database = Arc::new(snap);
+        }
+
+        if force_update
+            || self
+                .last_opcode
+                .map(|c| c.modifies_transient_storage() && !c.is_message_call())
+                .unwrap_or(force_update)
+        {
+            let transient_storage = ctx.journal().transient_storage.clone();
+            self.transient_storage = Arc::new(transient_storage);
+        }
+    }
+
     /// Check if this is a hook trigger call and record snapshot if so
     fn check_and_record_hook(
         &mut self,
         data: &[u8],
         interp: &Interpreter,
-        ctx: &mut EdbContext<DB>,
+        _ctx: &mut EdbContext<DB>,
     ) {
         let address = self
             .current_frame_id()
@@ -346,12 +394,6 @@ where
             error!("Hook call data does not contain valid USID, skipping snapshot");
             return;
         };
-
-        // Clone current database state
-        let mut inner = ctx.journal().to_inner();
-        let changes = inner.finalize();
-        let mut snap = ctx.db().clone();
-        snap.commit(changes);
 
         // Check variables that are valid at this point
         let Some(step) = self.analysis.get(&address).and_then(|a| a.usid_to_step.get(&usid)) else {
@@ -381,7 +423,8 @@ where
                 let hook_snapshot = HookSnapshot {
                     target_address: entry.target,
                     bytecode_address: entry.code_address,
-                    database: Arc::new(snap),
+                    database: self.database.clone(),
+                    transient_storage: self.transient_storage.clone(),
                     locals,
                     usid,
                     state_variables: HashMap::new(), // State variables can be filled in later
@@ -567,6 +610,7 @@ where
     fn step(&mut self, interp: &mut Interpreter, ctx: &mut EdbContext<DB>) {
         // Get current opcode safely
         let opcode = unsafe { OpCode::new_unchecked(interp.bytecode.opcode()) };
+        self.last_opcode = Some(opcode);
 
         if opcode != OpCode::KECCAK256 {
             // KECCAK256 is the only hooked opcode.
@@ -604,23 +648,34 @@ where
         }
     }
 
+    fn step_end(&mut self, _interp: &mut Interpreter, context: &mut EdbContext<DB>) {
+        self.update_database(context, false);
+    }
+
     fn call(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         _inputs: &mut CallInputs,
     ) -> Option<CallOutcome> {
+        // Update database
+        self.update_database(context, true);
+
         // Start tracking new execution frame for regular calls only
         self.push_frame(self.current_trace_id);
         self.current_trace_id += 1;
+
         None
     }
 
     fn call_end(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         inputs: &CallInputs,
         outcome: &mut CallOutcome,
     ) {
+        // Update database
+        self.update_database(context, true);
+
         let Some(frame_id) = self.pop_frame() else { return };
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
@@ -644,21 +699,28 @@ where
         context: &mut EdbContext<DB>,
         inputs: &mut CreateInputs,
     ) -> Option<CreateOutcome> {
+        // Update database
+        self.update_database(context, true);
+
         // Check and apply creation hooks if applicable
         self.check_and_apply_creation_hooks(inputs, context);
 
         // Start tracking new execution frame for contract creation
         self.push_frame(self.current_trace_id);
         self.current_trace_id += 1;
+
         None
     }
 
     fn create_end(
         &mut self,
-        _context: &mut EdbContext<DB>,
+        context: &mut EdbContext<DB>,
         _inputs: &CreateInputs,
         outcome: &mut CreateOutcome,
     ) {
+        // Update database
+        self.update_database(context, true);
+
         // Stop tracking current execution frame
         let Some(frame_id) = self.pop_frame() else { return };
 

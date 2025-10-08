@@ -1,4 +1,4 @@
-# EDB - Ethereum Debugger 🔍
+# EDB: The Ethereum Project Debugger 🔍
 
 **Source-level time-travel debugger for Ethereum smart contracts**
 
@@ -72,6 +72,7 @@ By inserting strategic debugging hooks during compilation, EDB creates contracts
 - **Reliable variable inspection** - Access any local variable, struct field, or array element with confidence
 - **Expression evaluation** - Evaluate arbitrary Solidity expressions against the current execution state
 - **Time-travel capabilities** - Navigate backward and forward through execution history
+- **Breakpoints & watchpoints** - Set conditional and unconditional breakpoints, and watchpoints on expressions
 
 ## Sponsors
 

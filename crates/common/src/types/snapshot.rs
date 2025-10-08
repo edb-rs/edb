@@ -153,11 +153,12 @@ pub struct OpcodeSnapshotInfoDetail {
 
 /// Custom serialization module for transient storage
 /// Converts HashMap<(Address, U256), U256> to HashMap<String, U256> for JSON serialization
-mod transient_string_map {
+pub mod transient_string_map {
     use super::*;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::collections::HashMap;
 
+    /// Serialize the given transient storage
     pub fn serialize<S>(storage: &TransientStorage, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -172,6 +173,7 @@ mod transient_string_map {
         string_map.serialize(serializer)
     }
 
+    /// Deserialize the given transient storage
     pub fn deserialize<'de, D>(deserializer: D) -> Result<TransientStorage, D::Error>
     where
         D: Deserializer<'de>,
@@ -357,6 +359,84 @@ mod transient_string_map {
             let deserialized: TransientStorage = deserialize(&mut deserializer).unwrap();
 
             assert_eq!(deserialized.get(&(addr, key)), Some(&value));
+        }
+    }
+}
+
+/// Custom serialization module for Arc<TransientStorage>
+///
+/// This module provides specialized (de)serialization for `Arc<TransientStorage>`.
+/// It reuses the underlying `transient_string_map` serialization logic but wraps
+/// the deserialized result in an Arc.
+pub mod arc_transient_string_map {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    /// Serialize Arc<TransientStorage> by delegating to the base implementation
+    pub fn serialize<S>(storage: &Arc<TransientStorage>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        transient_string_map::serialize(storage, serializer)
+    }
+
+    /// Deserialize into Arc<TransientStorage>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Arc<TransientStorage>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        transient_string_map::deserialize(deserializer).map(Arc::new)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use alloy_primitives::{address, uint};
+
+        #[test]
+        fn test_arc_transient_storage_serialization_empty() {
+            let storage = Arc::new(TransientStorage::default());
+
+            // Test serialization
+            let mut writer = Vec::new();
+            let mut serializer = serde_json::Serializer::new(&mut writer);
+            transient_string_map::serialize(&storage, &mut serializer).unwrap();
+            let serialized_str = String::from_utf8(writer).unwrap();
+            assert_eq!(serialized_str, "{}");
+
+            // Test deserialization
+            let mut deserializer = serde_json::Deserializer::from_str(&serialized_str);
+            let deserialized: Arc<TransientStorage> = deserialize(&mut deserializer).unwrap();
+            assert_eq!(deserialized.len(), 0);
+        }
+
+        #[test]
+        fn test_arc_transient_storage_roundtrip() {
+            let mut original = TransientStorage::default();
+            let addr1 = address!("1111111111111111111111111111111111111111");
+            let addr2 = address!("2222222222222222222222222222222222222222");
+            let key1 = uint!(100_U256);
+            let key2 = uint!(200_U256);
+            let value1 = uint!(1000_U256);
+            let value2 = uint!(2000_U256);
+
+            original.insert((addr1, key1), value1);
+            original.insert((addr2, key2), value2);
+            let storage = Arc::new(original);
+
+            // Test roundtrip serialization
+            let mut writer = Vec::new();
+            let mut serializer = serde_json::Serializer::new(&mut writer);
+            serialize(&storage, &mut serializer).unwrap();
+            let serialized_str = String::from_utf8(writer).unwrap();
+
+            let mut deserializer = serde_json::Deserializer::from_str(&serialized_str);
+            let deserialized: Arc<TransientStorage> = deserialize(&mut deserializer).unwrap();
+
+            // Verify all entries are preserved
+            assert_eq!(deserialized.len(), 2);
+            assert_eq!(deserialized.get(&(addr1, key1)), Some(&value1));
+            assert_eq!(deserialized.get(&(addr2, key2)), Some(&value2));
         }
     }
 }

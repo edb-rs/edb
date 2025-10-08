@@ -34,6 +34,8 @@ pub mod expression;
 pub mod forking;
 /// Logging setup and utilities for consistent logging across EDB components
 pub mod logging;
+/// Conditional assertion macros for strict testing mode
+pub mod macros;
 /// Extended opcode analysis utilities for EVM state modification detection and debugging
 pub mod opcode;
 /// Specification ID utilities for handling different Ethereum hardforks and protocol versions

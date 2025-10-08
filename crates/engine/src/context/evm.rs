@@ -1,3 +1,19 @@
+// EDB - Ethereum Debugger
+// Copyright (C) 2024 Zhuo Zhang and Wuqi Zhang
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 use alloy_dyn_abi::{DynSolValue, FunctionExt, JsonAbiExt};
 use alloy_json_abi::Function;
 use alloy_primitives::{Address, Bytes, U256};
@@ -104,8 +120,12 @@ where
         let db = CacheDB::new(CacheDB::new(snapshot.db()));
         let cfg = self.cfg.clone();
         let block = self.block.clone();
+        let transient_storage = snapshot.transient_storage();
 
-        let mut ctx = Context::mainnet().with_db(db).with_cfg(cfg).with_block(block);
+        let mut ctx =
+            Context::mainnet().with_db(db).with_cfg(cfg).with_block(block).modify_journal_chained(
+                |journal| journal.transient_storage.extend(transient_storage.iter()),
+            );
         relax_evm_context_constraints(&mut ctx);
         disable_nonce_check(&mut ctx);
 

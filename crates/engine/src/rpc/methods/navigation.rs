@@ -138,7 +138,7 @@ where
     match snapshot.detail() {
         SnapshotDetail::Opcode(ref s) => {
             let op = unsafe { OpCode::new_unchecked(s.opcode) };
-            Ok(op.is_call())
+            Ok(op.is_message_call())
         }
         SnapshotDetail::Hook(ref s) => {
             let usid = s.usid;

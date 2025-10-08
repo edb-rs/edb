@@ -107,9 +107,11 @@ pub use eval::*;
 pub mod inspector;
 pub use inspector::*;
 
-/// Contract instrumentation and code generation (internal module).
 pub mod instrumentation;
 pub use instrumentation::*;
+
+pub mod orchestration;
+pub use orchestration::*;
 
 pub mod rpc;
 pub use rpc::*;

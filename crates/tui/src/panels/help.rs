@@ -189,7 +189,7 @@ impl HelpOverlay {
                     layout_specific: None,
                 },
                 HelpItem {
-                    keys: "m/M",
+                    keys: "\\",
                     description: "Toggle mouse mode (click to focus, scroll to navigate)",
                     layout_specific: None,
                 },

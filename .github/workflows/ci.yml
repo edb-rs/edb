@@ -180,4 +180,5 @@ jobs:
         env:
           EDB_TEST_PROXY_MODE: cache-only
           EDB_TEST_ETHERSCAN_MODE: cache-only
+          EDB_ASSERT: all
           RUST_LOG: info

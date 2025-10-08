@@ -69,7 +69,7 @@ pub trait OpcodeTr {
     fn modifies_transient_storage(&self) -> bool;
 
     /// Check if this opcode is a call instruction
-    fn is_call(&self) -> bool;
+    fn is_message_call(&self) -> bool;
 }
 
 impl OpcodeTr for OpCode {
@@ -88,6 +88,12 @@ impl OpcodeTr for OpCode {
             Self::CALL |       // External call that can transfer ETH
             Self::CALLCODE |   // Call with current account context (deprecated)
 
+            // Note: DELEGATECALL and STATICCALL do not transfer value.
+            // At the same time, we do not care about gas modifications.
+            // We hence do not consider them as state-modifying opcodes.
+            // Self::DELEGATECALL | // Call with caller's context (no value transfer)
+            // Self::STATICCALL |   // Static call (no state modifications)
+
             // Log emissions - add entries to transaction receipt logs
             Self::LOG0 | Self::LOG1 | Self::LOG2 | Self::LOG3 | Self::LOG4
         )
@@ -100,7 +106,7 @@ impl OpcodeTr for OpCode {
         )
     }
 
-    fn is_call(&self) -> bool {
+    fn is_message_call(&self) -> bool {
         matches!(
             *self,
             Self::CREATE
@@ -201,22 +207,22 @@ mod tests {
     #[test]
     fn test_is_call() {
         // Contract creation
-        assert!(OpCode::CREATE.is_call());
-        assert!(OpCode::CREATE2.is_call());
+        assert!(OpCode::CREATE.is_message_call());
+        assert!(OpCode::CREATE2.is_message_call());
 
         // Various call types
-        assert!(OpCode::CALL.is_call());
-        assert!(OpCode::CALLCODE.is_call());
-        assert!(OpCode::DELEGATECALL.is_call());
-        assert!(OpCode::STATICCALL.is_call());
+        assert!(OpCode::CALL.is_message_call());
+        assert!(OpCode::CALLCODE.is_message_call());
+        assert!(OpCode::DELEGATECALL.is_message_call());
+        assert!(OpCode::STATICCALL.is_message_call());
 
         // Non-call operations
-        assert!(!OpCode::SSTORE.is_call());
-        assert!(!OpCode::SLOAD.is_call());
-        assert!(!OpCode::ADD.is_call());
-        assert!(!OpCode::JUMP.is_call());
-        assert!(!OpCode::RETURN.is_call());
-        assert!(!OpCode::REVERT.is_call());
+        assert!(!OpCode::SSTORE.is_message_call());
+        assert!(!OpCode::SLOAD.is_message_call());
+        assert!(!OpCode::ADD.is_message_call());
+        assert!(!OpCode::JUMP.is_message_call());
+        assert!(!OpCode::RETURN.is_message_call());
+        assert!(!OpCode::REVERT.is_message_call());
     }
 
     #[test]
@@ -232,8 +238,8 @@ mod tests {
         assert!(!OpCode::JUMPI.modifies_transient_storage());
 
         // And they're not calls
-        assert!(!OpCode::JUMP.is_call());
-        assert!(!OpCode::JUMPI.is_call());
+        assert!(!OpCode::JUMP.is_message_call());
+        assert!(!OpCode::JUMPI.is_message_call());
     }
 
     #[test]

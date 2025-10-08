@@ -48,6 +48,7 @@ solang-parser = { workspace = true }
 
 # async
 tokio = { workspace = true, features = ["full"] }
+futures.workspace = true
 
 # serialization
 serde = { workspace = true, features = ["derive"] }
@@ -72,6 +73,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 derive_more.workspace = true
+rpds.workspace = true
 serial_test.workspace = true
 once_cell.workspace = true
 rand.workspace = true
