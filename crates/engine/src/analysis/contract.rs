@@ -18,7 +18,10 @@ use foundry_compilers::artifacts::{ContractDefinition, ContractKind};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    analysis::{macros::{define_ref, universal_id}, Analyzer},
+    analysis::{
+        macros::{define_ref, universal_id},
+        Analyzer,
+    },
     utils::VisitorAction,
 };
 
@@ -51,11 +54,7 @@ pub struct Contract {
 impl Contract {
     /// Creates a new Contract with the given definition.
     pub fn new(definition: &ContractDefinition) -> Self {
-        Self {
-            ucid: UCID::next(),
-            name: definition.name.clone(),
-            kind: definition.kind.clone(),
-        }
+        Self { ucid: UCID::next(), name: definition.name.clone(), kind: definition.kind.clone() }
     }
 
     /// Returns the name of this contract.
@@ -66,7 +65,10 @@ impl Contract {
 
 /* Contract analysis utils */
 impl Analyzer {
-    pub(super) fn enter_new_contract(&mut self, contract: &ContractDefinition) -> eyre::Result<VisitorAction> {
+    pub(super) fn enter_new_contract(
+        &mut self,
+        contract: &ContractDefinition,
+    ) -> eyre::Result<VisitorAction> {
         assert!(self.current_contract.is_none(), "Contract cannot be nested");
         let new_contract: ContractRef = Contract::new(contract).into();
         self.current_contract = Some(new_contract);
@@ -136,24 +138,19 @@ mod tests {
         assert_eq!(analysis.contracts.len(), 3, "Should have 3 contracts");
 
         // Verify all contracts are collected
-        let contract_names: Vec<String> = analysis.contracts.iter()
-            .map(|c| c.name().clone())
-            .collect();
+        let contract_names: Vec<String> = analysis.contracts.iter().map(|c| c.name()).collect();
 
         assert!(contract_names.contains(&"Contract1".to_string()), "Contract1 should be collected");
         assert!(contract_names.contains(&"Contract2".to_string()), "Contract2 should be collected");
         assert!(contract_names.contains(&"Contract3".to_string()), "Contract3 should be collected");
 
         // Verify each function is associated with the correct contract
-        let func1 = analysis.functions.iter()
-            .find(|f| f.name() == "func1")
-            .expect("Should find func1");
-        let func2 = analysis.functions.iter()
-            .find(|f| f.name() == "func2")
-            .expect("Should find func2");
-        let func3 = analysis.functions.iter()
-            .find(|f| f.name() == "func3")
-            .expect("Should find func3");
+        let func1 =
+            analysis.functions.iter().find(|f| f.name() == "func1").expect("Should find func1");
+        let func2 =
+            analysis.functions.iter().find(|f| f.name() == "func2").expect("Should find func2");
+        let func3 =
+            analysis.functions.iter().find(|f| f.name() == "func3").expect("Should find func3");
 
         assert_eq!(func1.contract().unwrap().name(), "Contract1");
         assert_eq!(func2.contract().unwrap().name(), "Contract2");
@@ -178,17 +175,11 @@ mod tests {
         let (_sources, analysis) = compile_and_analyze(source);
 
         // Collect all UCIDs
-        let ucids: Vec<UCID> = analysis.contracts.iter()
-            .map(|c| c.read().ucid)
-            .collect();
+        let ucids: Vec<UCID> = analysis.contracts.iter().map(|c| c.read().ucid).collect();
 
         // Check all UCIDs are unique
         let unique_ucids: std::collections::HashSet<_> = ucids.iter().collect();
-        assert_eq!(
-            ucids.len(),
-            unique_ucids.len(),
-            "All UCIDs should be unique"
-        );
+        assert_eq!(ucids.len(), unique_ucids.len(), "All UCIDs should be unique");
 
         // Should have 4 unique UCIDs
         assert_eq!(ucids.len(), 4, "Should have 4 contracts");
@@ -205,7 +196,9 @@ mod tests {
         let (_sources, analysis) = compile_and_analyze(source);
 
         // Find the contract
-        let contract = analysis.contracts.iter()
+        let contract = analysis
+            .contracts
+            .iter()
             .find(|c| c.name() == "MyTestContract")
             .expect("Should find MyTestContract");
 
@@ -241,14 +234,21 @@ mod tests {
         assert_eq!(analysis.contracts.len(), 4, "Should have 4 contracts");
 
         // Verify all contract kinds are collected
-        let contract_names: Vec<String> = analysis.contracts.iter()
-            .map(|c| c.name().clone())
-            .collect();
+        let contract_names: Vec<String> = analysis.contracts.iter().map(|c| c.name()).collect();
 
-        assert!(contract_names.contains(&"RegularContract".to_string()), "RegularContract should be collected");
-        assert!(contract_names.contains(&"IMyInterface".to_string()), "IMyInterface should be collected");
+        assert!(
+            contract_names.contains(&"RegularContract".to_string()),
+            "RegularContract should be collected"
+        );
+        assert!(
+            contract_names.contains(&"IMyInterface".to_string()),
+            "IMyInterface should be collected"
+        );
         assert!(contract_names.contains(&"MyLibrary".to_string()), "MyLibrary should be collected");
-        assert!(contract_names.contains(&"AbstractContract".to_string()), "AbstractContract should be collected");
+        assert!(
+            contract_names.contains(&"AbstractContract".to_string()),
+            "AbstractContract should be collected"
+        );
     }
 
     #[test]
@@ -279,12 +279,16 @@ mod tests {
         assert_eq!(analysis.contracts.len(), 4, "Should have 4 contracts");
 
         // Find the derived contract
-        let _derived = analysis.contracts.iter()
+        let _derived = analysis
+            .contracts
+            .iter()
             .find(|c| c.name() == "DerivedContract")
             .expect("Should find DerivedContract");
 
         // Find the implementing contract
-        let _implementing = analysis.contracts.iter()
+        let _implementing = analysis
+            .contracts
+            .iter()
             .find(|c| c.name() == "ImplementingContract")
             .expect("Should find ImplementingContract");
     }
@@ -306,7 +310,9 @@ mod tests {
         assert_eq!(analysis.contracts.len(), 2, "Should have 2 contracts");
 
         // Find the empty contract
-        let empty = analysis.contracts.iter()
+        let empty = analysis
+            .contracts
+            .iter()
             .find(|c| c.name() == "EmptyContract")
             .expect("Should find EmptyContract");
 
@@ -314,7 +320,9 @@ mod tests {
         assert_eq!(empty.name(), "EmptyContract");
 
         // Find the non-empty contract
-        let non_empty = analysis.contracts.iter()
+        let non_empty = analysis
+            .contracts
+            .iter()
             .find(|c| c.name() == "NonEmptyContract")
             .expect("Should find NonEmptyContract");
 
@@ -364,7 +372,9 @@ mod tests {
         assert_eq!(analysis.contracts.len(), 1, "Should have 1 contract");
 
         // Find the contract
-        let contract = analysis.contracts.iter()
+        let contract = analysis
+            .contracts
+            .iter()
             .find(|c| c.name() == "ComplexContract")
             .expect("Should find ComplexContract");
 
@@ -372,13 +382,19 @@ mod tests {
         assert_eq!(contract.name(), "ComplexContract");
 
         // Verify functions are associated with this contract
-        let public_func = analysis.functions.iter()
+        let public_func = analysis
+            .functions
+            .iter()
             .find(|f| f.name() == "publicFunc")
             .expect("Should find publicFunc");
-        let private_func = analysis.functions.iter()
+        let private_func = analysis
+            .functions
+            .iter()
             .find(|f| f.name() == "privateFunc")
             .expect("Should find privateFunc");
-        let modifier = analysis.functions.iter()
+        let modifier = analysis
+            .functions
+            .iter()
             .find(|f| f.name() == "onlyOwner")
             .expect("Should find onlyOwner modifier");
 

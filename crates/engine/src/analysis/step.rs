@@ -15,13 +15,8 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 use foundry_compilers::artifacts::{
-    ast::SourceLocation,
-    Expression,
-    FunctionCall,
-    FunctionCallKind,
-    FunctionDefinition,
-    ModifierDefinition,
-    Statement,
+    ast::SourceLocation, Expression, FunctionCall, FunctionCallKind, FunctionDefinition,
+    ModifierDefinition, Statement,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1707,7 +1702,7 @@ contract TestContract {
         // Try statement should have after_step for the try block and each catch clause
         // In this case, we have 1 try block and 1 catch clause, so 2 after_step locations
         assert!(
-            hook_locs.after_step.len() >= 1,
+            !hook_locs.after_step.is_empty(),
             "Try statement should have after_step locations for catch clauses"
         );
 
