@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add mouse interaction support in TUI ([#16](https://github.com/edb-rs/edb/issues/16))
 - Support conditional, unconditional, and data breakpoints ([#9](https://github.com/edb-rs/edb/issues/9))
 - Tracking transient storage changes in source-level snapshots
+- Runtime path-based filtering via EDB_ASSERT environment variable for assertion
 
 ### Changed
 - Improved horizontal scrolling support in terminal panel vim mode
