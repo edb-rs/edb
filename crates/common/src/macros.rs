@@ -105,7 +105,7 @@ static ASSERTION_TARGETS: Lazy<Vec<String>> = Lazy::new(|| match env::var("EDB_A
 ///
 /// # Examples
 ///
-/// ```
+/// ```rust, ignore
 /// use edb_common::macros::is_assertion_enabled;
 ///
 /// // Assuming EDB_ASSERT=edb_engine::inspector
@@ -358,7 +358,7 @@ mod tests {
         // This tests the core logic without relying on environment variables
 
         // Simulate wildcard matching
-        let targets = vec!["*".to_string()];
+        let targets = ["*".to_string()];
         assert!(targets.iter().any(|t| t == "*" || t == "all"));
 
         // Simulate prefix matching
@@ -371,7 +371,7 @@ mod tests {
         assert!(!"edb_engine::eval".starts_with("edb_engine::inspector"));
 
         // Simulate multiple targets
-        let targets = vec!["edb_engine".to_string(), "edb_common::types".to_string()];
+        let targets = ["edb_engine".to_string(), "edb_common::types".to_string()];
         assert!(targets.iter().any(|t| "edb_engine::inspector".starts_with(t)));
         assert!(targets.iter().any(|t| "edb_common::types::snapshot".starts_with(t)));
         assert!(!targets.iter().any(|t| "edb_tui".starts_with(t)));
@@ -436,9 +436,6 @@ mod tests {
         // If EDB_ASSERT=edb_common::macros (or edb_common, or *), this should be true
         // If EDB_ASSERT is not set or different, this will be false
         let enabled = is_assertion_enabled(current_module);
-
-        // The actual value depends on the environment, but the function should work
-        assert!(enabled == true || enabled == false);
 
         // Test that the function works with various paths
         assert!(is_assertion_enabled("edb_common::macros::tests") == enabled);

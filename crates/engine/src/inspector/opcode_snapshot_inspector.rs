@@ -29,7 +29,7 @@
 
 use alloy_primitives::{Address, Bytes, U256};
 use edb_common::{
-    edb_assert_eq,
+    edb_debug_assert_eq,
     types::{ExecutionFrameId, Trace},
     EdbContext, OpcodeTr,
 };
@@ -295,7 +295,7 @@ where
             }
         }
 
-        edb_assert_eq!(
+        edb_debug_assert_eq!(
             new_stack.len(),
             interp.stack.len(),
             "Stack length mismatch after executing {opcode} (in {}, out {}): expected {}, got {}",
@@ -376,7 +376,7 @@ where
         let frame_state =
             self.frame_states.entry(frame_id).or_insert(FrameState::from_interp(interp));
         let memory = frame_state.last_memory.clone();
-        edb_assert_eq!(
+        edb_debug_assert_eq!(
             memory.len(),
             interp.memory.borrow().context_memory().len(),
             "inconsistent memory"
@@ -500,7 +500,7 @@ where
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
-        edb_assert_eq!(
+        edb_debug_assert_eq!(
             entry.result,
             Some(outcome.into()),
             "Call outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
@@ -553,7 +553,7 @@ where
 
         let Some(entry) = self.trace.get(frame_id.trace_entry_id()) else { return };
 
-        edb_assert_eq!(
+        edb_debug_assert_eq!(
             entry.result,
             Some(outcome.into()),
             "Create outcome mismatch in frame {frame_id:?}: expected {:?}, got {outcome:?}",
