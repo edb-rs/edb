@@ -45,6 +45,13 @@ impl SourceRange {
     pub fn expand_to_next_semicolon(mut self, source: &str) -> Self {
         let start = self.start;
         let end = self.next_loc();
+
+        // Check if we already have a semicolon at the end
+        if end > 0 && source.as_bytes().get(end - 1) == Some(&b';') {
+            // Already have a semicolon, no need to expand
+            return self;
+        }
+
         let substr = &source[end..];
         if let Some(semicolon) = substr.find(";").map(|i| i + end) {
             self.length = semicolon - start + 1;

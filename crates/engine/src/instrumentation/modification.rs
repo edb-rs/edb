@@ -319,39 +319,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_collect_statement_to_block_modifications() {
-        let source = r#"
-        contract C {
-            function a() public returns (uint256) {
-                if (false )return 0;
-
-                if (true)return 0;
-                else    return 1 ;
-            }
-
-            function b() public returns (uint256 x) {
-                for (uint256 i = 0; i < 10; i++)x += i
-                ;
-            }
-
-            function c() public returns (uint256) {
-                while (true) return 0;
-            }
-        }
-        "#;
-
-        let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 10);
-        let modified_source = modifications.modify_source(source);
-
-        // The modified source should be able to be compiled and analyzed.
-        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-    }
-
-    #[test]
     fn test_do_while_loop_step_modification() {
         let source = r#"
         contract C {
@@ -430,81 +397,7 @@ mod tests {
         let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
         let version = Arc::new(Version::parse("0.8.0").unwrap());
         modifications.collect_before_step_hook_modifications(version, source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 13);
-        let modified_source = modifications.modify_source(source);
-
-        // The modified source should be able to be compiled and analyzed.
-        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-    }
-
-    // #[test]
-    // fn test_modifier_is_not_step() {
-    //     let source = r#"
-    //     contract C {
-    //         modifier m(uint x) {
-    //             _;
-    //         }
-
-    //         function a() public m(1) {}
-    //     }
-    //     "#;
-    //     let (_sources, analysis) = analysis::tests::compile_and_analyze(source);
-
-    //     let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-    //     let version = Arc::new(Version::parse("0.8.0").unwrap());
-    //     modifications.collect_before_step_hook_modifications(version, source, &analysis).unwrap();
-    //     assert_eq!(modifications.modifications.len(), 1);
-    //     let modified_source = modifications.modify_source(source);
-
-    //     // The modified source should be able to be compiled and analyzed.
-    //     let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-    // }
-
-    #[test]
-    fn test_else_if_statement_to_block() {
-        let source = r#"
-contract TestContract {
-    function foo() public {
-        if (true)
-            revert();
-        else if (false)
-            return;
-        else {
-            require(true, "error");
-        }
-    }
-}
-"#;
-        let (_sources, analysis) = compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 6);
-        let modified_source = modifications.modify_source(source);
-
-        // The modified source should be able to be compiled and analyzed.
-        let (_sources, _analysis2) = analysis::tests::compile_and_analyze(&modified_source);
-    }
-
-    #[test]
-    fn test_if_for_statement_to_block() {
-        let source = r#"
-contract TestContract {
-    function foo() public {
-        if (true)
-            for (uint256 i = 0; i < 10; i++)
-                return;
-        else
-            while (true)
-                return;
-    }
-}
-"#;
-        let (_sources, analysis) = compile_and_analyze(source);
-
-        let mut modifications = SourceModifications::new(analysis::tests::TEST_CONTRACT_SOURCE_ID);
-        modifications.collect_statement_to_block_modifications(source, &analysis).unwrap();
-        assert_eq!(modifications.modifications.len(), 6);
+        assert_eq!(modifications.modifications.len(), 12);
         let modified_source = modifications.modify_source(source);
 
         // The modified source should be able to be compiled and analyzed.

@@ -306,6 +306,9 @@ impl Analyzer {
                     loop_expression.walk(&mut single_step_walker)?;
                 }
 
+                // collect statement bodies before walking the body
+                self.collect_statement_bodies(&for_statement.body);
+
                 // end the for statement step early and then walk the body of the for statement.
                 self.exit_current_statement_step(statement)?;
                 for_statement.body.walk(self)?;
@@ -351,6 +354,12 @@ impl Analyzer {
                 // we take over the walk of the sub ast tree in the if statement step.
                 let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
                 if_statement.condition.walk(&mut single_step_walker)?;
+
+                // collect statement bodies before walking the bodies
+                self.collect_statement_bodies(&if_statement.true_body);
+                if let Some(false_body) = &if_statement.false_body {
+                    self.collect_statement_bodies(false_body);
+                }
 
                 // end the if statement step early and then walk the true and false body of the if statement.
                 self.exit_current_statement_step(statement)?;
@@ -444,6 +453,9 @@ impl Analyzer {
                 // we take over the walk of the sub ast tree in the while statement step.
                 let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
                 while_statement.condition.walk(&mut single_step_walker)?;
+
+                // collect statement bodies before walking the body
+                self.collect_statement_bodies(&while_statement.body);
 
                 // end the while statement step early and then walk the body of the while statement.
                 self.exit_current_statement_step(statement)?;

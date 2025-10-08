@@ -18,8 +18,8 @@ use std::path::PathBuf;
 
 use foundry_compilers::artifacts::{
     Assignment, Block, ContractDefinition, EnumDefinition, ErrorDefinition, EventDefinition,
-    ForStatement, FunctionCall, FunctionDefinition, IfStatement, ModifierDefinition, PragmaDirective,
-    SourceUnit, Statement, StructDefinition, UncheckedBlock,
+    ForStatement, FunctionCall, FunctionDefinition, IfStatement, ModifierDefinition,
+    PragmaDirective, SourceUnit, Statement, StructDefinition, UncheckedBlock,
     UserDefinedValueTypeDefinition, VariableDeclaration, WhileStatement,
 };
 use std::collections::HashMap;
@@ -29,9 +29,8 @@ use tracing::debug;
 
 use crate::{
     analysis::{
-        ContractRef, FunctionRef, FunctionTypeNameRef, SourceAnalysis,
-        StatementBody, StepRef, UserDefinedTypeRef,
-        VariableRef, VariableScopeRef,
+        ContractRef, FunctionRef, FunctionTypeNameRef, SourceAnalysis, StatementBody, StepRef,
+        UserDefinedTypeRef, VariableRef, VariableScopeRef,
     },
     utils::{Visitor, VisitorAction, Walk},
 };
@@ -362,15 +361,6 @@ impl Visitor for Analyzer {
         Ok(())
     }
 
-    fn visit_for_statement(&mut self, for_statement: &ForStatement) -> eyre::Result<VisitorAction> {
-        self.collect_statement_bodies(&for_statement.body);
-        Ok(VisitorAction::Continue)
-    }
-
-    fn post_visit_for_statement(&mut self, _for_statement: &ForStatement) -> eyre::Result<()> {
-        Ok(())
-    }
-
     fn visit_statement(&mut self, _statement: &Statement) -> eyre::Result<VisitorAction> {
         // try to enter a new step
         self.enter_new_statement_step(_statement)
@@ -452,6 +442,25 @@ impl<'a> Visitor for AnalyzerSingleStepWalker<'a> {
     fn post_visit_for_statement(&mut self, for_statement: &ForStatement) -> eyre::Result<()> {
         self.analyzer.exit_current_scope(for_statement.src)?;
         Ok(())
+    }
+
+    fn visit_if_statement(
+        &mut self,
+        _if_statement: &foundry_compilers::artifacts::IfStatement,
+    ) -> eyre::Result<VisitorAction> {
+        self.analyzer.collect_statement_bodies(&_if_statement.true_body);
+        if let Some(false_body) = &_if_statement.false_body {
+            self.analyzer.collect_statement_bodies(false_body);
+        }
+        Ok(VisitorAction::Continue)
+    }
+
+    fn visit_while_statement(
+        &mut self,
+        while_statement: &WhileStatement,
+    ) -> eyre::Result<VisitorAction> {
+        self.analyzer.collect_statement_bodies(&while_statement.body);
+        Ok(VisitorAction::Continue)
     }
 }
 
