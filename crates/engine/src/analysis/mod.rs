@@ -15,7 +15,8 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 mod analyzer;
-mod annotation;
+mod ast;
+mod body;
 mod common;
 mod contract;
 mod function;
@@ -23,10 +24,10 @@ mod scope;
 mod step;
 mod types;
 mod variable;
-mod visitor;
 
 pub use analyzer::*;
-pub use annotation::*;
+pub use ast::*;
+pub use body::*;
 pub use common::*;
 pub use contract::*;
 pub use function::*;
@@ -34,7 +35,6 @@ pub use scope::*;
 pub use step::*;
 pub use types::*;
 pub use variable::*;
-pub use visitor::*;
 
 mod macros {
     macro_rules! universal_id {

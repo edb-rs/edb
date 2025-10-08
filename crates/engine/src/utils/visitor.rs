@@ -29,7 +29,7 @@ use paste::paste;
 /// # Examples
 ///
 /// ```rust
-/// use crate::analysis::visitor::{Visitor, VisitorAction};
+/// use crate::utils::visitor::{Visitor, VisitorAction};
 ///
 /// struct MyVisitor;
 ///
