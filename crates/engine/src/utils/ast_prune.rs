@@ -225,7 +225,7 @@ mod tests {
     use eyre::Result;
     use foundry_block_explorers::Client;
 
-    use crate::utils::OnchainCompiler;
+    use crate::utils::{next_etherscan_api_key, OnchainCompiler};
 
     use super::*;
 
@@ -234,8 +234,11 @@ mod tests {
             .join("../../testdata/cache/etherscan")
             .join(chain.to_string());
         let cache_ttl = Duration::from_secs(u32::MAX as u64); // we don't want the cache to expire
-        let client =
-            Client::builder().chain(chain)?.with_cache(Some(cache_root), cache_ttl).build()?;
+        let client = Client::builder()
+            .with_api_key(next_etherscan_api_key())
+            .chain(chain)?
+            .with_cache(Some(cache_root), cache_ttl)
+            .build()?;
 
         let compiler_cache_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../testdata/cache/solc")
