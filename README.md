@@ -1,12 +1,36 @@
-# EDB: The Ethereum Project Debugger 🔍
+<!-- Project Banner -->
+<p align="center">
+  <img src="./resources/edb-banner.png" alt="EDB Banner" width="80%" />
+</p>
 
-**Source-level time-travel debugger for Ethereum smart contracts**
+<h1 align="center">EDB: The Ethereum Project Debugger 🔍</h1>
 
-EDB bridges the gap between high-level Solidity code and low-level EVM execution, providing the three essential debugging features that have been missing from the Ethereum ecosystem: **step-by-step execution at the source code level**, **local variable value inspection**, and **custom expression evaluation during debug execution**.
+<p align="center">
+  <strong>Source-level time-travel debugger for Ethereum smart contracts</strong>
+</p>
+
+<p align="center">
+  <a href="#installation">Installation</a> •
+  <a href="#quickstart">Quickstart</a> •
+  <a href="#why-edb">Why EDB?</a> •
+  <a href="#sponsors">Sponsors</a>
+</p>
+
+EDB bridges the gap between high-level Solidity code and low-level EVM execution, providing four essential debugging features that have been missing from the Ethereum ecosystem:
+
+- 🧭 **Step-by-step execution at the source code level**  
+- 🧠 **Local variable value inspection**  
+- 🧮 **Custom expression evaluation during debug execution**
+- 🎯 **Breakpoints & watchpoints for fine-grained control**
+
 
 > ⚠️ **Note**: EDB is currently under active development. Features and APIs may change as we continue to improve the debugging experience.
 
-![EDB Demo](resources/edb-demo-min.gif)
+<!-- Demo GIF with framing -->
+<p align="center">
+  <img src="resources/edb-demo-min.gif" alt="EDB Demo" width="85%" style="border: 1px solid #ddd; border-radius: 8px;">
+</p>
+<p align="center"><em>✨ Time-travel through your Solidity code with a full TUI debugger.</em></p>
 
 ## Installation
 
