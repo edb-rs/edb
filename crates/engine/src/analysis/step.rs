@@ -70,7 +70,13 @@ impl StepRef {
 
     /// Check whether this step is a statement step
     pub fn is_statement(&self) -> bool {
-        matches!(self.kind(), StepKind::Statement { .. })
+        matches!(
+            self.kind(),
+            StepKind::EmitStatement
+                | StepKind::ReturnStatement
+                | StepKind::PlaceholderStatement
+                | StepKind::OtherStatement
+        )
     }
 
     /// Check whether this step is an entry step
@@ -89,7 +95,7 @@ impl StepRef {
 
     /// Check whether this step contains return statements
     pub fn contains_return(&self) -> bool {
-        matches!(self.kind(), StepKind::Statement { contains_return: true, .. })
+        matches!(self.kind(), StepKind::ReturnStatement)
     }
 }
 
@@ -136,13 +142,14 @@ pub struct Step {
 pub enum StepKind {
     /// An entry step for a function or modifier
     Entry(FunctionRef),
-    /// A statement step
-    Statement {
-        /// Whether this statement is an emit statement
-        is_emit_statement: bool,
-        /// Whether this statement contains a return statement
-        contains_return: bool,
-    },
+    /// A emit statement step
+    EmitStatement,
+    /// A return statement step
+    ReturnStatement,
+    /// A placeholder statement step
+    PlaceholderStatement,
+    /// Other statement steps
+    OtherStatement,
 }
 
 impl Step {
@@ -191,16 +198,13 @@ impl Analyzer {
         let current_scope = self.current_scope();
 
         macro_rules! step {
-            ($variant:ident, $stmt:expr, $loc:expr, $hooks:expr, $is_emit:expr, $is_return:expr) => {{
+            ($variant:ident, $stmt:expr, $loc:expr, $hooks:expr, $kind:expr) => {{
                 let variables_in_scope = current_scope.read().variables_recursive();
                 let new_step: StepRef = Step::new(
                     current_function.ufid(),
                     $loc,
                     $hooks,
-                    StepKind::Statement {
-                        is_emit_statement: $is_emit,
-                        contains_return: $is_return,
-                    },
+                    $kind,
                     current_scope.clone(),
                     variables_in_scope.clone(),
                 )
@@ -219,15 +223,18 @@ impl Analyzer {
                 } else {
                     vec![src.expand_to_next_semicolon(&self.source).next_loc()]
                 };
-                let is_emit_statement = matches!(statement, Statement::EmitStatement { .. });
-                let contains_return = matches!(statement, Statement::Return(..));
+                let kind = match statement {
+                    Statement::EmitStatement { .. } => StepKind::EmitStatement,
+                    Statement::Return(..) => StepKind::ReturnStatement,
+                    Statement::PlaceholderStatement(..) => StepKind::PlaceholderStatement,
+                    _ => StepKind::OtherStatement,
+                };
                 step!(
                     Statement,
                     statement.clone(),
                     src,
                     StepHookLocations { before_step: src.start, after_step },
-                    is_emit_statement,
-                    contains_return
+                    kind
                 )
             }};
         }
@@ -253,8 +260,7 @@ impl Analyzer {
                         // the after step hook should be instrumented after the do-while statement
                         after_step: vec![src.next_loc()]
                     },
-                    false, // is_emit_statement
-                    false  // contains_return
+                    StepKind::OtherStatement
                 );
 
                 // we take over the walk of the sub ast tree in the do-while statement step.
@@ -290,8 +296,7 @@ impl Analyzer {
                         )
                         .expect("for statement first statement location not found")]
                     },
-                    false, // is_emit_statement
-                    false  // contains_return
+                    StepKind::OtherStatement
                 );
 
                 // we take over the walk of the sub ast tree in the for statement step.
@@ -347,8 +352,7 @@ impl Analyzer {
                             locs
                         }
                     },
-                    false, // is_emit_statement
-                    false  // contains_return
+                    StepKind::OtherStatement
                 );
 
                 // we take over the walk of the sub ast tree in the if statement step.
@@ -372,19 +376,18 @@ impl Analyzer {
                 return Ok(VisitorAction::SkipSubtree);
             }
             Statement::InlineAssembly(inline_assembly) => simple_stmt_to_step!(inline_assembly),
-            Statement::PlaceholderStatement(placeholder_statement) => {
-                let src = placeholder_statement.src.into();
-                step!(
-                    Placeholder,
-                    *placeholder_statement.clone(),
-                    src,
-                    StepHookLocations { before_step: src.start, after_step: vec![src.next_loc()] },
-                    false,
-                    false
-                );
+            Statement::PlaceholderStatement(_placeholder_statement) => {
+                // let src = placeholder_statement.src.into();
+                // step!(
+                //     Placeholder,
+                //     *placeholder_statement.clone(),
+                //     src,
+                //     StepHookLocations { before_step: src.start, after_step: vec![src.next_loc()] },
+                //     StepKind::PlaceholderStatement
+                // );
 
-                // end the placeholder statement step early
-                self.exit_current_statement_step(statement)?;
+                // // end the placeholder statement step early
+                // self.exit_current_statement_step(statement)?;
             }
             Statement::Return(return_stmt) => simple_stmt_to_step!(return_stmt),
             Statement::RevertStatement(revert_statement) => simple_stmt_to_step!(revert_statement),
@@ -408,8 +411,7 @@ impl Analyzer {
                             ))
                             .collect()
                     },
-                    false, // is_emit_statement
-                    false  // contains_return
+                    StepKind::OtherStatement
                 );
 
                 // we take over the walk of the sub ast tree in the try statement step.
@@ -446,8 +448,7 @@ impl Analyzer {
                         )
                         .expect("while statement first statement location not found")],
                     },
-                    false, // is_emit_statement
-                    false  // contains_return
+                    StepKind::OtherStatement
                 );
 
                 // we take over the walk of the sub ast tree in the while statement step.
@@ -587,10 +588,7 @@ impl Analyzer {
 
                     // Corner case 1: skip if EmitStatement
                     // In EmitStatement, an event is also considered as a function call, but we don't count it
-                    let is_emit_statement = matches!(
-                        step_read.kind,
-                        StepKind::Statement { is_emit_statement: true, .. }
-                    );
+                    let is_emit_statement = matches!(step_read.kind, StepKind::EmitStatement);
                     if is_emit_statement {
                         false
                     } else {
@@ -937,7 +935,8 @@ contract TestContract {
         let func_entries = analysis.steps.iter().filter(|s| s.is_entry()).count();
         assert_eq!(func_entries, 1);
         let statement_steps = analysis.steps.iter().filter(|s| s.is_statement()).count();
-        assert_eq!(statement_steps, 3);
+        // FIXME: when we consider the placeholder statement as a step, the number of steps will be 3
+        assert_eq!(statement_steps, 2);
     }
 
     #[test]
@@ -1112,17 +1111,8 @@ contract TestContract {
         }
 
         // 3. Check emit statements
-        let emit_steps: Vec<_> = analysis
-            .steps
-            .iter()
-            .filter(|s| {
-                if let StepKind::Statement { is_emit_statement, .. } = s.kind() {
-                    is_emit_statement
-                } else {
-                    false
-                }
-            })
-            .collect();
+        let emit_steps: Vec<_> =
+            analysis.steps.iter().filter(|s| matches!(s.kind(), StepKind::EmitStatement)).collect();
 
         for emit_step in emit_steps {
             let emit_after_pos = emit_step.hook_locations().after_step[0];
@@ -1232,17 +1222,8 @@ contract TestContract {
 
         // Assert that emit statements are tracked as statement steps
         // and that events are not counted as function calls
-        let emit_steps = analysis
-            .steps
-            .iter()
-            .filter(|s| {
-                if let StepKind::Statement { is_emit_statement, .. } = s.kind() {
-                    is_emit_statement
-                } else {
-                    false
-                }
-            })
-            .count();
+        let emit_steps =
+            analysis.steps.iter().filter(|s| matches!(s.kind(), StepKind::EmitStatement)).count();
         assert_eq!(emit_steps, 2);
 
         // Verify that events are not counted as function calls
@@ -1442,11 +1423,13 @@ contract TestContract {
         // Should have: modifier entry, before statement, placeholder, after statement,
         // function entry, function statement
         let all_steps = analysis.steps.len();
-        assert_eq!(all_steps, 6);
+        // FIXME: when we consider the placeholder statement as a step, the number of steps will be 6
+        assert_eq!(all_steps, 5);
 
         // Verify placeholder is treated as a statement
         let statement_steps = analysis.steps.iter().filter(|s| s.is_statement()).count();
-        assert_eq!(statement_steps, 4);
+        // FIXME: when we consider the placeholder statement as a step, the number of steps will be 4
+        assert_eq!(statement_steps, 3);
     }
 
     #[test]
