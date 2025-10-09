@@ -28,7 +28,7 @@ EDB bridges the gap between high-level Solidity code and low-level EVM execution
 
 <!-- Demo GIF with framing -->
 <p align="center">
-  <img src="resources/edb-demo-min.gif" alt="EDB Demo" width="85%" style="border: 1px solid #ddd; border-radius: 8px;">
+  <img src="resources/edb-demo-min.gif" alt="EDB Demo" width="100%" style="border: 1px solid #ddd; border-radius: 8px;">
 </p>
 <p align="center"><em>✨ Time-travel through your Solidity code with a full TUI debugger.</em></p>
 
@@ -70,7 +70,9 @@ The more RPC endpoints are provided, the faster the replay is.
 __If none is provided, EDB will default to the ten most popular public RPC endpoints, which may be slow and unreliable.__
 
 EDB will by default start a TUI debugger:
-![EDB TUI](resources/edb-tui.png)
+<p align="center">
+  <img src="resources/edb-tui.png" alt="EDB Demo" width="98%" style="border: 1px solid #ddd; border-radius: 8px;">
+</p>
 
 Type `?` in the TUI to view the help page.
 
