@@ -42,10 +42,6 @@ use proxy::ProxyServerBuilder;
 struct Args {
     #[command(subcommand)]
     command: Commands,
-
-    /// Verbosity level (repeat for more: -v, -vv, -vvv)
-    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
-    verbose: u8,
 }
 
 /// Available commands
@@ -130,17 +126,6 @@ struct MonitorArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-
-    // Set RUST_LOG based on verbosity
-    if std::env::var("RUST_LOG").is_err() {
-        let level = match args.verbose {
-            0 => "warn",
-            1 => "info",
-            2 => "debug",
-            _ => "trace",
-        };
-        std::env::set_var("RUST_LOG", level);
-    }
 
     match args.command {
         Commands::Server(server_args) => run_server(server_args).await,

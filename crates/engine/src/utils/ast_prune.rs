@@ -218,10 +218,11 @@ impl ASTPruner {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, str::FromStr, time::Duration};
+    use std::{env, str::FromStr, time::Duration};
 
     use alloy_chains::Chain;
     use alloy_primitives::Address;
+    use edb_common::{test_utils::setup_test_environment, CachePath, EdbCachePath};
     use eyre::Result;
     use foundry_block_explorers::Client;
 
@@ -230,17 +231,17 @@ mod tests {
     use super::*;
 
     async fn download_and_compile(chain: Chain, addr: Address) -> Result<()> {
-        let cache_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/cache/etherscan")
-            .join(chain.to_string());
-        let cache_ttl = Duration::from_secs(u32::MAX as u64); // we don't want the cache to expire
-        let client =
-            Client::builder().chain(chain)?.with_cache(Some(cache_root), cache_ttl).build()?;
+        setup_test_environment(true);
 
-        let compiler_cache_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../testdata/cache/solc")
-            .join(chain.to_string());
-        let compiler = OnchainCompiler::new(Some(compiler_cache_root))?;
+        let cache_path = EdbCachePath::new(env::var(edb_common::env::EDB_CACHE_DIR).ok());
+        let cache_ttl = Duration::from_secs(u32::MAX as u64); // we don't want the cache to expire
+
+        let client = Client::builder()
+            .chain(chain)?
+            .with_cache(cache_path.etherscan_chain_cache_dir(chain), cache_ttl)
+            .build()?;
+
+        let compiler = OnchainCompiler::new(cache_path.compiler_chain_cache_dir(chain))?;
 
         let mut artifact =
             compiler.compile(&client, addr).await?.ok_or_eyre("missing compiler output")?;

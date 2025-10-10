@@ -35,46 +35,14 @@ pub mod paths {
             .join("testdata")
             .join("rpc_baseline")
     }
-
-    /// Get the testdata cache directory root path
-    pub fn get_testdata_cache_root() -> PathBuf {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        manifest_dir
-            .parent() // crates/
-            .and_then(|p| p.parent()) // workspace root
-            .expect("Failed to find workspace root")
-            .join("testdata")
-            .join("cache")
-    }
-
-    /// Setup the EDB_CACHE_DIR/EDB_ETHERSCAN_CACHE_TTL environment variable for tests
-    /// This should be called at the beginning of each test to ensure consistent cache location
-    pub fn setup_test_cache_dir() {
-        let cache_dir = get_testdata_cache_root();
-
-        // Set the environment variable
-        env::set_var("EDB_CACHE_DIR", cache_dir.to_str().expect("Invalid cache path"));
-
-        // Optionally create the directory if it doesn't exist
-        if !cache_dir.exists() {
-            std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
-        }
-
-        // Set the EDB_ETHERSCAN_CACHE_TTL environment variable
-        env::set_var("EDB_ETHERSCAN_CACHE_TTL", format!("{}", u32::MAX)); // close to forever
-
-        println!("Test cache directory set to: {}", cache_dir.display());
-    }
 }
 
 /// Initialization utilities for tests
 pub mod init {
-    use crate::test_utils::paths::setup_test_cache_dir;
-
     /// Initialize test environment with cache directory and logging
     /// This is a convenience function that sets up both cache and logging
-    pub fn init_test_environment() {
-        setup_test_cache_dir();
+    pub fn init_test_environment(use_temp_dir: bool) {
+        edb_common::test_utils::setup_test_environment(use_temp_dir);
         edb_common::logging::ensure_test_logging(None);
     }
 }
@@ -86,14 +54,12 @@ pub mod proxy {
     use tokio::time::sleep;
     use tracing::info;
 
-    use super::paths;
-
     /// Helper to set up a cache-only test proxy with caching in testdata directory
     async fn setup_test_proxy_with_cache_only(
         grace_period: u64,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        // Get the testdata cache directory
-        let cache_dir = paths::get_testdata_cache_root();
+        // Create a temporary cache directory for test isolation
+        let cache_dir = edb_common::test_utils::create_temp_cache_dir();
         setup_test_proxy(grace_period, Some(cache_dir), Some(vec![])).await
     }
 
@@ -101,8 +67,8 @@ pub mod proxy {
     async fn setup_test_proxy_with_cache(
         grace_period: u64,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        // Get the testdata cache directory
-        let cache_dir = paths::get_testdata_cache_root();
+        // Create a temporary cache directory for test isolation
+        let cache_dir = edb_common::test_utils::create_temp_cache_dir();
         setup_test_proxy(grace_period, Some(cache_dir), None).await
     }
 
@@ -111,7 +77,7 @@ pub mod proxy {
     pub async fn setup_test_proxy_configurable(
         grace_period: u64,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        let proxy_mode = env::var("EDB_TEST_PROXY_MODE").unwrap_or_default();
+        let proxy_mode = env::var(edb_common::env::EDB_TEST_PROXY_MODE).unwrap_or_default();
 
         match proxy_mode.as_str() {
             "cache-only" => {

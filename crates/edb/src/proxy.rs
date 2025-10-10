@@ -174,7 +174,7 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         }
 
         // If cache directory is specified, add it as well
-        if let Ok(cache_dir) = env::var("EDB_CACHE_DIR") {
+        if let Ok(cache_dir) = env::var(edb_common::env::EDB_CACHE_DIR) {
             args.push("--cache-dir".to_string());
             args.push(cache_dir);
         }
@@ -221,7 +221,7 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
         }
 
         // If cache directory is specified, add it as well
-        if let Ok(cache_dir) = env::var("EDB_CACHE_DIR") {
+        if let Ok(cache_dir) = env::var(edb_common::env::EDB_CACHE_DIR) {
             args.push("--cache-dir".to_string());
             args.push(cache_dir);
         }

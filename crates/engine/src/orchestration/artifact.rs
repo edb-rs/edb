@@ -42,12 +42,12 @@ pub async fn download_verified_source_code(
 ) -> Result<HashMap<Address, Artifact>> {
     info!("Downloading verified source code for touched contracts");
 
-    let compiler_cache_root =
-        EdbCachePath::new(env::var("EDB_CACHE_DIR").ok()).compiler_chain_cache_dir(chain_id);
+    let compiler_cache_root = EdbCachePath::new(env::var(edb_common::env::EDB_CACHE_DIR).ok())
+        .compiler_chain_cache_dir(chain_id);
     let compiler = OnchainCompiler::new(compiler_cache_root)?;
 
-    let etherscan_cache_root =
-        EdbCachePath::new(env::var("EDB_CACHE_DIR").ok()).etherscan_chain_cache_dir(chain_id);
+    let etherscan_cache_root = EdbCachePath::new(env::var(edb_common::env::EDB_CACHE_DIR).ok())
+        .etherscan_chain_cache_dir(chain_id);
 
     let addresses: Vec<_> = replay_result.visited_addresses.keys().copied().collect();
     let total_contracts = addresses.len();
@@ -61,7 +61,7 @@ pub async fn download_verified_source_code(
             .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
         );
 
-    let cache_ttl = env::var("EDB_ETHERSCAN_CACHE_TTL")
+    let cache_ttl = env::var(edb_common::env::EDB_ETHERSCAN_CACHE_TTL)
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(DEFAULT_ETHERSCAN_CACHE_TTL);
