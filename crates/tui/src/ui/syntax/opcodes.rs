@@ -196,7 +196,6 @@ mod tests {
     fn test_numbers() {
         let highlighter = OpcodeHighlighter::new();
         let tokens = highlighter.tokenize("PUSH1 128");
-        println!("MDZZ {tokens:?}");
 
         let number_token = tokens.iter().find(|t| t.token_type == TokenType::OpcodeNumber);
         assert!(number_token.is_some());
