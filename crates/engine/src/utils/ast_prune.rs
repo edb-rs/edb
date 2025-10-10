@@ -231,7 +231,7 @@ mod tests {
     use super::*;
 
     async fn download_and_compile(chain: Chain, addr: Address) -> Result<()> {
-        setup_test_environment(false);
+        setup_test_environment(true);
 
         let cache_path = EdbCachePath::new(env::var(edb_common::env::EDB_CACHE_DIR).ok());
         let cache_ttl = Duration::from_secs(u32::MAX as u64); // we don't want the cache to expire
