@@ -79,12 +79,12 @@ codegen-units = 1
 
 [workspace.dependencies]
 # workspace crates
-edb-engine = { version = "0.0.1", path = "crates/engine" }
-edb-common = { version = "0.0.1", path = "crates/common" }
-edb-rpc-proxy = { version = "0.0.1", path = "crates/rpc-proxy" }
-edb-integration-tests = { version = "0.0.1", path = "crates/integration-tests" }
-edb-tui = { version = "0.0.1", path = "crates/tui" }
-edb = { version = "0.0.1", path = "crates/edb" }
+edb-engine = { version = "0.0.2", path = "crates/engine" }
+edb-common = { version = "0.0.2", path = "crates/common" }
+edb-rpc-proxy = { version = "0.0.2", path = "crates/rpc-proxy" }
+edb-integration-tests = { version = "0.0.2", path = "crates/integration-tests" }
+edb-tui = { version = "0.0.2", path = "crates/tui" }
+edb = { version = "0.0.2", path = "crates/edb" }
 
 # alloy - matching Foundry's versions exactly (updated to latest)
 alloy-chains = "0.2"
