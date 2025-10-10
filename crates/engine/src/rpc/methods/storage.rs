@@ -16,10 +16,7 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{
-    map::foldhash::{HashMap, HashMapExt},
-    U256,
-};
+use alloy_primitives::{map::HashMap, U256};
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use serde_json::Value;
 use tracing::debug;
@@ -63,7 +60,7 @@ where
         })?
         .target;
 
-    let empty_storage = HashMap::new();
+    let empty_storage = HashMap::default();
     let dst_db = snapshot.db();
     let dst_cached_storage = dst_db
         .cache
