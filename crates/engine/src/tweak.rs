@@ -215,7 +215,7 @@ where
         let chain_id = self.ctx.cfg().chain_id();
 
         // Cache directory
-        let etherscan_cache_dir = EdbCachePath::new(env::var("EDB_CACHE_DIR").ok())
+        let etherscan_cache_dir = EdbCachePath::new(env::var(edb_common::env::EDB_CACHE_DIR).ok())
             .etherscan_chain_cache_dir(chain_id)
             .map(|p| p.join("contract_creation_txs"));
 

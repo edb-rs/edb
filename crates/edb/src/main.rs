@@ -63,7 +63,7 @@ pub struct Cli {
     pub disable_cache: bool,
 
     /// The cache directory
-    #[arg(long, env = "EDB_CACHE_DIR")]
+    #[arg(long, env = edb_common::env::EDB_CACHE_DIR)]
     pub cache_dir: Option<String>,
 
     /// TUI-specific options
@@ -138,7 +138,7 @@ async fn main() -> Result<()> {
 
     if let Some(cache_dir) = &cli.cache_dir {
         tracing::info!("Using cache directory: {cache_dir}");
-        env::set_var("EDB_CACHE_DIR", cache_dir);
+        env::set_var(edb_common::env::EDB_CACHE_DIR, cache_dir);
     }
 
     // Set up RPC endpoint (proxy or direct)

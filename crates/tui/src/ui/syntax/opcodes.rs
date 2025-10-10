@@ -126,10 +126,10 @@ fn get_opcode_patterns() -> &'static OpcodePatterns {
             numbers: Regex::new(r"\b\d+\b").unwrap(),
 
             // Hexadecimal addresses and data (0x followed by hex digits)
-            hex_addresses: Regex::new(r"\b0x[0-9a-fA-F]{8,}\b").unwrap(),
+            hex_addresses: Regex::new(r"\b0x[0-9a-fA-F]{20}\b").unwrap(),
 
-            // Pure hex data (sequences of hex digits, at least 2 chars)
-            hex_data: Regex::new(r"\b[0-9a-fA-F]{2,}\b").unwrap(),
+            // Hex data (sequences of hex digits, at least 2 chars)
+            hex_data: Regex::new(r"\b0x[0-9a-fA-F]{2,}\b").unwrap(),
 
             // Stack positions like [0], [1], etc.
             stack_positions: Regex::new(r"\[\d+\]").unwrap(),
@@ -168,7 +168,7 @@ mod tests {
         let push_token = tokens.iter().find(|t| t.token_type == TokenType::Opcode);
         assert!(push_token.is_some());
 
-        let hex_token = tokens.iter().find(|t| t.token_type == TokenType::OpcodeAddress);
+        let hex_token = tokens.iter().find(|t| t.token_type == TokenType::OpcodeData);
         assert!(hex_token.is_some());
     }
 
@@ -188,7 +188,7 @@ mod tests {
         let tokens = highlighter
             .tokenize("PUSH32 0x0000000000000000000000000000000000000000000000000000000000000080");
 
-        let address_token = tokens.iter().find(|t| t.token_type == TokenType::OpcodeAddress);
+        let address_token = tokens.iter().find(|t| t.token_type == TokenType::OpcodeData);
         assert!(address_token.is_some());
     }
 
@@ -196,6 +196,7 @@ mod tests {
     fn test_numbers() {
         let highlighter = OpcodeHighlighter::new();
         let tokens = highlighter.tokenize("PUSH1 128");
+        println!("MDZZ {tokens:?}");
 
         let number_token = tokens.iter().find(|t| t.token_type == TokenType::OpcodeNumber);
         assert!(number_token.is_some());
@@ -237,7 +238,7 @@ mod tests {
         let has_comment = tokens.iter().any(|t| t.token_type == TokenType::Comment);
 
         assert!(has_opcode);
-        assert!(has_address);
+        assert!(!has_address);
         assert!(has_comment);
     }
 

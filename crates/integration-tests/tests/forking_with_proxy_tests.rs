@@ -32,7 +32,7 @@ const TEST_TX_HASH_2: &str = "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_with_proxy_cache() {
-    init::init_test_environment();
+    init::init_test_environment(true);
     info!("Testing fork and prepare with proxy caching");
 
     let proxy_url =
@@ -79,7 +79,7 @@ async fn test_fork_with_proxy_cache() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_multiple_transactions_with_cache() {
-    init::init_test_environment();
+    init::init_test_environment(true);
     info!("Testing multiple transactions with proxy caching");
 
     let proxy_url =
@@ -124,7 +124,7 @@ async fn test_multiple_transactions_with_cache() {
 
 #[tokio::test]
 async fn test_proxy_endpoints() {
-    init::init_test_environment();
+    init::init_test_environment(true);
     debug!("Testing proxy endpoint functionality");
 
     let proxy_url =
@@ -169,7 +169,7 @@ async fn test_proxy_endpoints() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_and_prepare_quick_mode() {
-    init::init_test_environment();
+    init::init_test_environment(true);
     info!("Testing fork and prepare in quick mode with caching");
 
     // Setup proxy with cache for more reliable testing
@@ -244,7 +244,7 @@ async fn test_fork_and_prepare_quick_mode() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_at_specific_hardfork_boundaries() {
-    init::init_test_environment();
+    init::init_test_environment(true);
     info!("Testing fork at different hardfork boundaries");
 
     // Setup proxy with cache for more reliable testing

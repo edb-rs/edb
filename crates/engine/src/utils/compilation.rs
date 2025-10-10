@@ -76,7 +76,9 @@ impl OnchainCompiler {
         if let Some(output) = self.cache.load_cache(addr.to_string()) {
             Ok(output)
         } else {
-            if env::var("EDB_TEST_ETHERSCAN_MODE").is_ok_and(|ref v| v == "cache-only") {
+            if env::var(edb_common::env::EDB_TEST_ETHERSCAN_MODE)
+                .is_ok_and(|ref v| v == "cache-only")
+            {
                 debug!(address=?addr, "skipping on-chain compilation in cache-only mode");
                 return Ok(None);
             }

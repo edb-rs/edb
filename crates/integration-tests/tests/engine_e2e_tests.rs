@@ -41,7 +41,7 @@ async fn capture_single_baseline() {
     let tx_name = "uniswap_v4"; // Change this to capture different transactions
 
     // Initialize test environment if needed
-    init::init_test_environment();
+    init::init_test_environment(false);
 
     // Create fixture
     let fixture = get_or_create_fixture(tx_name)
@@ -84,7 +84,7 @@ async fn capture_single_baseline() {
 #[ignore = "Run manually to capture new baselines"]
 async fn capture_all_baselines() {
     // Initialize test environment if needed
-    init::init_test_environment();
+    init::init_test_environment(false);
 
     let overall_start = Instant::now();
     let fixtures = get_or_create_fixtures().await.expect("Failed to get fixtures");
@@ -182,7 +182,7 @@ async fn test_comprehensive_transaction(tx_name: &str) {
     info!("Starting comprehensive RPC test for {} transaction using shared logic...", tx_name);
 
     // Initialize test environment if needed
-    init::init_test_environment();
+    init::init_test_environment(true);
 
     // Verify baseline exists
     let baseline_loader = BaselineLoader::new();

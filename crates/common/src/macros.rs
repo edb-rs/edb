@@ -77,12 +77,13 @@ use once_cell::sync::Lazy;
 use std::env;
 
 /// Global storage for assertion target patterns from the EDB_ASSERT environment variable
-static ASSERTION_TARGETS: Lazy<Vec<String>> = Lazy::new(|| match env::var("EDB_ASSERT") {
-    Ok(val) if !val.is_empty() => {
-        val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
-    }
-    _ => Vec::new(),
-});
+static ASSERTION_TARGETS: Lazy<Vec<String>> =
+    Lazy::new(|| match env::var(crate::env::EDB_ASSERT) {
+        Ok(val) if !val.is_empty() => {
+            val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        }
+        _ => Vec::new(),
+    });
 
 /// Check if assertions are enabled for the given module path
 ///

@@ -176,7 +176,7 @@ jobs:
             ${{ runner.os }}-svm-
 
       - name: Run integration tests
-        run: cargo test -p edb-integration-tests --verbose -- --nocapture
+        run: cargo test --workspace --all-features --verbose -- --nocapture
         env:
           EDB_TEST_PROXY_MODE: cache-only
           EDB_TEST_ETHERSCAN_MODE: cache-only
