@@ -248,7 +248,10 @@ impl Variable {
 
 /* Variable analysis utils */
 impl Analyzer {
-    pub(super) fn declare_variable(&mut self, declaration: &VariableDeclaration) -> eyre::Result<()> {
+    pub(super) fn declare_variable(
+        &mut self,
+        declaration: &VariableDeclaration,
+    ) -> eyre::Result<()> {
         if declaration.name.is_empty() {
             // if a variable has no name, we skip the variable declaration
             return Ok(());
@@ -312,7 +315,10 @@ impl Analyzer {
         Ok(())
     }
 
-    pub(super) fn record_assignment(&mut self, variable: &Assignment) -> eyre::Result<VisitorAction> {
+    pub(super) fn record_assignment(
+        &mut self,
+        variable: &Assignment,
+    ) -> eyre::Result<VisitorAction> {
         fn get_varaiable(this: &Analyzer, expr: &Expression) -> Option<VariableRef> {
             match expr {
                 Expression::Identifier(identifier) => {
@@ -394,7 +400,10 @@ impl Analyzer {
     }
 
     /// Record a declared variable's initial value to the current step's updated variables.
-    pub(super) fn record_declared_varaible(&mut self, declaration: &VariableDeclaration) -> eyre::Result<()> {
+    pub(super) fn record_declared_varaible(
+        &mut self,
+        declaration: &VariableDeclaration,
+    ) -> eyre::Result<()> {
         let Some(step) = self.current_step.as_mut() else {
             return Ok(());
         };
@@ -410,7 +419,7 @@ impl Analyzer {
 
 #[cfg(test)]
 mod tests {
-    use super::{Variable, UVID, EDB_RUNTIME_VALUE_OFFSET};
+    use super::{Variable, EDB_RUNTIME_VALUE_OFFSET, UVID};
     use crate::analysis::analyzer::tests::compile_and_analyze;
 
     macro_rules! count_updated_variables {
@@ -534,14 +543,18 @@ mod tests {
         let var_table = analysis.variable_table();
 
         // Find variable 'a' (Plain variant)
-        let var_a = var_table.values().find(|v| v.read().name() == "a").expect("Should find variable 'a'");
+        let var_a =
+            var_table.values().find(|v| v.read().name() == "a").expect("Should find variable 'a'");
         let uvid_a = var_a.read().id();
 
         // Verify Plain variant returns its own UVID and name
         assert_eq!(var_a.read().name(), "a");
 
         // Find the state variable 'points' (Plain variant)
-        let var_points = var_table.values().find(|v| v.read().name() == "points").expect("Should find variable 'points'");
+        let var_points = var_table
+            .values()
+            .find(|v| v.read().name() == "points")
+            .expect("Should find variable 'points'");
         let uvid_points = var_points.read().id();
 
         // Verify that different Plain variables have different UVIDs
@@ -559,19 +572,43 @@ mod tests {
                 // For Member/Index variants, they should delegate to their base
                 match &*var_read {
                     Variable::Member { base, .. } => {
-                        assert_eq!(var_read.id(), base.read().id(), "Member should delegate id() to base");
-                        assert_eq!(var_read.name(), base.read().name(), "Member should delegate name() to base");
+                        assert_eq!(
+                            var_read.id(),
+                            base.read().id(),
+                            "Member should delegate id() to base"
+                        );
+                        assert_eq!(
+                            var_read.name(),
+                            base.read().name(),
+                            "Member should delegate name() to base"
+                        );
                     }
                     Variable::Index { base, .. } => {
-                        assert_eq!(var_read.id(), base.read().id(), "Index should delegate id() to base");
-                        assert_eq!(var_read.name(), base.read().name(), "Index should delegate name() to base");
+                        assert_eq!(
+                            var_read.id(),
+                            base.read().id(),
+                            "Index should delegate id() to base"
+                        );
+                        assert_eq!(
+                            var_read.name(),
+                            base.read().name(),
+                            "Index should delegate name() to base"
+                        );
                     }
                     Variable::Plain { .. } => {
                         // Plain variant has its own id and name
                     }
                     Variable::IndexRange { base, .. } => {
-                        assert_eq!(var_read.id(), base.read().id(), "IndexRange should delegate id() to base");
-                        assert_eq!(var_read.name(), base.read().name(), "IndexRange should delegate name() to base");
+                        assert_eq!(
+                            var_read.id(),
+                            base.read().id(),
+                            "IndexRange should delegate id() to base"
+                        );
+                        assert_eq!(
+                            var_read.name(),
+                            base.read().name(),
+                            "IndexRange should delegate name() to base"
+                        );
                     }
                 }
             }
@@ -598,7 +635,9 @@ mod tests {
         let (_sources, analysis) = compile_and_analyze(source);
 
         // Find the assignment step
-        let assignment_step = analysis.steps.iter()
+        let assignment_step = analysis
+            .steps
+            .iter()
             .find(|s| !s.read().updated_variables.is_empty())
             .expect("Should have assignment step");
 
@@ -689,10 +728,8 @@ mod tests {
         let (_sources, analysis) = compile_and_analyze(source);
 
         // Check private_state_variables list
-        let private_vars: Vec<String> = analysis.private_state_variables
-            .iter()
-            .map(|v| v.read().name())
-            .collect();
+        let private_vars: Vec<String> =
+            analysis.private_state_variables.iter().map(|v| v.read().name()).collect();
 
         // Public variable should NOT be in private_state_variables
         assert!(
@@ -758,10 +795,12 @@ mod tests {
         let (_sources, analysis) = compile_and_analyze(source);
 
         // Find the tuple assignment step
-        let assignment_step = analysis.steps.iter()
+        let assignment_step = analysis
+            .steps
+            .iter()
             .find(|s| {
                 let updated = s.read().updated_variables.clone();
-                updated.len() == 2  // Should have 2 variables updated (x and y)
+                updated.len() == 2 // Should have 2 variables updated (x and y)
             })
             .expect("Should find tuple assignment step");
 
@@ -795,11 +834,7 @@ mod tests {
 
         // Check all UVIDs are unique
         let unique_uvids: std::collections::HashSet<_> = uvids.iter().collect();
-        assert_eq!(
-            uvids.len(),
-            unique_uvids.len(),
-            "All variables should have unique UVIDs"
-        );
+        assert_eq!(uvids.len(), unique_uvids.len(), "All variables should have unique UVIDs");
 
         // Check UVIDs start from EDB_RUNTIME_VALUE_OFFSET
         for uvid in &uvids {
@@ -826,14 +861,18 @@ mod tests {
         let var_table = analysis.variable_table();
 
         // Find state variable
-        let state_var = var_table.values()
+        let state_var = var_table
+            .values()
             .find(|v| v.read().name() == "stateVar")
             .expect("Should find stateVar");
 
         // State variable should have contract but NO function
         let state_var_read = state_var.read();
         assert!(state_var_read.contract().is_some(), "State variable should have contract context");
-        assert!(state_var_read.function().is_none(), "State variable should NOT have function context");
+        assert!(
+            state_var_read.function().is_none(),
+            "State variable should NOT have function context"
+        );
 
         // Verify contract name
         if let Some(contract) = state_var_read.contract() {
@@ -841,7 +880,8 @@ mod tests {
         }
 
         // Find local variable
-        let local_var = var_table.values()
+        let local_var = var_table
+            .values()
             .find(|v| v.read().name() == "localVar")
             .expect("Should find localVar");
 
@@ -876,15 +916,12 @@ mod tests {
         let var_table = analysis.variable_table();
 
         // Function arguments should be tracked as variables
-        let arg1 = var_table.values()
-            .find(|v| v.read().name() == "arg1")
-            .expect("Should find arg1");
-        let arg2 = var_table.values()
-            .find(|v| v.read().name() == "arg2")
-            .expect("Should find arg2");
-        let arg3 = var_table.values()
-            .find(|v| v.read().name() == "arg3")
-            .expect("Should find arg3");
+        let arg1 =
+            var_table.values().find(|v| v.read().name() == "arg1").expect("Should find arg1");
+        let arg2 =
+            var_table.values().find(|v| v.read().name() == "arg2").expect("Should find arg2");
+        let arg3 =
+            var_table.values().find(|v| v.read().name() == "arg3").expect("Should find arg3");
 
         // All arguments should have function context
         assert!(arg1.read().function().is_some(), "arg1 should have function context");
@@ -897,7 +934,9 @@ mod tests {
         assert!(arg3.read().contract().is_some(), "arg3 should have contract context");
 
         // Arguments should be in the function's scope
-        let function = analysis.functions.iter()
+        let function = analysis
+            .functions
+            .iter()
             .find(|f| f.name() == "foo")
             .expect("Should find function foo");
 
@@ -923,15 +962,12 @@ mod tests {
         let (_sources, analysis) = compile_and_analyze(source);
 
         // Find the function entry step
-        let entry_step = analysis.steps.iter()
-            .find(|s| s.is_entry())
-            .expect("Should find function entry step");
+        let entry_step =
+            analysis.steps.iter().find(|s| s.is_entry()).expect("Should find function entry step");
 
         // Check that function arguments appear in updated_variables for the entry step
         let updated_vars = entry_step.read().updated_variables.clone();
-        let updated_names: Vec<String> = updated_vars.iter()
-            .map(|v| v.read().name())
-            .collect();
+        let updated_names: Vec<String> = updated_vars.iter().map(|v| v.read().name()).collect();
 
         // All function arguments should be marked as updated in the entry step
         assert!(
@@ -970,19 +1006,29 @@ mod tests {
         let var_table = analysis.variable_table();
 
         // Named return variables should be tracked as variables
-        let result_var = var_table.values()
+        let result_var = var_table
+            .values()
             .find(|v| v.read().name() == "result")
             .expect("Should find named return variable 'result'");
-        let success_var = var_table.values()
+        let success_var = var_table
+            .values()
             .find(|v| v.read().name() == "success")
             .expect("Should find named return variable 'success'");
 
         // Return variables should have function context
-        assert!(result_var.read().function().is_some(), "Return variable should have function context");
-        assert!(success_var.read().function().is_some(), "Return variable should have function context");
+        assert!(
+            result_var.read().function().is_some(),
+            "Return variable should have function context"
+        );
+        assert!(
+            success_var.read().function().is_some(),
+            "Return variable should have function context"
+        );
 
         // Return variables should be in the function's scope
-        let function = analysis.functions.iter()
+        let function = analysis
+            .functions
+            .iter()
             .find(|f| f.name() == "foo")
             .expect("Should find function foo");
 
@@ -990,8 +1036,14 @@ mod tests {
         let func_vars = func_scope.declared_variables();
         let var_names: Vec<String> = func_vars.iter().map(|v| v.read().name()).collect();
 
-        assert!(var_names.contains(&"result".to_string()), "Function scope should contain 'result'");
-        assert!(var_names.contains(&"success".to_string()), "Function scope should contain 'success'");
+        assert!(
+            var_names.contains(&"result".to_string()),
+            "Function scope should contain 'result'"
+        );
+        assert!(
+            var_names.contains(&"success".to_string()),
+            "Function scope should contain 'success'"
+        );
 
         // Named return variables should be tracked as updated when assigned
         let updated_count = count_updated_variables!(analysis);
@@ -1030,7 +1082,9 @@ mod tests {
 
         // The variable count should only include parameters (and any internal variables created by the compiler)
         // but definitely not unnamed return variables
-        let function_foo = analysis.functions.iter()
+        let function_foo = analysis
+            .functions
+            .iter()
             .find(|f| f.name() == "foo")
             .expect("Should find function foo");
 
@@ -1047,9 +1101,9 @@ mod tests {
 
     #[test]
     fn test_uvid_uniqueness_across_files() {
-        use std::path::PathBuf;
+        use crate::{analysis::Analyzer, compile_contract_source_to_source_unit};
         use semver::Version;
-        use crate::{compile_contract_source_to_source_unit, analysis::Analyzer};
+        use std::path::PathBuf;
 
         // First source file
         let source1 = r#"
@@ -1079,7 +1133,8 @@ mod tests {
 
         // Compile and analyze first file
         let version = Version::parse("0.8.20").unwrap();
-        let source_unit1 = compile_contract_source_to_source_unit(version.clone(), source1, false).unwrap();
+        let source_unit1 =
+            compile_contract_source_to_source_unit(version.clone(), source1, false).unwrap();
         let analyzer1 = Analyzer::new(0, PathBuf::from("file1.sol"), source1.to_string());
         let analysis1 = analyzer1.analyze(&source_unit1).unwrap();
 

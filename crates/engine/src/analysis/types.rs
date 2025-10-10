@@ -235,7 +235,10 @@ impl Analyzer {
         Ok(())
     }
 
-    pub(in crate::analysis) fn record_struct_type(&mut self, struct_definition: &StructDefinition) -> eyre::Result<()> {
+    pub(in crate::analysis) fn record_struct_type(
+        &mut self,
+        struct_definition: &StructDefinition,
+    ) -> eyre::Result<()> {
         let user_defined_type = UserDefinedType::new(
             self.source_id,
             UserDefinedTypeVariant::Struct(struct_definition.clone()),
@@ -244,7 +247,10 @@ impl Analyzer {
         Ok(())
     }
 
-    pub(in crate::analysis) fn record_enum_type(&mut self, enum_definition: &EnumDefinition) -> eyre::Result<()> {
+    pub(in crate::analysis) fn record_enum_type(
+        &mut self,
+        enum_definition: &EnumDefinition,
+    ) -> eyre::Result<()> {
         let user_defined_type = UserDefinedType::new(
             self.source_id,
             UserDefinedTypeVariant::Enum(enum_definition.clone()),

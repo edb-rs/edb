@@ -95,11 +95,7 @@ pub fn generate_variable_update_hook(
 /// # Returns
 /// * `Option<String>` - The generated view function code, or None if user-defined types are present
 pub fn generate_view_method(state_variable: &VariableRef) -> Option<String> {
-    if state_variable
-        .contract()
-        .map(|c| c.kind() != ContractKind::Contract)
-        .unwrap_or(true)
-    {
+    if state_variable.contract().map(|c| c.kind() != ContractKind::Contract).unwrap_or(true) {
         // We only generate view methods for state variables in contracts
         return None;
     }

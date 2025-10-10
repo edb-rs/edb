@@ -273,7 +273,9 @@ mod tests {
         assert_eq!(analysis.statement_bodies.len(), 4);
 
         // Verify each body contains the expected content (order may vary)
-        let body_texts: Vec<String> = analysis.statement_bodies.iter()
+        let body_texts: Vec<String> = analysis
+            .statement_bodies
+            .iter()
             .map(|b| b.range.slice_source(source).trim().to_string())
             .collect();
 
@@ -301,7 +303,9 @@ mod tests {
         assert_eq!(analysis.statement_bodies.len(), 4);
 
         // Verify each body contains the expected content (order may vary)
-        let body_texts: Vec<String> = analysis.statement_bodies.iter()
+        let body_texts: Vec<String> = analysis
+            .statement_bodies
+            .iter()
             .map(|b| b.range.slice_source(source).trim().to_string())
             .collect();
 

@@ -101,7 +101,6 @@ impl VariableScope {
     }
 }
 
-
 /* Scope management methods */
 impl Analyzer {
     /// Returns the current scope from the scope stack.
@@ -166,7 +165,6 @@ impl Analyzer {
 #[cfg(test)]
 mod tests {
     use crate::analysis::analyzer::tests::compile_and_analyze;
-
 
     #[test]
     fn test_scope_hierarchy_simple_function() {
@@ -381,7 +379,6 @@ contract TestContract {
         assert_eq!(unchecked_vars.len(), 1, "Unchecked block should have 1 variable (y)");
     }
 
-
     #[test]
     fn test_scope_parent_relationship() {
         // Test parent-child relationships
@@ -416,7 +413,6 @@ contract TestContract {
             "Block's parent should be the function scope"
         );
     }
-
 
     #[test]
     fn test_scope_multiple_nested_blocks() {
