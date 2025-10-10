@@ -38,6 +38,12 @@ EDB bridges the gap between high-level Solidity code and low-level EVM execution
 
 - **Ethereum RPC endpoint** - Public (like Infura/Alchemy) or local node
 
+### One-line Install
+
+```bash
+curl -sSL https://install.edb.sh | bash
+```
+
 ### Build from Source
 
 ```bash
