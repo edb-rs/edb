@@ -126,10 +126,10 @@ fn get_opcode_patterns() -> &'static OpcodePatterns {
             numbers: Regex::new(r"\b\d+\b").unwrap(),
 
             // Hexadecimal addresses and data (0x followed by hex digits)
-            hex_addresses: Regex::new(r"\b0x[0-9a-fA-F]{8,}\b").unwrap(),
+            hex_addresses: Regex::new(r"0x[0-9a-fA-F]+").unwrap(),
 
-            // Pure hex data (sequences of hex digits, at least 2 chars)
-            hex_data: Regex::new(r"\b[0-9a-fA-F]{2,}\b").unwrap(),
+            // Pure hex data (sequences of hex digits, at least 2 chars, must contain at least one a-f)
+            hex_data: Regex::new(r"\b(?:[0-9]*[a-fA-F][0-9a-fA-F]*|[0-9a-fA-F]*[a-fA-F][0-9]*)\b").unwrap(),
 
             // Stack positions like [0], [1], etc.
             stack_positions: Regex::new(r"\[\d+\]").unwrap(),
