@@ -82,6 +82,10 @@ pub struct Analyzer {
     pub(super) function_types: Vec<FunctionTypeNameRef>,
     /// User defined types defined in this file.
     pub(in crate::analysis) user_defined_types: Vec<UserDefinedTypeRef>,
+    /// Context flag: true when declaring function parameters
+    pub(super) is_declaring_param: bool,
+    /// Context flag: true when declaring return variables
+    pub(super) is_declaring_return: bool,
 }
 
 impl Analyzer {
@@ -114,6 +118,8 @@ impl Analyzer {
             immutable_functions: Vec::new(),
             function_types: Vec::new(),
             user_defined_types: Vec::new(),
+            is_declaring_param: false,
+            is_declaring_return: false,
         }
     }
 

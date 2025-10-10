@@ -73,6 +73,19 @@ universal_id! {
     UVID => EDB_RUNTIME_VALUE_OFFSET
 }
 
+/// Represents the kind/category of a variable.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum VariableKind {
+    /// Local variable declared in function body
+    Local,
+    /// State variable
+    State,
+    /// Function parameter (input)
+    Param,
+    /// Named return variable
+    Return,
+}
+
 define_ref! {
     /// A reference-counted pointer to a Variable.
     ///
@@ -141,8 +154,8 @@ pub enum Variable {
         name: String,
         /// The variable declaration from the AST.
         declaration: VariableDeclaration,
-        /// Whether this is a state variable (true) or local variable (false).
-        state_variable: bool,
+        /// The kind of variable (local, state, etc.).
+        kind: VariableKind,
         /// Function that this variable is declared in.
         function: Option<FunctionRef>,
         /// Contract that this variable is declared in.
@@ -191,6 +204,16 @@ impl Variable {
             Self::Member { base, .. } => base.read().name(),
             Self::Index { base, .. } => base.read().name(),
             Self::IndexRange { base, .. } => base.read().name(),
+        }
+    }
+
+    /// Returns the kind of this variable.
+    pub fn kind(&self) -> VariableKind {
+        match self {
+            Self::Plain { kind, .. } => *kind,
+            Self::Member { base, .. } => base.read().kind(),
+            Self::Index { base, .. } => base.read().kind(),
+            Self::IndexRange { base, .. } => base.read().kind(),
         }
     }
 
@@ -269,18 +292,26 @@ impl Analyzer {
         let function = self.current_function.clone();
         let contract = self.current_contract.clone();
         let uvid = UVID::next();
-        let state_variable = declaration.state_variable;
+        let kind = if declaration.state_variable {
+            VariableKind::State
+        } else if self.is_declaring_param {
+            VariableKind::Param
+        } else if self.is_declaring_return {
+            VariableKind::Return
+        } else {
+            VariableKind::Local
+        };
         let variable: VariableRef = Variable::Plain {
             uvid,
             name: declaration.name.clone(),
             declaration: declaration.clone(),
-            state_variable,
+            kind,
             function,
             contract,
         }
         .into();
         self.check_state_variable_visibility(&variable)?;
-        if state_variable {
+        if kind == VariableKind::State {
             self.state_variables.push(variable.clone());
         }
         scope.write().declared_variables.push(variable.clone());
@@ -419,7 +450,7 @@ impl Analyzer {
 
 #[cfg(test)]
 mod tests {
-    use super::{Variable, EDB_RUNTIME_VALUE_OFFSET, UVID};
+    use super::{Variable, VariableKind, EDB_RUNTIME_VALUE_OFFSET, UVID};
     use crate::analysis::analyzer::tests::compile_and_analyze;
 
     macro_rules! count_updated_variables {
@@ -1097,6 +1128,56 @@ mod tests {
         for name in &foo_var_names {
             assert!(!name.is_empty(), "foo should not have empty-named variables");
         }
+    }
+
+    #[test]
+    fn test_variable_kind_distinction() {
+        let source = r#"
+        contract TestContract {
+            uint256 stateVar;
+
+            function foo(uint256 param1, address param2) public returns (uint256 ret1, bool ret2) {
+                uint256 localVar = param1;
+                ret1 = localVar;
+                ret2 = true;
+            }
+        }
+        "#;
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let var_table = analysis.variable_table();
+
+        // Find state variable
+        let state_var = var_table
+            .values()
+            .find(|v| v.read().name() == "stateVar")
+            .expect("Should find stateVar");
+        assert_eq!(state_var.read().kind(), VariableKind::State, "stateVar should be State kind");
+
+        // Find parameters
+        let param1 =
+            var_table.values().find(|v| v.read().name() == "param1").expect("Should find param1");
+        assert_eq!(param1.read().kind(), VariableKind::Param, "param1 should be Param kind");
+
+        let param2 =
+            var_table.values().find(|v| v.read().name() == "param2").expect("Should find param2");
+        assert_eq!(param2.read().kind(), VariableKind::Param, "param2 should be Param kind");
+
+        // Find return variables
+        let ret1 =
+            var_table.values().find(|v| v.read().name() == "ret1").expect("Should find ret1");
+        assert_eq!(ret1.read().kind(), VariableKind::Return, "ret1 should be Return kind");
+
+        let ret2 =
+            var_table.values().find(|v| v.read().name() == "ret2").expect("Should find ret2");
+        assert_eq!(ret2.read().kind(), VariableKind::Return, "ret2 should be Return kind");
+
+        // Find local variable
+        let local_var = var_table
+            .values()
+            .find(|v| v.read().name() == "localVar")
+            .expect("Should find localVar");
+        assert_eq!(local_var.read().kind(), VariableKind::Local, "localVar should be Local kind");
     }
 
     #[test]
