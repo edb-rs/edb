@@ -239,16 +239,15 @@ where
                     return false;
                 };
 
-                let Some(step) =
-                    analysis_result.usid_to_step.get(&detail.usid).map(|step| step.read())
+                let Some(step_src) =
+                    analysis_result.usid_to_step.get(&detail.usid).map(|step| step.src())
                 else {
                     return false;
                 };
 
-                if step
-                    .src
-                    .index
-                    .and_then(|idx| analysis_result.sources.get(&(idx as u32)))
+                if analysis_result
+                    .sources
+                    .get(&step_src.file)
                     .map(|s| s.path != *file_path)
                     .unwrap_or(false)
                 {
@@ -259,7 +258,7 @@ where
                     .artifacts
                     .get(bytecode_address)
                     .and_then(|artifact| artifact.input.sources.get(file_path))
-                    .zip(step.src.start)
+                    .zip(Some(step_src.start))
                     .is_some_and(|(source, offset)| {
                         source.content[..offset + 1].lines().count() == *line_number
                     })

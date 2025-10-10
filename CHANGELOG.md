@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support conditional, unconditional, and data breakpoints ([#9](https://github.com/edb-rs/edb/issues/9))
 - Tracking transient storage changes in source-level snapshots
 - Runtime path-based filtering via EDB_ASSERT environment variable for assertion
+- Introduced statement body analysis for more accurate source-level debugging ([#21](https://github.com/edb-rs/edb/pull/21))
 
 ### Changed
 - Improved horizontal scrolling support in terminal panel vim mode
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove Web UI code and dependencies ([#15](https://github.com/edb-rs/edb/pull/15))
 - Add more tests for common and rpc-proxy crates, and well as more end-to-end tests for engine crate
 - Optimized snapshot memory usage and processing speed by selectively storing calldata/memory/storage changes only when necessary and using persistent data structures for stack.
+- Refactored analysis module with improved AST abstractions for better maintainability and extensibility ([#21](https://github.com/edb-rs/edb/pull/21))
 
 ## [0.0.1] - 2024-09-19
 

@@ -407,7 +407,7 @@ where
 
         // Collect values of accessible variables
         let mut locals = HashMap::new();
-        for variable in &step.read().accessible_variables {
+        for variable in step.accessible_variables() {
             if variable.declaration().state_variable {
                 continue;
             }
@@ -915,6 +915,7 @@ pub fn decode_variable_value(
 ) -> Result<DynSolValue> {
     let type_name = variable
         .type_name()
+        .as_ref()
         .ok_or(eyre::eyre!("Failed to get variable type: no type name in the declaration"))?;
     let Some(variable_type): Option<DynSolType> = dyn_sol_type(user_defined_types, type_name)
     else {

@@ -25,7 +25,7 @@ use once_cell::sync::OnceCell;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::macros::universal_id;
+use crate::analysis::{macros::universal_id, Analyzer};
 
 universal_id! {
     /// A Universal Type Identifier (UTID) is a unique identifier for a type in a contract.
@@ -221,6 +221,57 @@ pub fn dyn_sol_type(
     }
 }
 
+/* User defined type analysis */
+impl Analyzer {
+    pub(in crate::analysis) fn record_user_defined_value_type(
+        &mut self,
+        type_definition: &UserDefinedValueTypeDefinition,
+    ) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::UserDefinedValueType(type_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+
+    pub(in crate::analysis) fn record_struct_type(
+        &mut self,
+        struct_definition: &StructDefinition,
+    ) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::Struct(struct_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+
+    pub(in crate::analysis) fn record_enum_type(
+        &mut self,
+        enum_definition: &EnumDefinition,
+    ) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::Enum(enum_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+
+    pub(in crate::analysis) fn record_contract_type(
+        &mut self,
+        contract_definition: &ContractDefinition,
+    ) -> eyre::Result<()> {
+        let user_defined_type = UserDefinedType::new(
+            self.source_id,
+            UserDefinedTypeVariant::Contract(contract_definition.clone()),
+        );
+        self.user_defined_types.push(user_defined_type.into());
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -243,7 +294,7 @@ mod tests {
         "#;
         let (_sources, analysis) = compile_and_analyze(source);
         let var = analysis.state_variables.first().unwrap();
-        let ty = var.type_name().unwrap();
+        let ty = var.type_name().as_ref().unwrap();
         let dyn_ty = dyn_sol_type(&analysis.user_defined_types(), ty).unwrap();
         assert_eq!(
             dyn_ty,

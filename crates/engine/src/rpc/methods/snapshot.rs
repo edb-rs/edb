@@ -141,11 +141,10 @@ where
             })?;
 
             // Get step details
-            let step = step_ref.read();
-            let source_location = &step.src;
+            let source_location = step_ref.src();
 
             // Find the source analysis using the source index
-            let source_index = source_location.index.unwrap_or(0) as u32;
+            let source_index = source_location.file;
             let source_analysis =
                 analysis_result.sources.get(&source_index).ok_or_else(|| RpcError {
                     code: error_codes::CODE_NOT_FOUND,
@@ -180,8 +179,8 @@ where
                     locals,
                     state_variables,
                     path: source_analysis.path.clone(),
-                    offset: source_location.start.unwrap_or(0),
-                    length: source_location.length.unwrap_or(0),
+                    offset: source_location.start,
+                    length: source_location.length,
                 }),
             }
         }

@@ -14,6 +14,9 @@ exclude.workspace = true
 [lints]
 workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 edb-common.workspace = true
 

@@ -63,13 +63,144 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::debug;
 
+use std::path::PathBuf;
+
+use foundry_compilers::artifacts::SourceUnit;
+
 use crate::{
     analysis::{
-        AnalysisError, Analyzer, ContractRef, FunctionRef, SourceAnalysis, StepRef,
-        UserDefinedTypeRef, UCID, UFID, UTID,
+        AnalysisError, Analyzer, ContractRef, FunctionRef, FunctionTypeNameRef, StatementBody,
+        StepRef, UserDefinedTypeRef, VariableScopeRef, UCID, UFID, UTID,
     },
     ASTPruner, Artifact, VariableRef, USID, UVID,
 };
+
+/// Analysis results for a single source file.
+///
+/// Contains all the analysis data for one Solidity source file, including the original
+/// source content, parsed AST, and step-by-step analysis results.
+///
+/// # Fields
+///
+/// - `id`: Unique identifier for this source file
+/// - `path`: File system path to the source file
+/// - `source`: Original source content and metadata
+/// - `ast`: Parsed Abstract Syntax Tree
+/// - `unit`: Processed source unit ready for analysis
+/// - `steps`: List of analyzed execution steps in this file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceAnalysis {
+    /// Unique identifier for this source file
+    pub id: u32,
+    /// File system path to the source file
+    pub path: PathBuf,
+    /// Original source content
+    pub source: String,
+    /// Processed source unit ready for analysis
+    pub unit: SourceUnit,
+    /// Global variable scope of the source file
+    pub global_scope: VariableScopeRef,
+    /// List of analyzed execution steps in this file
+    pub steps: Vec<StepRef>,
+    /// List of statement bodies in this file.
+    pub statement_bodies: Vec<StatementBody>,
+    /// State variables that should be made public
+    pub private_state_variables: Vec<VariableRef>,
+    /// List of all contracts in this file.
+    pub contracts: Vec<ContractRef>,
+    /// List of all functions in this file.
+    pub functions: Vec<FunctionRef>,
+    /// List of all state variables in this file.
+    pub state_variables: Vec<VariableRef>,
+    /// Functions that should be made public
+    pub private_functions: Vec<FunctionRef>,
+    /// Functions that should be made mutable (i.e., neither pure nor view)
+    pub immutable_functions: Vec<FunctionRef>,
+    /// Variables that are defined as function types
+    pub function_types: Vec<FunctionTypeNameRef>,
+    /// User defined types defined in this file.
+    pub user_defined_types: Vec<UserDefinedTypeRef>,
+}
+
+impl SourceAnalysis {
+    /// Returns a mapping of all variables in this source file by their UVID.
+    ///
+    /// This method traverses the entire variable scope tree and collects all
+    /// variables into a flat HashMap for efficient lookup.
+    ///
+    /// # Returns
+    ///
+    /// A HashMap mapping UVIDs to their corresponding VariableRef instances.
+    pub fn variable_table(&self) -> HashMap<UVID, VariableRef> {
+        let mut table = HashMap::default();
+        fn walk_scope(scope: &VariableScopeRef, table: &mut HashMap<UVID, VariableRef>) {
+            for variable in scope.declared_variables() {
+                table.insert(variable.read().id(), variable.clone());
+            }
+            for child in scope.children() {
+                walk_scope(child, table);
+            }
+        }
+        walk_scope(&self.global_scope, &mut table);
+        table
+    }
+
+    /// Returns a mapping of all steps in this source file by their USID.
+    ///
+    /// This method creates a HashMap for efficient step lookup by their
+    /// unique step identifiers.
+    ///
+    /// # Returns
+    ///
+    /// A HashMap mapping USIDs to their corresponding StepRef instances.
+    pub fn step_table(&self) -> HashMap<USID, StepRef> {
+        let mut table = HashMap::default();
+        for step in &self.steps {
+            table.insert(step.read().usid, step.clone());
+        }
+        table
+    }
+
+    /// Returns a mapping of all functions in this source file by their UFID.
+    pub fn function_table(&self) -> HashMap<UFID, FunctionRef> {
+        let mut table = HashMap::default();
+        for function in &self.functions {
+            table.insert(function.read().ufid, function.clone());
+        }
+        table
+    }
+
+    /// Returns a mapping of all contracts in this source file by their UCID.
+    pub fn contract_table(&self) -> HashMap<UCID, ContractRef> {
+        let mut table = HashMap::default();
+        for contract in &self.contracts {
+            table.insert(contract.read().ucid, contract.clone());
+        }
+        table
+    }
+
+    /// Returns a mapping of all user defined types in this source file by their UTID.
+    pub fn user_defined_type_table(&self) -> HashMap<UTID, UserDefinedTypeRef> {
+        let mut table = HashMap::default();
+        for user_defined_type in &self.user_defined_types {
+            table.insert(user_defined_type.read().utid, user_defined_type.clone());
+        }
+        table
+    }
+
+    /// Returns a mapping of all user defined types in this source file by their AST ID.
+    ///
+    /// # Returns
+    ///
+    /// A HashMap mapping AST IDs to their corresponding UserDefinedTypeRef instances.
+    pub fn user_defined_types(&self) -> HashMap<usize, UserDefinedTypeRef> {
+        let mut table = HashMap::default();
+        for user_defined_type in &self.user_defined_types {
+            table.insert(user_defined_type.ast_id(), user_defined_type.clone());
+        }
+        table
+    }
+}
 
 /// Main analysis result containing debugging information from source code analysis.
 ///
@@ -166,12 +297,14 @@ pub struct AnalysisResult {
 /// This function can return the following errors:
 /// - `AnalysisError::StepPartitionError`: When step partitioning fails
 pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
+    let sources = &artifact.input.sources;
     let source_results: Vec<SourceAnalysis> = artifact
         .output
         .sources
         .par_iter()
         .map(|(path, source_result)| {
             let source_id = source_result.id;
+            let source = sources.get(path).ok_or(AnalysisError::MissingSource)?;
             let mut source_ast = source_result.ast.clone().ok_or(AnalysisError::MissingAst)?;
 
             debug!(path=?path, "start pruning AST for analyzing source");
@@ -179,8 +312,8 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
                 .map_err(AnalysisError::ASTConversionError)?;
             debug!(path=?path, "finish pruning AST for analyzing source");
 
-            let analyzer = Analyzer::new(source_id);
-            let mut source_result = analyzer.analyze(source_id, path, &source_unit)?;
+            let analyzer = Analyzer::new(source_id, path.clone(), source.content.to_string());
+            let mut source_result = analyzer.analyze(&source_unit)?;
             debug!(path=?path, "finish the core analysis");
 
             // sort steps in reverse order
@@ -225,7 +358,7 @@ pub fn analyze(artifact: &Artifact) -> Result<AnalysisResult, AnalysisError> {
 // runtime. We haven't investigated why, and hence leave it as dead code.
 fn _check_step_overlap(steps: &[StepRef]) -> Result<(), AnalysisError> {
     for (prev, step) in steps.iter().tuple_windows() {
-        let end = step.read().src.start.map(|start| start + step.read().src.length.unwrap_or(0));
+        let end = step.read().src.next_loc();
         if end > prev.read().src.start {
             return Err(AnalysisError::StepPartitionError(eyre::eyre!(
                 "Overlapping steps detected: [{:?}, {:?}]",

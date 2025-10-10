@@ -19,7 +19,7 @@ use foundry_compilers::artifacts::{
 };
 use semver::VersionReq;
 
-use crate::analysis::stmt_src;
+use crate::analysis::{find_next_semicolon_after_source_location, stmt_src};
 
 /// Get the source string at the given location.
 ///
@@ -76,6 +76,7 @@ pub fn source_string_at_location_unchecked<'a>(
 /// assert_eq!(sliced.length, Some(3));
 /// assert_eq!(sliced.index, Some(0));
 /// ```
+#[deprecated]
 pub fn slice_source_location(src: &SourceLocation, start: usize, length: usize) -> SourceLocation {
     assert!(
         src.length.map(|l| l >= start).unwrap_or(true),
@@ -162,35 +163,6 @@ pub fn find_next_index_of_source_location(src: &SourceLocation) -> Option<usize>
         }
     }
     None
-}
-
-/// Find the next semicolon after the source location.
-///
-/// # Arguments
-///
-/// * `source` - The source string
-/// * `src` - The source location
-///
-/// # Returns
-///
-/// The index of the next semicolon after the source location in the source string.
-///
-/// # Example
-///
-/// ```rust
-/// let source = "1;2;3;4;5";
-/// let src = SourceLocation { start: Some(0), length: Some(1), index: Some(0) };
-/// let next_semicolon = find_next_semicolon_after_source_location(source, &src);
-/// assert_eq!(next_semicolon, Some(2));
-/// ```
-pub fn find_next_semicolon_after_source_location(
-    source: &str,
-    src: &SourceLocation,
-) -> Option<usize> {
-    let start = src.start.unwrap_or(0);
-    let end = src.length.map(|l| start + l).unwrap_or(start);
-    let substr = &source[end..];
-    substr.find(";").map(|i| i + end)
 }
 
 /// Find the index of the next character immediately after the `BlockOrStatement`.
