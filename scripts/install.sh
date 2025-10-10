@@ -125,18 +125,81 @@ clone_repo() {
 
     if [ -d "$REPO_DIR" ]; then
         print_info "Repository already exists at $REPO_DIR"
-        read -p "Do you want to pull the latest changes? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Pulling latest changes..."
+
+        # Check if running in interactive mode
+        if [ -t 0 ]; then
+            read -p "Do you want to pull the latest changes? (y/n) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                print_info "Pulling latest changes..."
+                cd "$REPO_DIR"
+                if ! git pull; then
+                    print_error "Failed to pull latest changes"
+                    exit 1
+                fi
+                print_success "✓ Updated repository"
+            fi
+        else
+            # Non-interactive mode (piped from curl), auto-pull
+            print_info "Pulling latest changes (non-interactive mode)..."
             cd "$REPO_DIR"
-            git pull
+            if ! git pull; then
+                print_error "Failed to pull latest changes"
+                exit 1
+            fi
             print_success "✓ Updated repository"
         fi
     else
         print_info "Cloning repository to $REPO_DIR..."
-        git clone https://github.com/edb-rs/edb "$REPO_DIR"
+        if ! git clone https://github.com/edb-rs/edb "$REPO_DIR"; then
+            print_error "Failed to clone repository"
+            exit 1
+        fi
         print_success "✓ Cloned repository"
+    fi
+}
+
+# Check if cargo bin directory is in PATH
+check_cargo_path() {
+    CARGO_BIN="$HOME/.cargo/bin"
+
+    if [[ ":$PATH:" != *":$CARGO_BIN:"* ]]; then
+        echo ""
+        print_info "⚠️  Warning: $CARGO_BIN is not in your PATH"
+        echo ""
+        echo "To use EDB commands, you need to add it to your PATH."
+        echo "Add the following line to your shell configuration file:"
+        echo ""
+        case "$OS" in
+            Linux)
+                if [ -f "$HOME/.bashrc" ]; then
+                    echo "  echo 'export PATH=\"\$HOME/.cargo/bin:\$PATH\"' >> ~/.bashrc"
+                    echo "  source ~/.bashrc"
+                elif [ -f "$HOME/.zshrc" ]; then
+                    echo "  echo 'export PATH=\"\$HOME/.cargo/bin:\$PATH\"' >> ~/.zshrc"
+                    echo "  source ~/.zshrc"
+                else
+                    echo "  export PATH=\"\$HOME/.cargo/bin:\$PATH\""
+                fi
+                ;;
+            macOS)
+                if [ -f "$HOME/.zshrc" ]; then
+                    echo "  echo 'export PATH=\"\$HOME/.cargo/bin:\$PATH\"' >> ~/.zshrc"
+                    echo "  source ~/.zshrc"
+                elif [ -f "$HOME/.bash_profile" ]; then
+                    echo "  echo 'export PATH=\"\$HOME/.cargo/bin:\$PATH\"' >> ~/.bash_profile"
+                    echo "  source ~/.bash_profile"
+                else
+                    echo "  export PATH=\"\$HOME/.cargo/bin:\$PATH\""
+                fi
+                ;;
+            *)
+                echo "  export PATH=\"\$HOME/.cargo/bin:\$PATH\""
+                ;;
+        esac
+        echo ""
+        echo "Or restart your terminal after installation."
+        echo ""
     fi
 }
 
@@ -151,17 +214,26 @@ install_edb() {
 
     # Install main edb binary
     print_info "Installing edb..."
-    cargo install --path crates/edb
+    if ! cargo install --path crates/edb; then
+        print_error "Failed to install edb"
+        exit 1
+    fi
     print_success "✓ Installed edb"
 
     # Install rpc-proxy
     print_info "Installing edb-rpc-proxy..."
-    cargo install --path crates/rpc-proxy
+    if ! cargo install --path crates/rpc-proxy; then
+        print_error "Failed to install edb-rpc-proxy"
+        exit 1
+    fi
     print_success "✓ Installed edb-rpc-proxy"
 
     # Install tui
     print_info "Installing edb-tui..."
-    cargo install --path crates/tui
+    if ! cargo install --path crates/tui; then
+        print_error "Failed to install edb-tui"
+        exit 1
+    fi
     print_success "✓ Installed edb-tui"
 }
 
@@ -193,6 +265,9 @@ main() {
     print_info "Step 4/4: Building and installing EDB..."
     install_edb
     echo ""
+
+    # Check PATH configuration
+    check_cargo_path
 
     # Success message
     echo ""
