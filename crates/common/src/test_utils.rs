@@ -115,7 +115,7 @@ static TEST_ENV_INITIALIZED: std::sync::OnceLock<bool> = std::sync::OnceLock::ne
 ///
 /// # Examples
 ///
-/// ```rust, ignore
+/// ```rust, no_run
 /// use edb_common::test_utils::setup_test_environment;
 ///
 /// // Use shared testdata cache (read-only tests)
