@@ -54,20 +54,17 @@ pub fn generate_variable_update_hook(
     }
 
     // We currently do not support recording variables involving user-defined types and arrays (< 0.8.0), as well as state variables.
-    // Variables declared as calldata are not supported too.
     // In addition, source code with 0.4.x solidity version is not supported due to the lack of the `abi.encode` function.
     // TODO: support user-defined types and arrays, as well as state variables, solidity <0.4.24, in the future
     let declaration = variable.declaration();
     let base_type = &declaration.type_name;
     let is_state_variable = declaration.state_variable;
-    let is_calldata_variable = declaration.storage_location == StorageLocation::Calldata;
     let is_storage_variable = declaration.storage_location == StorageLocation::Storage;
     if base_type.as_ref().is_some_and(|ty| {
         (contains_user_defined_type(ty) && **version < Version::parse("0.8.0").unwrap())
             || contains_function_type(ty)
             || contains_mapping_type(ty)
             || is_state_variable
-            || is_calldata_variable
             || is_storage_variable
     }) {
         return None;

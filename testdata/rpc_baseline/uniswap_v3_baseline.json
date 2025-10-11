@@ -61,21 +61,21 @@
       "value": "0x62e9bffa61adc"
     },
     "call_types_distribution": {
-      "Call(StaticCall)": 4,
       "Call(Call)": 11,
-      "Call(DelegateCall)": 4
+      "Call(DelegateCall)": 4,
+      "Call(StaticCall)": 4
     },
     "depth_distribution": {
-      "0": 1,
       "2": 8,
       "1": 8,
+      "0": 1,
       "3": 2
     },
     "unique_addresses": [
       "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
-      "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
       "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
       "0x7677339387b31ae06274d0533681aea79276c61a",
+      "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
       "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
       "0x43506849d7c04f9138d1a2050bbf3a0c054402dd"
     ],
@@ -84,6 +84,49 @@
   "snapshot_analysis": {
     "total_count": 4934,
     "sample_snapshots": {
+      "late_4924": {
+        "bytecode_address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "detail": {
+          "Hook": {
+            "frame_id": [
+              16,
+              1
+            ],
+            "id": 4924,
+            "length": 27,
+            "locals": {
+              "wad": null
+            },
+            "offset": 1637,
+            "path": "Contract",
+            "state_variables": {
+              "decimals": {
+                "type": "Uint",
+                "value": {
+                  "bits": 8,
+                  "value": "0x12"
+                }
+              },
+              "name": {
+                "type": "String",
+                "value": "Wrapped Ether"
+              },
+              "symbol": {
+                "type": "String",
+                "value": "WETH"
+              }
+            }
+          }
+        },
+        "frame_id": [
+          16,
+          1
+        ],
+        "id": 4924,
+        "next_id": 4925,
+        "prev_id": 4922,
+        "target_address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
       "three_quarter_3700": {
         "bytecode_address": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
         "detail": {
@@ -1326,49 +1369,6 @@
         "prev_id": 3699,
         "target_address": "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640"
       },
-      "late_4924": {
-        "bytecode_address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-        "detail": {
-          "Hook": {
-            "frame_id": [
-              16,
-              1
-            ],
-            "id": 4924,
-            "length": 27,
-            "locals": {
-              "wad": null
-            },
-            "offset": 1637,
-            "path": "Contract",
-            "state_variables": {
-              "decimals": {
-                "type": "Uint",
-                "value": {
-                  "bits": 8,
-                  "value": "0x12"
-                }
-              },
-              "name": {
-                "type": "String",
-                "value": "Wrapped Ether"
-              },
-              "symbol": {
-                "type": "String",
-                "value": "WETH"
-              }
-            }
-          }
-        },
-        "frame_id": [
-          16,
-          1
-        ],
-        "id": 4924,
-        "next_id": 4925,
-        "prev_id": 4922,
-        "target_address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
-      },
       "last_4933": {
         "bytecode_address": "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad",
         "detail": {
@@ -2498,8 +2498,622 @@
             "id": 10,
             "length": 19,
             "locals": {
-              "commands": null,
-              "inputs": null,
+              "commands": {
+                "type": "Bytes",
+                "value": [
+                  11,
+                  1,
+                  5,
+                  4,
+                  12
+                ]
+              },
+              "inputs": {
+                "type": "Array",
+                "value": [
+                  {
+                    "type": "Bytes",
+                    "value": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      3,
+                      29,
+                      191,
+                      69,
+                      212,
+                      124,
+                      110,
+                      164
+                    ]
+                  },
+                  {
+                    "type": "Bytes",
+                    "value": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      2,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      44,
+                      205,
+                      92,
+                      4,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      3,
+                      29,
+                      191,
+                      69,
+                      212,
+                      124,
+                      110,
+                      164,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      160,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      43,
+                      160,
+                      184,
+                      105,
+                      145,
+                      198,
+                      33,
+                      139,
+                      54,
+                      193,
+                      209,
+                      157,
+                      74,
+                      46,
+                      158,
+                      176,
+                      206,
+                      54,
+                      6,
+                      235,
+                      72,
+                      0,
+                      1,
+                      244,
+                      192,
+                      42,
+                      170,
+                      57,
+                      178,
+                      35,
+                      254,
+                      141,
+                      10,
+                      14,
+                      92,
+                      79,
+                      39,
+                      234,
+                      217,
+                      8,
+                      60,
+                      117,
+                      108,
+                      194,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  },
+                  {
+                    "type": "Bytes",
+                    "value": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      160,
+                      184,
+                      105,
+                      145,
+                      198,
+                      33,
+                      139,
+                      54,
+                      193,
+                      209,
+                      157,
+                      74,
+                      46,
+                      158,
+                      176,
+                      206,
+                      54,
+                      6,
+                      235,
+                      72,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      39,
+                      33,
+                      62,
+                      40,
+                      215,
+                      253,
+                      165,
+                      197,
+                      127,
+                      233,
+                      229,
+                      221,
+                      146,
+                      56,
+                      24,
+                      219,
+                      204,
+                      247,
+                      28,
+                      71,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      28,
+                      154,
+                      21
+                    ]
+                  },
+                  {
+                    "type": "Bytes",
+                    "value": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      160,
+                      184,
+                      105,
+                      145,
+                      198,
+                      33,
+                      139,
+                      54,
+                      193,
+                      209,
+                      157,
+                      74,
+                      46,
+                      158,
+                      176,
+                      206,
+                      54,
+                      6,
+                      235,
+                      72,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      44,
+                      176,
+                      193,
+                      239
+                    ]
+                  },
+                  {
+                    "type": "Bytes",
+                    "value": [
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  }
+                ]
+              },
               "success": {
                 "type": "Bool",
                 "value": false
@@ -3569,10 +4183,10 @@
       }
     },
     "frame_id_patterns": {
+      "16.1": 1,
       "0.8": 1,
       "0.0": 2,
-      "2.0": 3,
-      "16.1": 1
+      "2.0": 3
     }
   },
   "code_analysis": {
@@ -3593,68 +4207,68 @@
   },
   "storage_analysis": {
     "slot_samples": {
-      "slot_11": "0",
-      "slot_19": "0",
-      "slot_16": "0",
-      "slot_13": "0",
-      "slot_3": "0",
-      "slot_4": "0",
-      "slot_15": "0",
       "slot_0": "115792089237316195423570985008687907853269984665640564039457584007913129639935",
-      "slot_5": "0",
-      "slot_17": "0",
-      "slot_7": "0",
-      "slot_6": "0",
-      "slot_18": "0",
-      "slot_10": "0",
+      "slot_4": "0",
       "slot_12": "0",
-      "slot_1": "1",
-      "slot_14": "0",
+      "slot_19": "0",
+      "slot_11": "0",
+      "slot_17": "0",
+      "slot_6": "0",
+      "slot_15": "0",
+      "slot_16": "0",
+      "slot_18": "0",
+      "slot_3": "0",
       "slot_9": "0",
+      "slot_10": "0",
+      "slot_14": "0",
+      "slot_1": "1",
+      "slot_8": "0",
+      "slot_7": "0",
       "slot_2": "0",
-      "slot_8": "0"
+      "slot_5": "0",
+      "slot_13": "0"
     },
     "storage_diffs": {
-      "snapshot_3700": 2,
-      "snapshot_2467": 1,
+      "snapshot_4933": 1,
       "snapshot_1233": 1,
-      "snapshot_4933": 1
+      "snapshot_3700": 2,
+      "snapshot_2467": 1
     },
     "non_zero_slots": [
-      "slot_1",
-      "slot_0"
+      "slot_0",
+      "slot_1"
     ],
     "total_slots_checked": 20
   },
   "expression_evaluation": {
     "successful_evaluations": {
-      "snapshot_0": {
-        "msg.value": "EdbSolValue(Uint(224545863076966052, 256))",
+      "snapshot_2467": {
+        "2 * 3": "EdbSolValue(Uint(6, 256))",
+        "msg.value": "EdbSolValue(Uint(0, 256))",
         "block.timestamp": "EdbSolValue(Uint(1719408407, 256))",
-        "msg.sender": "EdbSolValue(Address(0x7677339387b31ae06274d0533681aea79276c61a))",
+        "1 + 1": "EdbSolValue(Uint(2, 256))",
+        "msg.sender": "EdbSolValue(Address(0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad))",
+        "block.number": "EdbSolValue(Uint(20176155, 256))",
+        "tx.origin": "EdbSolValue(Address(0x7677339387b31ae06274d0533681aea79276c61a))",
+        "address(this)": "EdbSolValue(Address(0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640))"
+      },
+      "snapshot_0": {
+        "2 * 3": "EdbSolValue(Uint(6, 256))",
+        "block.timestamp": "EdbSolValue(Uint(1719408407, 256))",
+        "block.number": "EdbSolValue(Uint(20176155, 256))",
         "1 + 1": "EdbSolValue(Uint(2, 256))",
         "address(this)": "EdbSolValue(Address(0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad))",
-        "block.number": "EdbSolValue(Uint(20176155, 256))",
-        "2 * 3": "EdbSolValue(Uint(6, 256))",
-        "tx.origin": "EdbSolValue(Address(0x7677339387b31ae06274d0533681aea79276c61a))"
-      },
-      "snapshot_2467": {
-        "block.number": "EdbSolValue(Uint(20176155, 256))",
-        "1 + 1": "EdbSolValue(Uint(2, 256))",
-        "2 * 3": "EdbSolValue(Uint(6, 256))",
-        "msg.sender": "EdbSolValue(Address(0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad))",
-        "msg.value": "EdbSolValue(Uint(0, 256))",
+        "msg.sender": "EdbSolValue(Address(0x7677339387b31ae06274d0533681aea79276c61a))",
         "tx.origin": "EdbSolValue(Address(0x7677339387b31ae06274d0533681aea79276c61a))",
-        "address(this)": "EdbSolValue(Address(0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640))",
-        "block.timestamp": "EdbSolValue(Uint(1719408407, 256))"
+        "msg.value": "EdbSolValue(Uint(224545863076966052, 256))"
       }
     },
     "failed_evaluations": {
       "snapshot_0": {
         "block.difficulty": "Cannot evaluate block directly, use member access",
         "gasleft()": "No function found for name='gasleft', args=[], callee=None, snapshot_id=0",
-        "tx.gasprice": "Cannot evaluate tx directly, use member access",
-        "msg.data.length": "Cannot evaluate msg directly, use member access"
+        "msg.data.length": "Cannot evaluate msg directly, use member access",
+        "tx.gasprice": "Cannot evaluate tx directly, use member access"
       },
       "snapshot_2467": {
         "block.difficulty": "Cannot evaluate block directly, use member access",
@@ -3664,27 +4278,27 @@
       }
     },
     "blockchain_context": {
-      "block.number": "EdbSolValue(Uint(20176155, 256))",
-      "msg.sender": "EdbSolValue(Address(0x7677339387b31ae06274d0533681aea79276c61a))"
+      "msg.sender": "EdbSolValue(Address(0x7677339387b31ae06274d0533681aea79276c61a))",
+      "block.number": "EdbSolValue(Uint(20176155, 256))"
     },
     "success_rate": 0.6666666666666666
   },
   "navigation_analysis": {
     "next_calls": {
       "snapshot_2467": 3754,
-      "snapshot_3700": 3754,
-      "snapshot_1233": 3754,
-      "snapshot_616": 3754,
       "snapshot_4924": 4926,
-      "snapshot_0": 3
+      "snapshot_3700": 3754,
+      "snapshot_0": 3,
+      "snapshot_616": 3754,
+      "snapshot_1233": 3754
     },
     "prev_calls": {
-      "snapshot_0": 0,
       "snapshot_616": 93,
-      "snapshot_2467": 93,
-      "snapshot_3700": 93,
       "snapshot_1233": 93,
-      "snapshot_4924": 4922
+      "snapshot_3700": 93,
+      "snapshot_4924": 4922,
+      "snapshot_0": 0,
+      "snapshot_2467": 93
     },
     "call_chain_depth": 493,
     "navigable_snapshots": 6
@@ -3705,345 +4319,345 @@
           "contract_ty": "Normal",
           "entries": [
             {
-              "abi": {
-                "inputs": [
-                  {
-                    "internalType": "bytes",
-                    "name": "looksRareClaim",
-                    "type": "bytes"
-                  }
-                ],
-                "name": "collectRewards",
-                "outputs": [],
-                "stateMutability": "nonpayable",
-                "type": "function"
-              },
+              "name": "collectRewards",
+              "ty": "Function",
               "inputs": [
                 "bytes"
               ],
-              "name": "collectRewards",
               "outputs": [],
-              "ty": "Function"
-            },
-            {
               "abi": {
+                "type": "function",
+                "name": "collectRewards",
                 "inputs": [
                   {
-                    "internalType": "bytes",
-                    "name": "commands",
-                    "type": "bytes"
-                  },
-                  {
-                    "internalType": "bytes[]",
-                    "name": "inputs",
-                    "type": "bytes[]"
+                    "name": "looksRareClaim",
+                    "type": "bytes",
+                    "internalType": "bytes"
                   }
                 ],
-                "name": "execute",
                 "outputs": [],
-                "stateMutability": "payable",
-                "type": "function"
-              },
+                "stateMutability": "nonpayable"
+              }
+            },
+            {
+              "name": "execute",
+              "ty": "Function",
               "inputs": [
                 "bytes",
                 "bytes[]"
               ],
-              "name": "execute",
               "outputs": [],
-              "ty": "Function"
-            },
-            {
               "abi": {
+                "type": "function",
+                "name": "execute",
                 "inputs": [
                   {
-                    "internalType": "bytes",
                     "name": "commands",
-                    "type": "bytes"
+                    "type": "bytes",
+                    "internalType": "bytes"
                   },
                   {
-                    "internalType": "bytes[]",
                     "name": "inputs",
-                    "type": "bytes[]"
-                  },
-                  {
-                    "internalType": "uint256",
-                    "name": "deadline",
-                    "type": "uint256"
+                    "type": "bytes[]",
+                    "internalType": "bytes[]"
                   }
                 ],
-                "name": "execute",
                 "outputs": [],
-                "stateMutability": "payable",
-                "type": "function"
-              },
+                "stateMutability": "payable"
+              }
+            },
+            {
+              "name": "execute",
+              "ty": "Function",
               "inputs": [
                 "bytes",
                 "bytes[]",
                 "uint256"
               ],
-              "name": "execute",
               "outputs": [],
-              "ty": "Function"
-            },
-            {
               "abi": {
+                "type": "function",
+                "name": "execute",
                 "inputs": [
                   {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
+                    "name": "commands",
+                    "type": "bytes",
+                    "internalType": "bytes"
                   },
                   {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
+                    "name": "inputs",
+                    "type": "bytes[]",
+                    "internalType": "bytes[]"
                   },
                   {
-                    "internalType": "uint256[]",
-                    "name": "",
-                    "type": "uint256[]"
-                  },
-                  {
-                    "internalType": "uint256[]",
-                    "name": "",
-                    "type": "uint256[]"
-                  },
-                  {
-                    "internalType": "bytes",
-                    "name": "",
-                    "type": "bytes"
+                    "name": "deadline",
+                    "type": "uint256",
+                    "internalType": "uint256"
                   }
                 ],
-                "name": "onERC1155BatchReceived",
-                "outputs": [
-                  {
-                    "internalType": "bytes4",
-                    "name": "",
-                    "type": "bytes4"
-                  }
-                ],
-                "stateMutability": "pure",
-                "type": "function"
-              },
-              "inputs": [
-                "address",
-                "address",
-                "uint256[]",
-                "uint256[]",
-                "bytes"
-              ],
-              "name": "onERC1155BatchReceived",
-              "outputs": [
-                "bytes4"
-              ],
-              "ty": "Function"
-            },
-            {
-              "abi": {
-                "inputs": [
-                  {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
-                  },
-                  {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
-                  },
-                  {
-                    "internalType": "uint256",
-                    "name": "",
-                    "type": "uint256"
-                  },
-                  {
-                    "internalType": "uint256",
-                    "name": "",
-                    "type": "uint256"
-                  },
-                  {
-                    "internalType": "bytes",
-                    "name": "",
-                    "type": "bytes"
-                  }
-                ],
-                "name": "onERC1155Received",
-                "outputs": [
-                  {
-                    "internalType": "bytes4",
-                    "name": "",
-                    "type": "bytes4"
-                  }
-                ],
-                "stateMutability": "pure",
-                "type": "function"
-              },
-              "inputs": [
-                "address",
-                "address",
-                "uint256",
-                "uint256",
-                "bytes"
-              ],
-              "name": "onERC1155Received",
-              "outputs": [
-                "bytes4"
-              ],
-              "ty": "Function"
-            },
-            {
-              "abi": {
-                "inputs": [
-                  {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
-                  },
-                  {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
-                  },
-                  {
-                    "internalType": "uint256",
-                    "name": "",
-                    "type": "uint256"
-                  },
-                  {
-                    "internalType": "bytes",
-                    "name": "",
-                    "type": "bytes"
-                  }
-                ],
-                "name": "onERC721Received",
-                "outputs": [
-                  {
-                    "internalType": "bytes4",
-                    "name": "",
-                    "type": "bytes4"
-                  }
-                ],
-                "stateMutability": "pure",
-                "type": "function"
-              },
-              "inputs": [
-                "address",
-                "address",
-                "uint256",
-                "bytes"
-              ],
-              "name": "onERC721Received",
-              "outputs": [
-                "bytes4"
-              ],
-              "ty": "Function"
-            },
-            {
-              "abi": {
-                "inputs": [
-                  {
-                    "internalType": "bytes4",
-                    "name": "interfaceId",
-                    "type": "bytes4"
-                  }
-                ],
-                "name": "supportsInterface",
-                "outputs": [
-                  {
-                    "internalType": "bool",
-                    "name": "",
-                    "type": "bool"
-                  }
-                ],
-                "stateMutability": "pure",
-                "type": "function"
-              },
-              "inputs": [
-                "bytes4"
-              ],
-              "name": "supportsInterface",
-              "outputs": [
-                "bool"
-              ],
-              "ty": "Function"
-            },
-            {
-              "abi": {
-                "inputs": [
-                  {
-                    "internalType": "int256",
-                    "name": "amount0Delta",
-                    "type": "int256"
-                  },
-                  {
-                    "internalType": "int256",
-                    "name": "amount1Delta",
-                    "type": "int256"
-                  },
-                  {
-                    "internalType": "bytes",
-                    "name": "data",
-                    "type": "bytes"
-                  }
-                ],
-                "name": "uniswapV3SwapCallback",
                 "outputs": [],
-                "stateMutability": "nonpayable",
-                "type": "function"
-              },
-              "inputs": [
-                "int256",
-                "int256",
-                "bytes"
-              ],
-              "name": "uniswapV3SwapCallback",
-              "outputs": [],
-              "ty": "Function"
-            },
-            {
-              "abi": {
-                "inputs": [],
-                "name": "lockedBy_edb_state_var_2543528819662848138",
-                "outputs": [
-                  {
-                    "internalType": "address",
-                    "name": "",
-                    "type": "address"
-                  }
-                ],
-                "stateMutability": "view",
-                "type": "function"
-              },
-              "inputs": [],
-              "name": "lockedBy",
-              "outputs": [
-                "address"
-              ],
-              "ty": {
-                "StateVariable": 2543528819662848138
+                "stateMutability": "payable"
               }
             },
             {
+              "name": "onERC1155BatchReceived",
+              "ty": "Function",
+              "inputs": [
+                "address",
+                "address",
+                "uint256[]",
+                "uint256[]",
+                "bytes"
+              ],
+              "outputs": [
+                "bytes4"
+              ],
               "abi": {
-                "inputs": [],
-                "name": "maxAmountInCached_edb_state_var_2543528819662848309",
-                "outputs": [
+                "type": "function",
+                "name": "onERC1155BatchReceived",
+                "inputs": [
                   {
-                    "internalType": "uint256",
                     "name": "",
-                    "type": "uint256"
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "",
+                    "type": "uint256[]",
+                    "internalType": "uint256[]"
+                  },
+                  {
+                    "name": "",
+                    "type": "uint256[]",
+                    "internalType": "uint256[]"
+                  },
+                  {
+                    "name": "",
+                    "type": "bytes",
+                    "internalType": "bytes"
                   }
                 ],
-                "stateMutability": "view",
-                "type": "function"
+                "outputs": [
+                  {
+                    "name": "",
+                    "type": "bytes4",
+                    "internalType": "bytes4"
+                  }
+                ],
+                "stateMutability": "pure"
+              }
+            },
+            {
+              "name": "onERC1155Received",
+              "ty": "Function",
+              "inputs": [
+                "address",
+                "address",
+                "uint256",
+                "uint256",
+                "bytes"
+              ],
+              "outputs": [
+                "bytes4"
+              ],
+              "abi": {
+                "type": "function",
+                "name": "onERC1155Received",
+                "inputs": [
+                  {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "",
+                    "type": "bytes",
+                    "internalType": "bytes"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "name": "",
+                    "type": "bytes4",
+                    "internalType": "bytes4"
+                  }
+                ],
+                "stateMutability": "pure"
+              }
+            },
+            {
+              "name": "onERC721Received",
+              "ty": "Function",
+              "inputs": [
+                "address",
+                "address",
+                "uint256",
+                "bytes"
+              ],
+              "outputs": [
+                "bytes4"
+              ],
+              "abi": {
+                "type": "function",
+                "name": "onERC721Received",
+                "inputs": [
+                  {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                  },
+                  {
+                    "name": "",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  },
+                  {
+                    "name": "",
+                    "type": "bytes",
+                    "internalType": "bytes"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "name": "",
+                    "type": "bytes4",
+                    "internalType": "bytes4"
+                  }
+                ],
+                "stateMutability": "pure"
+              }
+            },
+            {
+              "name": "supportsInterface",
+              "ty": "Function",
+              "inputs": [
+                "bytes4"
+              ],
+              "outputs": [
+                "bool"
+              ],
+              "abi": {
+                "type": "function",
+                "name": "supportsInterface",
+                "inputs": [
+                  {
+                    "name": "interfaceId",
+                    "type": "bytes4",
+                    "internalType": "bytes4"
+                  }
+                ],
+                "outputs": [
+                  {
+                    "name": "",
+                    "type": "bool",
+                    "internalType": "bool"
+                  }
+                ],
+                "stateMutability": "pure"
+              }
+            },
+            {
+              "name": "uniswapV3SwapCallback",
+              "ty": "Function",
+              "inputs": [
+                "int256",
+                "int256",
+                "bytes"
+              ],
+              "outputs": [],
+              "abi": {
+                "type": "function",
+                "name": "uniswapV3SwapCallback",
+                "inputs": [
+                  {
+                    "name": "amount0Delta",
+                    "type": "int256",
+                    "internalType": "int256"
+                  },
+                  {
+                    "name": "amount1Delta",
+                    "type": "int256",
+                    "internalType": "int256"
+                  },
+                  {
+                    "name": "data",
+                    "type": "bytes",
+                    "internalType": "bytes"
+                  }
+                ],
+                "outputs": [],
+                "stateMutability": "nonpayable"
+              }
+            },
+            {
+              "name": "lockedBy",
+              "ty": {
+                "StateVariable": 2543528819662847751
               },
               "inputs": [],
+              "outputs": [
+                "address"
+              ],
+              "abi": {
+                "type": "function",
+                "name": "lockedBy_edb_state_var_2543528819662847751",
+                "inputs": [],
+                "outputs": [
+                  {
+                    "name": "",
+                    "type": "address",
+                    "internalType": "address"
+                  }
+                ],
+                "stateMutability": "view"
+              }
+            },
+            {
               "name": "maxAmountInCached",
+              "ty": {
+                "StateVariable": 2543528819662848009
+              },
+              "inputs": [],
               "outputs": [
                 "uint256"
               ],
-              "ty": {
-                "StateVariable": 2543528819662848309
+              "abi": {
+                "type": "function",
+                "name": "maxAmountInCached_edb_state_var_2543528819662848009",
+                "inputs": [],
+                "outputs": [
+                  {
+                    "name": "",
+                    "type": "uint256",
+                    "internalType": "uint256"
+                  }
+                ],
+                "stateMutability": "view"
               }
             }
           ]
@@ -4057,48 +4671,48 @@
     "condition_breakpoints": {
       "tx.gasprice > 1000000000": 0,
       "gasleft() > 21000": 0,
-      "msg.value > 0": 204,
       "msg.sender != address(0)": 4934,
-      "msg.value == 0": 4730,
-      "block.number > 0": 4934
+      "msg.value > 0": 204,
+      "block.number > 0": 4934,
+      "msg.value == 0": 4730
     },
     "total_conditions_tested": 6,
     "conditions_with_hits": 4
   },
   "performance_metrics": {
     "rpc_call_times": {
-      "edb_getBreakpointHits": 46,
-      "edb_getTrace_detailed": 40,
-      "edb_getNextCall": 0,
-      "edb_getTrace": 40,
-      "edb_getStorage": 123,
-      "edb_getCode": 10,
-      "edb_getStorageDiff": 1,
-      "edb_evalOnSnapshot": 0,
-      "edb_getSnapshotInfo": 0,
-      "edb_getContractABI": 3,
-      "edb_getCallableABI": 2,
       "edb_getConstructorArgs": 0,
-      "edb_getSnapshotCount": 0,
-      "edb_getPrevCall": 0
+      "edb_getStorageDiff": 0,
+      "edb_getTrace_detailed": 58,
+      "edb_getContractABI": 2,
+      "edb_getSnapshotInfo": 0,
+      "edb_getTrace": 59,
+      "edb_getCallableABI": 1,
+      "edb_getSnapshotCount": 1,
+      "edb_getPrevCall": 0,
+      "edb_evalOnSnapshot": 0,
+      "edb_getBreakpointHits": 180,
+      "edb_getStorage": 0,
+      "edb_getCode": 15,
+      "edb_getNextCall": 0
     },
     "data_sizes": {
       "edb_getCallableABI": 3839,
-      "edb_getTrace_detailed": 447313,
       "edb_getPrevCall": 8,
+      "edb_getTrace_detailed": 447313,
       "edb_getStorageDiff": 60,
-      "edb_getContractABI": 5707,
-      "edb_getNextCall": 8,
-      "edb_getSnapshotInfo": 547,
-      "edb_getSnapshotCount": 8,
       "edb_getStorage": 32,
-      "edb_getConstructorArgs": 32,
       "edb_evalOnSnapshot": 64,
-      "edb_getTrace": 447313,
       "edb_getCode": 154627,
-      "edb_getBreakpointHits": 32
+      "edb_getNextCall": 8,
+      "edb_getContractABI": 5707,
+      "edb_getConstructorArgs": 32,
+      "edb_getBreakpointHits": 32,
+      "edb_getTrace": 447313,
+      "edb_getSnapshotCount": 8,
+      "edb_getSnapshotInfo": 547
     },
     "total_rpc_calls": 80,
-    "analysis_time_ms": 16657
+    "analysis_time_ms": 871
   }
 }

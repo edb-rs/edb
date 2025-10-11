@@ -507,8 +507,16 @@ impl Analyzer {
 
         // we take over the walk of the sub ast tree in the function step.
         let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
+
+        // Set context flag for parameters
+        single_step_walker.analyzer.is_declaring_param = true;
         function.parameters.walk(&mut single_step_walker)?;
+        single_step_walker.analyzer.is_declaring_param = false;
+
+        // Set context flag for return parameters
+        single_step_walker.analyzer.is_declaring_return = true;
         function.return_parameters.walk(&mut single_step_walker)?;
+        single_step_walker.analyzer.is_declaring_return = false;
 
         // end the function step early and then walk the body of the function.
         let step = self.current_step.take().unwrap();
@@ -562,7 +570,11 @@ impl Analyzer {
 
         // we take over the walk of the sub ast tree in the modifier step.
         let mut single_step_walker = AnalyzerSingleStepWalker { analyzer: self };
+
+        // Set context flag for parameters
+        single_step_walker.analyzer.is_declaring_param = true;
         modifier.parameters.walk(&mut single_step_walker)?;
+        single_step_walker.analyzer.is_declaring_param = false;
 
         // end the modifier step early and then walk the body of the modifier.
         let step = self.current_step.take().unwrap();
