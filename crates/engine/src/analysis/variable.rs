@@ -29,7 +29,7 @@
 //! comprehensive variable tracking and type information during contract analysis.
 
 use foundry_compilers::artifacts::{
-    Assignment, Expression, Mutability, TypeName, VariableDeclaration, Visibility,
+    Assignment, Expression, Mutability, StorageLocation, TypeName, VariableDeclaration, Visibility,
 };
 use serde::{Deserialize, Serialize};
 
@@ -98,9 +98,11 @@ define_ref! {
             name: String,
             declaration: VariableDeclaration,
             type_name: Option<TypeName>,
+            initialized: bool,
         }
         delegate: {
             fn id(&self) -> UVID;
+            fn kind(&self) -> VariableKind;
             fn contract(&self) -> Option<ContractRef>;
             fn function(&self) -> Option<FunctionRef>;
         }
@@ -154,6 +156,8 @@ pub enum Variable {
         name: String,
         /// The variable declaration from the AST.
         declaration: VariableDeclaration,
+        /// Whether the variable is initialized at declaration.
+        initialized: bool,
         /// The kind of variable (local, state, etc.).
         kind: VariableKind,
         /// Function that this variable is declared in.
@@ -194,6 +198,16 @@ impl Variable {
             Self::Member { base, .. } => base.read().id(),
             Self::Index { base, .. } => base.read().id(),
             Self::IndexRange { base, .. } => base.read().id(),
+        }
+    }
+
+    /// Returns whether the variable is initialized at declaration.
+    pub fn initialized(&self) -> bool {
+        match self {
+            Self::Plain { initialized, .. } => *initialized,
+            Self::Member { base, .. } => base.read().initialized(),
+            Self::Index { base, .. } => base.read().initialized(),
+            Self::IndexRange { base, .. } => base.read().initialized(),
         }
     }
 
@@ -301,10 +315,21 @@ impl Analyzer {
         } else {
             VariableKind::Local
         };
+        // Whether a variable is initialized so that we can observe the value at declaration.
+        let initialized = match kind {
+            VariableKind::Param | VariableKind::State => true,
+            VariableKind::Local | VariableKind::Return => match declaration.storage_location {
+                StorageLocation::Calldata
+                | StorageLocation::Transient
+                | StorageLocation::Storage => self.is_declaring_with_initial_expr,
+                StorageLocation::Default | StorageLocation::Memory => true,
+            },
+        };
         let variable: VariableRef = Variable::Plain {
             uvid,
             name: declaration.name.clone(),
             declaration: declaration.clone(),
+            initialized,
             kind,
             function,
             contract,
@@ -443,13 +468,17 @@ impl Analyzer {
             return Ok(());
         }
         let variable: VariableRef = self.variables.get(&declaration.id).unwrap().clone();
-        step.write().updated_variables.push(variable);
+        if *variable.initialized() {
+            step.write().updated_variables.push(variable);
+        }
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::{Variable, VariableKind, EDB_RUNTIME_VALUE_OFFSET, UVID};
     use crate::analysis::analyzer::tests::compile_and_analyze;
 
@@ -1256,5 +1285,44 @@ mod tests {
                 "UVID should start from EDB_RUNTIME_VALUE_OFFSET"
             );
         }
+    }
+
+    #[test]
+    fn test_variable_initialized() {
+        let source = r#"
+        contract TestContract {
+            uint256[] stateVar;
+            uint256 transient transientVar;
+            function foo(uint param1, uint[] calldata param2) public returns (uint ret1, uint[] calldata ret2) {
+                uint256 localVar;
+                uint256 localVar2 = 1;
+                uint256[] storage storageVar;
+                uint256[] storage storageVar2 = stateVar;
+                uint256[] memory memoryVar;
+                uint256[] calldata calldataVar;
+                uint256[] calldata calldataVar2 = param2;
+                ret2 = param2;
+            }
+        }
+        "#;
+
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let var_table = analysis.variable_table();
+        let var_name_to_ref =
+            var_table.values().map(|v| (v.read().name(), v)).collect::<HashMap<_, _>>();
+        assert!(var_name_to_ref["stateVar"].initialized());
+        assert!(var_name_to_ref["transientVar"].initialized());
+        assert!(var_name_to_ref["param1"].initialized());
+        assert!(var_name_to_ref["param2"].initialized());
+        assert!(var_name_to_ref["ret1"].initialized());
+        assert!(!var_name_to_ref["ret2"].initialized());
+        assert!(var_name_to_ref["localVar"].initialized());
+        assert!(var_name_to_ref["localVar2"].initialized());
+        assert!(!var_name_to_ref["storageVar"].initialized());
+        assert!(var_name_to_ref["storageVar2"].initialized());
+        assert!(var_name_to_ref["memoryVar"].initialized());
+        assert!(!var_name_to_ref["calldataVar"].initialized());
+        assert!(var_name_to_ref["calldataVar2"].initialized());
     }
 }

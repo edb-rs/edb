@@ -86,6 +86,8 @@ pub struct Analyzer {
     pub(super) is_declaring_param: bool,
     /// Context flag: true when declaring return variables
     pub(super) is_declaring_return: bool,
+    /// Context flag: true when we are inside a `VariableDeclarationStatement` with an initial value
+    pub(super) is_declaring_with_initial_expr: bool,
 }
 
 impl Analyzer {
@@ -120,6 +122,7 @@ impl Analyzer {
             user_defined_types: Vec::new(),
             is_declaring_param: false,
             is_declaring_return: false,
+            is_declaring_with_initial_expr: false,
         }
     }
 
@@ -415,6 +418,22 @@ impl Visitor for Analyzer {
         self.collect_statement_bodies(&while_statement.body);
         Ok(VisitorAction::Continue)
     }
+
+    fn visit_variable_declaration_statement(
+        &mut self,
+        declaration_stmt: &foundry_compilers::artifacts::VariableDeclarationStatement,
+    ) -> eyre::Result<VisitorAction> {
+        self.is_declaring_with_initial_expr = declaration_stmt.initial_value.is_some();
+        Ok(VisitorAction::Continue)
+    }
+
+    fn post_visit_variable_declaration_statement(
+        &mut self,
+        _declaration_stmt: &foundry_compilers::artifacts::VariableDeclarationStatement,
+    ) -> eyre::Result<()> {
+        self.is_declaring_with_initial_expr = false;
+        Ok(())
+    }
 }
 
 /// A walker wrapping [`Analyzer`] that only walks a single step.
@@ -525,7 +544,7 @@ pub(crate) mod tests {
     /// * `SourceAnalysis` - The analysis result containing steps, scopes, and recommendations
     pub(crate) fn compile_and_analyze(source: &str) -> (BTreeMap<u32, Source>, SourceAnalysis) {
         // Compile the source code to get the AST
-        let version = Version::parse("0.8.20").unwrap();
+        let version = Version::parse("0.8.30").unwrap();
         let result = compile_contract_source_to_source_unit(version, source, false);
         assert!(result.is_ok(), "Source compilation should succeed: {}", result.unwrap_err());
 
