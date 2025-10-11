@@ -1325,4 +1325,63 @@ mod tests {
         assert!(!var_name_to_ref["calldataVar"].initialized());
         assert!(var_name_to_ref["calldataVar2"].initialized());
     }
+
+    #[test]
+    fn test_struct_field_should_not_be_considered_as_variable() {
+        let source = r#"
+        contract TestContract {
+            struct S {
+                uint256 a;
+            }
+        }
+        "#;
+
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let var_table = analysis.variable_table();
+        let var_name_to_ref =
+            var_table.values().map(|v| (v.read().name(), v)).collect::<HashMap<_, _>>();
+        assert!(!var_name_to_ref.contains_key("a"));
+    }
+
+    #[test]
+    fn test_event_definition_variables_should_not_be_considered_as_variables() {
+        let source = r#"
+        contract TestContract {
+            event Transfer(address indexed from, address indexed to, uint256 value);
+            event Approval(address indexed owner, address indexed spender, uint256 amount);
+        }
+        "#;
+
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let var_table = analysis.variable_table();
+        let var_name_to_ref =
+            var_table.values().map(|v| (v.read().name(), v)).collect::<HashMap<_, _>>();
+        assert!(!var_name_to_ref.contains_key("from"));
+        assert!(!var_name_to_ref.contains_key("to"));
+        assert!(!var_name_to_ref.contains_key("value"));
+        assert!(!var_name_to_ref.contains_key("owner"));
+        assert!(!var_name_to_ref.contains_key("spender"));
+        assert!(!var_name_to_ref.contains_key("amount"));
+    }
+
+    #[test]
+    fn test_error_definition_variables_should_not_be_considered_as_variables() {
+        let source = r#"
+        contract TestContract {
+            error InsufficientBalance(uint256 available, uint256 required);
+            error Unauthorized(address caller);
+        }
+        "#;
+
+        let (_sources, analysis) = compile_and_analyze(source);
+
+        let var_table = analysis.variable_table();
+        let var_name_to_ref =
+            var_table.values().map(|v| (v.read().name(), v)).collect::<HashMap<_, _>>();
+        assert!(!var_name_to_ref.contains_key("available"));
+        assert!(!var_name_to_ref.contains_key("required"));
+        assert!(!var_name_to_ref.contains_key("caller"));
+    }
 }
