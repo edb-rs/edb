@@ -266,7 +266,7 @@ impl Visitor for Analyzer {
         _definition: &StructDefinition,
     ) -> eyre::Result<VisitorAction> {
         self.record_struct_type(_definition)?;
-        Ok(VisitorAction::Continue)
+        Ok(VisitorAction::SkipSubtree)
     }
 
     fn visit_enum_definition(
@@ -274,7 +274,7 @@ impl Visitor for Analyzer {
         _definition: &EnumDefinition,
     ) -> eyre::Result<VisitorAction> {
         self.record_enum_type(_definition)?;
-        Ok(VisitorAction::Continue)
+        Ok(VisitorAction::SkipSubtree)
     }
 
     fn visit_event_definition(
