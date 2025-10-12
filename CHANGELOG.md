@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-### Changed
+- Support for calldata variables ([#33](https://github.com/edb-rs/edb/issues/33))
+
+### Fixed
+
+- Struct fields are no longer be incorrectly treated as variables ([#33](https://github.com/edb-rs/edb/issues/33))
 
 ## [0.0.2] - 2024-10-11
 
