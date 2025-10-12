@@ -244,6 +244,12 @@ pub trait Visitor {
     fn visit_emit_statement(&mut self, _emit_statement: &EmitStatement) -> Result<VisitorAction> {
         Ok(VisitorAction::Continue)
     }
+    fn visit_variable_declaration_statement(
+        &mut self,
+        _declaration_stmt: &VariableDeclarationStatement,
+    ) -> Result<VisitorAction> {
+        Ok(VisitorAction::Continue)
+    }
     fn visit_unchecked_block(
         &mut self,
         _unchecked_block: &UncheckedBlock,
@@ -435,6 +441,12 @@ pub trait Visitor {
         Ok(())
     }
     fn post_visit_emit_statement(&mut self, _emit_statement: &EmitStatement) -> Result<()> {
+        Ok(())
+    }
+    fn post_visit_variable_declaration_statement(
+        &mut self,
+        _declaration_stmt: &VariableDeclarationStatement,
+    ) -> Result<()> {
         Ok(())
     }
     fn post_visit_unchecked_block(&mut self, _unchecked_block: &UncheckedBlock) -> Result<()> {
@@ -842,7 +854,7 @@ impl_walk!(EmitStatement, visit_emit_statement, |emit_statement, visitor| {
     emit_statement.event_call.walk(visitor)
 });
 
-impl_walk!(VariableDeclarationStatement, |stmt, visitor| {
+impl_walk!(VariableDeclarationStatement, visit_variable_declaration_statement, |stmt, visitor| {
     for declaration in stmt.declarations.iter().filter_map(|d| d.as_ref()) {
         declaration.walk(visitor)?;
     }
