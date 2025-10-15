@@ -243,8 +243,8 @@ impl ProviderManager {
         }
 
         // Generate random number for weighted selection
-        let mut rng = rand::thread_rng();
-        let random_weight = rng.gen_range(0..total_weight);
+        let mut rng = rand::rng();
+        let random_weight = rng.random_range(0..total_weight);
 
         // Find the provider corresponding to the random weight
         let mut current_weight = 0u32;
@@ -291,8 +291,8 @@ impl ProviderManager {
         }
 
         // Generate random number for weighted selection
-        let mut rng = rand::thread_rng();
-        let random_weight = rng.gen_range(0..total_weight);
+        let mut rng = rand::rng();
+        let random_weight = rng.random_range(0..total_weight);
 
         // Find the provider corresponding to the random weight
         let mut current_weight = 0u32;

@@ -59,7 +59,7 @@ pub fn get_testdata_cache_root() -> PathBuf {
 /// ```
 pub fn create_temp_cache_dir() -> PathBuf {
     use rand::Rng;
-    let random_suffix: u32 = rand::thread_rng().gen();
+    let random_suffix: u32 = rand::rng().random();
     let temp_dir = env::temp_dir().join(format!("edb-test-cache-{random_suffix:08x}"));
     let testdata_cache = get_testdata_cache_root();
 
