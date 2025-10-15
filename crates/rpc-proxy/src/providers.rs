@@ -17,7 +17,6 @@
 //! Multi-provider RPC management with health checking and load balancing
 
 use eyre::Result;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -243,8 +242,7 @@ impl ProviderManager {
         }
 
         // Generate random number for weighted selection
-        let mut rng = rand::rng();
-        let random_weight = rng.random_range(0..total_weight);
+        let random_weight = rand::random_range(0..total_weight);
 
         // Find the provider corresponding to the random weight
         let mut current_weight = 0u32;
@@ -291,8 +289,7 @@ impl ProviderManager {
         }
 
         // Generate random number for weighted selection
-        let mut rng = rand::rng();
-        let random_weight = rng.random_range(0..total_weight);
+        let random_weight = rand::random_range(0..total_weight);
 
         // Find the provider corresponding to the random weight
         let mut current_weight = 0u32;
