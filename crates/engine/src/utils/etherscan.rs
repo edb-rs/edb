@@ -50,7 +50,7 @@ static ETHERSCAN_MAINNET_KEYS: Lazy<Vec<&'static str>> = Lazy::new(|| {
         "3IA6ASNQXN8WKN7PNFX7T72S9YG56X9FPG",
     ];
 
-    keys.shuffle(&mut rand::thread_rng());
+    keys.shuffle(&mut rand::rng());
 
     keys
 });
