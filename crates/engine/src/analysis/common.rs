@@ -372,13 +372,15 @@ fn _check_step_overlap(steps: &[StepRef]) -> Result<(), AnalysisError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::find_or_install_solc;
+
     use super::*;
     use foundry_block_explorers::contract::Metadata;
     use foundry_compilers::{
         artifacts::{
             output_selection::OutputSelection, EvmVersion, Settings, SolcInput, Source, Sources,
         },
-        solc::{Solc, SolcLanguage},
+        solc::SolcLanguage,
     };
     use std::path::PathBuf;
 
@@ -417,7 +419,7 @@ contract SimpleContract {
 
         // Compile using Solc
         let version = semver::Version::new(0, 8, 19);
-        let compiler = Solc::find_or_install(&version).expect("Failed to find or install Solc");
+        let compiler = find_or_install_solc(&version).expect("Failed to find or install Solc");
         let output = compiler.compile_exact(&input).expect("Compilation failed");
         println!("input {input:?}");
         println!("output {output:?}");

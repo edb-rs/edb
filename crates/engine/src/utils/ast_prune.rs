@@ -14,58 +14,8 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-use std::path::PathBuf;
-
 use eyre::{OptionExt, Result};
-use foundry_compilers::{
-    artifacts::{
-        output_selection::OutputSelection, Ast, Node, NodeType, Settings, Severity, Source,
-        SourceUnit, Sources,
-    },
-    solc::{SolcCompiler, SolcLanguage, SolcSettings, SolcVersionedInput},
-    CompilationError, Compiler, CompilerInput,
-};
-use semver::Version;
-
-/// Compile a string as Solidity source code to a SourceUnit
-pub fn compile_contract_source_to_source_unit(
-    solc_version: Version,
-    source: &str,
-    prune: bool,
-) -> Result<SourceUnit> {
-    let phantom_file_name = PathBuf::from("Contract.sol");
-    let sources = Sources::from_iter([(phantom_file_name.clone(), Source::new(source))]);
-    let settings = SolcSettings {
-        settings: Settings::new(OutputSelection::complete_output_selection()),
-        cli_settings: Default::default(),
-    };
-    let solc_input =
-        SolcVersionedInput::build(sources, settings, SolcLanguage::Solidity, solc_version);
-    let compiler = SolcCompiler::AutoDetect;
-    let output = compiler.compile(&solc_input)?;
-
-    // return error if compiler error
-    let errors = output
-        .errors
-        .iter()
-        .filter(|e| e.severity() == Severity::Error)
-        .map(|e| format!("{e}"))
-        .collect::<Vec<_>>();
-    if !errors.is_empty() {
-        return Err(eyre::eyre!("Compiler error: {}", errors.join("\n")));
-    }
-
-    let mut ast = output
-        .sources
-        .get(&phantom_file_name)
-        .expect("No AST found")
-        .ast
-        .clone()
-        .expect("AST is not selected as output");
-
-    let source_unit = ASTPruner::convert(&mut ast, prune)?;
-    Ok(source_unit)
-}
+use foundry_compilers::artifacts::{Ast, Node, NodeType, SourceUnit};
 
 /// We prune the AST to remove or refine nodes that are not strongly related to analysis.
 /// We do this because the Solidity compiler has changed the AST structure over time, but
@@ -217,6 +167,64 @@ impl ASTPruner {
 }
 
 #[cfg(test)]
+pub(crate) mod test_utils {
+    //! Test utilities for AST pruning and compilation
+    //! This module provides helper functions to compile Solidity source code
+    //! into AST SourceUnit structures for testing purposes.
+
+    use eyre::Result;
+    use foundry_compilers::{
+        artifacts::{
+            output_selection::OutputSelection, EvmVersion, Settings, Severity, SolcInput, Source,
+            SourceUnit, Sources,
+        },
+        solc::SolcLanguage,
+        CompilationError as _,
+    };
+    use semver::Version;
+    use std::path::PathBuf;
+
+    use crate::{find_or_install_solc, ASTPruner};
+
+    /// Compile a string as Solidity source code to a SourceUnit
+    pub fn compile_contract_source_to_source_unit(
+        solc_version: Version,
+        source: &str,
+        prune: bool,
+    ) -> Result<SourceUnit> {
+        let phantom_file_name = PathBuf::from("Contract.sol");
+        let sources = Sources::from_iter([(phantom_file_name.clone(), Source::new(source))]);
+        let mut settings = Settings::new(OutputSelection::complete_output_selection());
+        settings.evm_version = EvmVersion::default_version_solc(&solc_version);
+        let solc_input = SolcInput::new(SolcLanguage::Solidity, sources, settings);
+        let compiler = find_or_install_solc(&solc_version)?;
+        let output = compiler.compile_exact(&solc_input)?;
+
+        // return error if compiler error
+        let errors = output
+            .errors
+            .iter()
+            .filter(|e| e.severity() == Severity::Error)
+            .map(|e| format!("{e}"))
+            .collect::<Vec<_>>();
+        if !errors.is_empty() {
+            return Err(eyre::eyre!("Compiler error: {}", errors.join("\n")));
+        }
+
+        let mut ast = output
+            .sources
+            .get(&phantom_file_name)
+            .expect("No AST found")
+            .ast
+            .clone()
+            .expect("AST is not selected as output");
+
+        let source_unit = ASTPruner::convert(&mut ast, prune)?;
+        Ok(source_unit)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::{env, str::FromStr, time::Duration};
 
@@ -225,8 +233,9 @@ mod tests {
     use edb_common::{test_utils::setup_test_environment, CachePath, EdbCachePath};
     use eyre::Result;
     use foundry_block_explorers::Client;
+    use semver::Version;
 
-    use crate::utils::OnchainCompiler;
+    use crate::{test_utils::compile_contract_source_to_source_unit, utils::OnchainCompiler};
 
     use super::*;
 

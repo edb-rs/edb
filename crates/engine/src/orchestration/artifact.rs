@@ -22,7 +22,6 @@ use alloy_primitives::Address;
 use edb_common::{CachePath, EdbCachePath, DEFAULT_ETHERSCAN_CACHE_TTL};
 use eyre::{bail, Result};
 use foundry_block_explorers::Client;
-use foundry_compilers::solc::Solc;
 use futures::future::join_all;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -30,8 +29,8 @@ use semver::Version;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    analysis::AnalysisResult, dump_source_for_debugging, format_compiler_errors, instrument,
-    Artifact, EngineConfig, OnchainCompiler, TraceReplayResult,
+    analysis::AnalysisResult, dump_source_for_debugging, find_or_install_solc,
+    format_compiler_errors, instrument, Artifact, EngineConfig, OnchainCompiler, TraceReplayResult,
 };
 
 /// Download and compile verified source code for each contract
@@ -164,7 +163,7 @@ pub fn instrument_and_recompile_source_code(
 
                     // prepare the compiler
                     let version = meta.compiler_version()?;
-                    let compiler = Solc::find_or_install(&version)?;
+                    let compiler = find_or_install_solc(&version)?;
 
                     // compile the source code
                     let output = match compiler.compile_exact(&input) {
