@@ -56,7 +56,7 @@ use edb_common::types::{ExecutionFrameId, Trace};
 use eyre::Result;
 use itertools::Itertools;
 use revm::{database::CacheDB, Database, DatabaseCommit, DatabaseRef};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::{
     analysis::{AnalysisResult, StepRef, UFID},
@@ -296,7 +296,7 @@ where
 
             // Step 0: To avoid annoying crash, we always add a placeholder stack entry
             if stack.is_empty() {
-                error!("Call stack is empty at Snapshot {} (step 0)", snapshots[i].1.id());
+                warn!("Call stack is empty at Snapshot {} (step 0)", snapshots[i].1.id());
                 stack.push(CallStackEntry {
                     func_info: FunctionInfo::Unknown,
                     callsite: None,
@@ -358,7 +358,7 @@ where
 
             // Step 4: check return
             let Some(stack_entry) = stack.last() else {
-                error!("Call stack is empty at Snapshot {} (step 4)", snapshots[i].1.id());
+                warn!("Call stack is empty at Snapshot {} (step 4)", snapshots[i].1.id());
                 continue;
             };
 
@@ -379,7 +379,7 @@ where
             // Step 5: handle returning chain
             loop {
                 let Some(mut stack_entry) = stack.pop() else {
-                    error!("Call stack is empty at Snapshot {} (step 5)", snapshots[i].1.id());
+                    warn!("Call stack is empty at Snapshot {} (step 5)", snapshots[i].1.id());
                     break;
                 };
 

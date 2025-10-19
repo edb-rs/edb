@@ -63,6 +63,7 @@ mod call_tracer;
 mod hook_snapshot_inspector;
 mod opcode_snapshot_inspector;
 mod tweak_inspector;
+mod utils;
 
 pub use call_tracer::*;
 pub use hook_snapshot_inspector::*;

@@ -133,7 +133,7 @@ foundry-compilers = { version = "0.19.5", default-features = false, features = [
 # revm - matching Foundry's version exactly (updated to 29.0.0)
 revm = { version = "29.0.0", default-features = false }
 revm-inspectors = { version = "0.30.0", features = ["serde"] }
-revm-context = { version = "9.0.1", default-features = false }
+revm-context = { version = "9.0.1", features = ["optional_balance_check"] }
 op-revm = "10.0.0"
 
 # solang

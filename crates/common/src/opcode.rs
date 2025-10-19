@@ -70,6 +70,9 @@ pub trait OpcodeTr {
 
     /// Check if this opcode is a call instruction
     fn is_message_call(&self) -> bool;
+
+    /// Check if this opcode is a contract creation call
+    fn is_creation_call(&self) -> bool;
 }
 
 impl OpcodeTr for OpCode {
@@ -116,6 +119,10 @@ impl OpcodeTr for OpCode {
                 | Self::DELEGATECALL
                 | Self::STATICCALL
         )
+    }
+
+    fn is_creation_call(&self) -> bool {
+        matches!(*self, Self::CREATE | Self::CREATE2)
     }
 }
 
