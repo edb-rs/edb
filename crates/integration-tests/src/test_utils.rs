@@ -67,8 +67,8 @@ pub mod proxy {
     async fn setup_test_proxy_with_cache(
         grace_period: u64,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        // Create a temporary cache directory for test isolation
-        let cache_dir = edb_common::test_utils::create_temp_cache_dir();
+        // Use the shared testdata cache directory
+        let cache_dir = edb_common::test_utils::get_testdata_cache_root();
         setup_test_proxy(grace_period, Some(cache_dir), None).await
     }
 

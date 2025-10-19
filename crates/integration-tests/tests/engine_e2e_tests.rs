@@ -38,7 +38,7 @@ use tracing::info;
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Run manually to capture new baselines"]
 async fn capture_single_baseline() {
-    let tx_name = "uniswap_v4"; // Change this to capture different transactions
+    let tx_name = "oog_tweak"; // Change this to capture different transactions
 
     // Initialize test environment if needed
     init::init_test_environment(false);
@@ -175,6 +175,12 @@ async fn test_comprehensive_another_uniswap_v3() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
 async fn test_comprehensive_uniswap_v4() {
     test_comprehensive_transaction("uniswap_v4").await;
+}
+
+/// Test comprehensive RPC analysis for Out-Of-Gas tweak transaction using shared logic
+#[tokio::test(flavor = "multi_thread", worker_threads = 5)]
+async fn test_comprehensive_oog_tweak() {
+    test_comprehensive_transaction("oog_tweak").await;
 }
 
 /// Core test function for comprehensive transaction analysis

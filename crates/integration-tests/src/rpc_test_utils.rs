@@ -64,10 +64,15 @@ pub mod test_transactions {
     pub const UNISWAP_V4: (&str, &str) =
         ("uniswap_v4", "0x258b5a643ae7ccb8e45a4ea1e308f708c8e0eb6e2f535ec68f678c944c98b402");
 
+    /// A transaction which previously triggers out-of-gas error when tweaking contracts.
+    /// This is used to test gas limit relaxation at callsites.
+    pub const OOG_TWEAK: (&str, &str) =
+        ("oog_tweak", "0xc14075310349be0c3a1dc4ee58c761c22f25c2b72c12d22f5e1c06f66f94b958");
+
     /// Returns all available test transaction fixtures.
     /// This provides a complete set of transactions covering different complexity levels and use cases.
     pub fn all() -> Vec<(&'static str, &'static str)> {
-        vec![SIMPLE, LARGE, UNISWAP_V3, UNISWAP_V3_ALT, UNISWAP_V4]
+        vec![SIMPLE, LARGE, UNISWAP_V3, UNISWAP_V3_ALT, UNISWAP_V4, OOG_TWEAK]
     }
 }
 
