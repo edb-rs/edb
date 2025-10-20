@@ -37,7 +37,7 @@ pub async fn replay_transaction(tx_hash: TxHash, cli: &crate::Cli, rpc_url: &str
     );
 
     // Step 2: Build inputs for the engine
-    let engine_config = cli.to_engine_config();
+    let engine_config = cli.to_engine_config(rpc_url);
 
     // Step 3: Call engine::prepare with forked database and EVM config
     tracing::info!("Calling engine::prepare with prepared inputs");

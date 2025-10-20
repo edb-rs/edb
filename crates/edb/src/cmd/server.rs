@@ -55,7 +55,7 @@ pub async fn start_server(ws_port: u16, cli: &crate::Cli, rpc_url: &str) -> Resu
     info!("Starting EDB WebSocket server on port {}", ws_port);
 
     // Create the engine with configuration
-    let engine_config = cli.to_engine_config();
+    let engine_config = cli.to_engine_config(rpc_url);
     let engine = Engine::new(engine_config);
 
     // Create shared state

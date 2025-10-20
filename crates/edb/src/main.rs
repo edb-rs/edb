@@ -86,10 +86,10 @@ impl Cli {
     }
 
     /// Derive EDB engine configuration from CLI arguments
-    pub fn to_engine_config(&self) -> EngineConfig {
+    pub fn to_engine_config(&self, rpc_url: &str) -> EngineConfig {
         let mut engine_config = EngineConfig::default()
             .with_quick_mode(self.quick)
-            .with_rpc_proxy_url(self.rpc_urls.clone().unwrap_or_default());
+            .with_rpc_proxy_url(rpc_url.to_string());
         if let Some(api_key) = &self.etherscan_api_key {
             engine_config = engine_config.with_etherscan_api_key(api_key.clone());
         }
