@@ -123,7 +123,7 @@ async fn handle_socket(socket: WebSocket, state: ServerState) {
             Ok(req) => req,
             Err(e) => {
                 error!("Failed to parse client request: {}", e);
-                let response = ServerResponse::error(format!("Invalid request: {}", e));
+                let response = ServerResponse::error(format!("Invalid request: {e}"));
                 if let Ok(json) = serde_json::to_string(&response) {
                     let _ = sender.send(Message::Text(json.into())).await;
                 }
@@ -167,7 +167,7 @@ async fn handle_replay_request(tx_hash_str: String, state: &ServerState) -> Serv
     let tx_hash: TxHash = match tx_hash_str.parse() {
         Ok(hash) => hash,
         Err(e) => {
-            return ServerResponse::error(format!("Invalid transaction hash: {}", e));
+            return ServerResponse::error(format!("Invalid transaction hash: {e}"));
         }
     };
 
@@ -191,7 +191,7 @@ async fn handle_replay_request(tx_hash_str: String, state: &ServerState) -> Serv
         Ok(result) => result,
         Err(e) => {
             error!("Failed to fork and prepare: {}", e);
-            return ServerResponse::error(format!("Fork failed: {}", e));
+            return ServerResponse::error(format!("Fork failed: {e}"));
         }
     };
 
@@ -202,7 +202,7 @@ async fn handle_replay_request(tx_hash_str: String, state: &ServerState) -> Serv
         Ok(addr) => addr,
         Err(e) => {
             error!("Failed to prepare engine: {}", e);
-            return ServerResponse::error(format!("Preparation failed: {}", e));
+            return ServerResponse::error(format!("Preparation failed: {e}"));
         }
     };
 

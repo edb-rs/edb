@@ -115,7 +115,7 @@ pub async fn start_tui(options: &TuiOptions, rpc_server_addr: SocketAddr) -> Res
 
     // Spawn TUI as a child process with inherited stdio
     let mut cmd = std::process::Command::new(&tui_binary);
-    cmd.arg("--url").arg(format!("http://{}", rpc_server_addr));
+    cmd.arg("--url").arg(format!("http://{rpc_server_addr}"));
 
     // Only pass --mouse flag if requested and using TUI mode
     if !options.disable_mouse {
