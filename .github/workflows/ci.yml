@@ -175,7 +175,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-svm-
 
-      - name: Run integration tests
+      - name: Run tests
         run: cargo test --workspace --all-features --verbose -- --nocapture
         env:
           EDB_TEST_PROXY_MODE: cache-only
