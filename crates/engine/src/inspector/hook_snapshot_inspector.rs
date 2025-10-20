@@ -54,6 +54,7 @@ use tracing::{debug, error};
 
 use crate::{
     analysis::{dyn_sol_type, AnalysisResult, UserDefinedTypeRef, VariableRef, UVID},
+    inspector::utils::relax_gas_limit_at_callsite,
     USID,
 };
 
@@ -608,6 +609,9 @@ where
     <DB as Database>::Error: Clone,
 {
     fn step(&mut self, interp: &mut Interpreter, ctx: &mut EdbContext<DB>) {
+        // Relax gas limit at call site
+        relax_gas_limit_at_callsite(interp);
+
         // Get current opcode safely
         let opcode = unsafe { OpCode::new_unchecked(interp.bytecode.opcode()) };
         self.last_opcode = Some(opcode);

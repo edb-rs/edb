@@ -36,7 +36,7 @@
 //! 3. Compile the contract with all dependencies
 //! 4. Generate artifact with metadata and compilation output
 
-use std::{env, path::PathBuf};
+use std::{collections::HashSet, env, path::PathBuf, sync::Mutex, thread, time::Duration};
 
 use alloy_primitives::Address;
 use edb_common::{Cache, EdbCache};
@@ -47,6 +47,8 @@ use foundry_compilers::{
     solc::{Solc, SolcLanguage},
 };
 use itertools::Itertools;
+use once_cell::sync::Lazy;
+use semver::Version;
 use tracing::{debug, error, info, trace};
 
 use crate::{etherscan_rate_limit_guard, Artifact};
@@ -112,7 +114,7 @@ impl OnchainCompiler {
 
             // prepare the compiler
             let version = meta.compiler_version()?;
-            let compiler = Solc::find_or_install(&version)?;
+            let compiler = find_or_install_solc(&version)?;
             trace!(addr=?addr, compiler=?compiler, "using compiler");
 
             // compile the source code
@@ -177,6 +179,34 @@ pub fn get_compilation_input_from_metadata(meta: &Metadata, addr: Address) -> Re
     let input = SolcInput::new(SolcLanguage::Solidity, sources, settings);
 
     Ok(input)
+}
+
+/// Global lock map for solc installation (per-version locking for multi-threaded safety).
+static INSTALL_LOCKS: Lazy<Mutex<HashSet<Version>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+/// Find or install the specified solc version (lock when concurrent).
+pub fn find_or_install_solc(version: &Version) -> Result<Solc> {
+    // Acquire global lock to check/insert version lock
+    let mut locks = INSTALL_LOCKS.lock().unwrap();
+
+    // Wait if this version is being installed
+    while locks.contains(version) {
+        drop(locks);
+        thread::sleep(Duration::from_millis(100));
+        locks = INSTALL_LOCKS.lock().unwrap();
+    }
+
+    // Mark this version as being installed
+    locks.insert(version.clone());
+    drop(locks);
+
+    // Do the actual find/install
+    let result = Solc::find_or_install(version);
+
+    // Remove the lock
+    INSTALL_LOCKS.lock().unwrap().remove(version);
+
+    result.map_err(Into::into)
 }
 
 #[cfg(test)]

@@ -48,6 +48,7 @@ pub fn relax_evm_context_constraints<DB: Database + DatabaseRef>(context: &mut E
     let cfg = &mut context.cfg;
     cfg.disable_base_fee = true;
     cfg.disable_block_gas_limit = true;
+    cfg.disable_balance_check = true;
     cfg.tx_gas_limit_cap = Some(u64::MAX);
     cfg.limit_contract_initcode_size = Some(usize::MAX);
     cfg.limit_contract_code_size = Some(usize::MAX);

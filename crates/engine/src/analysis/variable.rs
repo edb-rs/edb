@@ -480,7 +480,10 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{Variable, VariableKind, EDB_RUNTIME_VALUE_OFFSET, UVID};
-    use crate::analysis::analyzer::tests::compile_and_analyze;
+    use crate::{
+        analysis::analyzer::tests::compile_and_analyze,
+        test_utils::compile_contract_source_to_source_unit,
+    };
 
     macro_rules! count_updated_variables {
         ($analysis:expr) => {
@@ -1211,7 +1214,7 @@ mod tests {
 
     #[test]
     fn test_uvid_uniqueness_across_files() {
-        use crate::{analysis::Analyzer, compile_contract_source_to_source_unit};
+        use crate::analysis::Analyzer;
         use semver::Version;
         use std::path::PathBuf;
 

@@ -523,7 +523,7 @@ pub(crate) mod tests {
     use foundry_compilers::artifacts::Source;
     use semver::Version;
 
-    use crate::compile_contract_source_to_source_unit;
+    use crate::test_utils::compile_contract_source_to_source_unit;
 
     use super::*;
 

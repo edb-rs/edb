@@ -1045,8 +1045,9 @@ impl_walk!(OverloadedOperator, |operator, visitor| operator.definition.walk(visi
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::compile_contract_source_to_source_unit;
+
     use super::*;
-    use crate::utils::compile_contract_source_to_source_unit;
     use semver::Version;
 
     /// A test visitor that counts nodes and skips function bodies

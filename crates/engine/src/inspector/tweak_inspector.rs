@@ -29,12 +29,15 @@ use revm::{
     bytecode::OpCode,
     context::{CreateScheme, JournalTr},
     database::CacheDB,
-    interpreter::{CreateInputs, CreateOutcome},
+    interpreter::{CreateInputs, CreateOutcome, Interpreter},
     Database, DatabaseCommit, DatabaseRef, Inspector,
 };
 use tracing::{debug, error, info, warn};
 
-use crate::utils::disasm::{disassemble, extract_push_value};
+use crate::{
+    inspector::utils::relax_gas_limit_at_callsite,
+    utils::disasm::{disassemble, extract_push_value},
+};
 
 static CONSTRUCTOR_ARG_SEARCH_RANGE: usize = 1024;
 /// Inspector that intercepts and modifies contract deployments
@@ -336,6 +339,10 @@ where
     <CacheDB<DB> as Database>::Error: Clone,
     <DB as Database>::Error: Clone,
 {
+    fn step(&mut self, interp: &mut Interpreter, _ctx: &mut EdbContext<DB>) {
+        relax_gas_limit_at_callsite(interp);
+    }
+
     fn create(
         &mut self,
         context: &mut EdbContext<DB>,
@@ -400,9 +407,13 @@ where
                     }
                 }
             } else {
-                info!(
-                    "Target deployment failed for {:?}: {:?}",
-                    self.target_address, outcome.result
+                error!(
+                    "Target deployment failed for {:?}: {:?} ({:?}, Bytes: {}, Address: {:?})",
+                    self.target_address,
+                    outcome.result.result,
+                    outcome.result.gas,
+                    outcome.result.output.len(),
+                    outcome.address
                 );
             }
         }

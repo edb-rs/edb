@@ -676,9 +676,12 @@ mod tests {
     use std::path::PathBuf;
 
     use foundry_compilers::{
-        artifacts::{Severity, Source, Sources},
-        solc::{SolcCompiler, SolcLanguage, SolcSettings, SolcVersionedInput},
-        CompilationError, Compiler, CompilerInput,
+        artifacts::{
+            output_selection::OutputSelection, EvmVersion, Settings, Severity, SolcInput, Source,
+            Sources,
+        },
+        solc::SolcLanguage,
+        CompilationError,
     };
     use semver::Version;
 
@@ -686,7 +689,7 @@ mod tests {
         analysis::analyzer::tests::{
             compile_and_analyze, TEST_CONTRACT_SOURCE_ID, TEST_CONTRACT_SOURCE_PATH,
         },
-        source_string_at_location_unchecked, ASTPruner,
+        find_or_install_solc, source_string_at_location_unchecked, ASTPruner,
     };
 
     use super::*;
@@ -973,11 +976,11 @@ contract TestContract {
             (PathBuf::from(interface_file0), Source::new(source0)),
             (PathBuf::from(TEST_CONTRACT_SOURCE_PATH), Source::new(source1)),
         ]);
-        let settings = SolcSettings::default();
-        let solc_input =
-            SolcVersionedInput::build(sources, settings, SolcLanguage::Solidity, version);
-        let compiler = SolcCompiler::AutoDetect;
-        let output = compiler.compile(&solc_input).unwrap();
+        let mut settings = Settings::new(OutputSelection::complete_output_selection());
+        settings.evm_version = Some(EvmVersion::Paris);
+        let solc_input = SolcInput::new(SolcLanguage::Solidity, sources, settings);
+        let compiler = find_or_install_solc(&version).unwrap();
+        let output = compiler.compile_exact(&solc_input).unwrap();
 
         // return error if compiler error
         let errors = output
