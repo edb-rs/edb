@@ -82,3 +82,4 @@ once_cell.workspace = true
 rand.workspace = true
 indicatif.workspace = true
 itertools.workspace = true
+dashmap.workspace = true

@@ -16,7 +16,9 @@
 
 //! Utility functions for the EDB binary
 
+use clap::{command, Args};
 use eyre::{eyre, Result};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::debug;
@@ -92,4 +94,62 @@ pub fn find_proxy_binary() -> Result<PathBuf> {
 /// Helper function to find the edb-tui binary
 pub fn find_tui_binary() -> Result<PathBuf> {
     find_binary("edb-tui")
+}
+
+/// TUI-specific options
+#[derive(Debug, Args)]
+#[command(next_help_heading = "Terminal UI Options (only apply with --ui=tui)")]
+pub struct TuiOptions {
+    /// Disable mouse support in the terminal UI
+    #[arg(long)]
+    pub disable_mouse: bool,
+}
+
+pub async fn start_tui(options: &TuiOptions, rpc_server_addr: SocketAddr) -> Result<()> {
+    // Launch Terminal UI
+    tracing::info!("Launching Terminal UI...");
+
+    // Find the edb-tui binary
+    let tui_binary = find_tui_binary()?;
+    tracing::debug!("Found TUI binary at: {:?}", tui_binary);
+
+    // Spawn TUI as a child process with inherited stdio
+    let mut cmd = std::process::Command::new(&tui_binary);
+    cmd.arg("--url").arg(format!("http://{}", rpc_server_addr));
+
+    // Only pass --mouse flag if requested and using TUI mode
+    if !options.disable_mouse {
+        cmd.arg("--mouse");
+    }
+
+    let mut child = cmd
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| eyre::eyre!("Failed to spawn TUI: {}", e))?;
+
+    // Wait for TUI to exit
+    let status = child.wait()?;
+    tracing::info!("TUI exited with status: {:?}", status);
+
+    // Return a dummy handle since we're waiting synchronously
+    let ui_handle = tokio::spawn(async {});
+
+    tracing::info!("Both RPC server and UI are running. Press Ctrl+C to exit.");
+
+    // Wait for either:
+    // 1. Ctrl+C signal
+    // 2. UI task completion
+    // 3. Any other termination signal
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Received Ctrl+C, shutting down...");
+        }
+        _ = ui_handle => {
+            tracing::info!("UI task completed, shutting down...");
+        }
+    }
+
+    Ok(())
 }

@@ -299,17 +299,21 @@ pub mod logging {
 
 /// Engine testing utilities
 pub mod engine {
+    use std::net::SocketAddr;
+
     use alloy_primitives::TxHash;
     use edb_common::fork_and_prepare;
-    use edb_engine::{Engine, EngineConfig, RpcServerHandle};
+    use edb_engine::{Engine, EngineConfig};
     use tracing::info;
 
     use super::logging;
 
     /// Test result containing any errors captured during replay
     pub struct ReplayTestResult {
-        /// RPC server handle (if needed for further interaction)
-        pub rpc_handle: RpcServerHandle,
+        /// Analysis Engine
+        pub engine: Engine,
+        /// RPC Server Address
+        pub rpc_handle_addr: SocketAddr,
         /// Captured error messages
         pub errors: Vec<String>,
         /// Whether the replay was successful (no errors)
@@ -349,14 +353,14 @@ pub mod engine {
         info!("Calling engine::prepare with prepared inputs");
 
         // Create the engine and run preparation
-        let mut engine = Engine::new(engine_config);
-        let rpc_handle = engine.prepare(fork_result).await?;
+        let engine = Engine::new(engine_config);
+        let rpc_handle_addr = engine.prepare(fork_result).await?;
 
         info!("Engine preparation completed successfully");
 
         // Return test results
         let errors = error_capture.get_errors();
-        Ok(ReplayTestResult { rpc_handle, success: errors.is_empty(), errors })
+        Ok(ReplayTestResult { engine, rpc_handle_addr, success: errors.is_empty(), errors })
     }
 
     /// Run a replay test and assert no errors occurred

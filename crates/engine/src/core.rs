@@ -47,10 +47,12 @@
 //! - **Comprehensive inspection**: Opcode and source-level snapshot collection
 
 use alloy_primitives::TxHash;
+use dashmap::DashMap;
 use edb_common::ForkResult;
 use eyre::Result;
 use revm::{context::Host, database::CacheDB, Database, DatabaseCommit, DatabaseRef};
-use std::{collections::HashMap, net::SocketAddr};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::Mutex;
 use tracing::info;
 
 use crate::{
@@ -110,10 +112,18 @@ impl EngineConfig {
 }
 
 /// The main Engine struct that performs transaction analysis
+///
+/// This struct is thread-safe and can be shared across multiple threads.
+/// It uses per-transaction locking to ensure that only one thread can analyze
+/// a given transaction at a time, while allowing concurrent analysis of different transactions.
 #[derive(Debug)]
 pub struct Engine {
-    /// Map of transaction hashes to their RPC server handles
-    pub server_handles: HashMap<TxHash, SocketAddr>,
+    /// Concurrent map of transaction hashes to their RPC server handles
+    server_handles: Arc<DashMap<TxHash, RpcServerHandle>>,
+
+    /// Per-transaction locks to prevent duplicate analysis of the same transaction
+    /// Each transaction hash gets its own lock, allowing parallel analysis of different transactions
+    in_flight: Arc<DashMap<TxHash, Arc<Mutex<()>>>>,
 
     /// Configuration for the engine
     config: EngineConfig,
@@ -128,7 +138,29 @@ impl Default for Engine {
 impl Engine {
     /// Create a new Engine instance from configuration
     pub fn new(config: EngineConfig) -> Self {
-        Self { server_handles: HashMap::new(), config }
+        Self {
+            server_handles: Arc::new(DashMap::new()),
+            in_flight: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
+    /// Get the RPC server address for a given transaction hash, if it exists
+    pub fn get_rpc_server_addr(&self, tx_hash: &TxHash) -> Option<SocketAddr> {
+        self.server_handles.get(tx_hash).map(|handle| handle.addr())
+    }
+
+    /// Shut down the RPC server for a given transaction hash, if it exists
+    /// Returns true if the server was found and shut down, false otherwise
+    pub fn shutdown_rpc_server(&self, tx_hash: &TxHash) -> Result<bool> {
+        if let Some((_, handle)) = self.server_handles.remove(tx_hash) {
+            handle.shutdown()?;
+            info!("Shut down RPC server for transaction: {:?}", tx_hash);
+            Ok(true)
+        } else {
+            info!("No RPC server found for transaction: {:?}", tx_hash);
+            Ok(false)
+        }
     }
 
     /// Main preparation method for the engine
@@ -142,13 +174,39 @@ impl Engine {
     /// 5. Collect opcode-level step execution results
     /// 6. Re-executes the transaction with state snapshots
     /// 7. Starts a JSON-RPC server with the analysis results and snapshots
-    pub async fn prepare<DB>(&mut self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
+    ///
+    /// # Thread Safety
+    ///
+    /// This method is thread-safe and can be called concurrently from multiple threads.
+    /// Per-transaction locking ensures that only one thread can analyze a given transaction
+    /// at a time. If a transaction is already being analyzed by another thread, subsequent
+    /// calls will wait for the analysis to complete and then return the cached result.
+    pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<SocketAddr>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
         <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
         <DB as Database>::Error: Clone + Send + Sync,
     {
-        info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
+        let tx_hash = fork_result.target_tx_hash;
+
+        // Get or create per-transaction lock
+        let lock =
+            self.in_flight.entry(tx_hash).or_insert_with(|| Arc::new(Mutex::new(()))).clone();
+
+        // Acquire lock - blocks if another thread is processing this transaction
+        let _guard = lock.lock().await;
+
+        // Check if this transaction has already been analyzed
+        if let Some(existing_handle) = self.server_handles.get(&tx_hash) {
+            info!(
+                "Transaction {:?} already analyzed, returning existing RPC server at {}",
+                tx_hash,
+                existing_handle.addr()
+            );
+            return Ok(existing_handle.addr());
+        }
+
+        info!("Starting engine preparation for transaction: {:?}", tx_hash);
 
         // Step 0: Initialize context and database
         let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, fork_info } =
@@ -227,8 +285,9 @@ impl Engine {
         info!("Debug RPC server started on {}", rpc_handle.addr());
 
         // Store the server handle for future reference
-        self.server_handles.insert(tx_hash, rpc_handle.addr());
+        let addr = rpc_handle.addr();
+        self.server_handles.insert(tx_hash, rpc_handle);
 
-        Ok(rpc_handle)
+        Ok(addr)
     }
 }

@@ -21,12 +21,16 @@
 use std::env;
 
 use alloy_primitives::TxHash;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
+use edb_engine::EngineConfig;
 use eyre::Result;
+
+use crate::utils::TuiOptions;
 
 mod cmd;
 mod proxy;
 mod utils;
+mod ws_protocol;
 
 /// Command-line interface for EDB
 #[derive(Debug, Parser)]
@@ -41,10 +45,6 @@ pub struct Cli {
     /// Example: --rpc-urls "https://eth.llamarpc.com,https://rpc.ankr.com/eth"
     #[arg(long)]
     rpc_urls: Option<String>,
-
-    /// User interface to use
-    #[arg(long, value_enum, default_value = "tui")]
-    pub ui: UiMode,
 
     /// Port for the RPC proxy server
     #[arg(long, default_value = "8546")]
@@ -79,27 +79,22 @@ impl Cli {
     /// Validate CLI arguments and warn about misused options
     pub fn validate(&self) {
         // Warn if TUI options are used with non-TUI mode
-        if !matches!(self.ui, UiMode::Tui) && self.tui_options.disable_mouse {
-            tracing::warn!("--disable-mouse flag has no effect when not using TUI mode");
-            eprintln!("Warning: --disable-mouse flag has no effect when not using TUI mode");
+        if self.command.enables_tui() && self.tui_options.disable_mouse {
+            tracing::warn!("--disable-mouse flag has no effect when not using TUI");
+            eprintln!("Warning: --disable-mouse flag has no effect when not using TUI");
         }
     }
-}
 
-/// TUI-specific options
-#[derive(Debug, Args)]
-#[command(next_help_heading = "Terminal UI Options (only apply with --ui=tui)")]
-pub struct TuiOptions {
-    /// Disable mouse support in the terminal UI
-    #[arg(long)]
-    pub disable_mouse: bool,
-}
-
-/// Available UI modes
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum UiMode {
-    /// Terminal User Interface
-    Tui,
+    /// Derive EDB engine configuration from CLI arguments
+    pub fn to_engine_config(&self) -> EngineConfig {
+        let mut engine_config = EngineConfig::default()
+            .with_quick_mode(self.quick)
+            .with_rpc_proxy_url(self.rpc_urls.clone().unwrap_or_default());
+        if let Some(api_key) = &self.etherscan_api_key {
+            engine_config = engine_config.with_etherscan_api_key(api_key.clone());
+        }
+        engine_config
+    }
 }
 
 /// Available commands
@@ -118,8 +113,21 @@ pub enum Commands {
         /// Block number to fork at (default: latest)
         block: Option<u64>,
     },
+    /// Start WebSocket server for remote debugging sessions
+    Server {
+        /// Port for the WebSocket server
+        #[arg(long, default_value = "9001")]
+        ws_port: u16,
+    },
     /// Show RPC proxy provider status
     ProxyStatus,
+}
+
+impl Commands {
+    /// Whether the command enables a TUI
+    pub fn enables_tui(&self) -> bool {
+        matches!(self, Self::Replay { .. } | Self::Test { .. })
+    }
 }
 
 #[tokio::main]
@@ -150,80 +158,21 @@ async fn main() -> Result<()> {
 
     tracing::info!("Using RPC endpoint: {}", effective_rpc_url);
 
-    // Handle proxy status command separately (doesn't need engine)
-    if let Commands::ProxyStatus = &cli.command {
-        return cmd::show_proxy_status(&cli).await;
-    }
-
     // Execute the command to get RPC server handle
-    let rpc_server_handle = match &cli.command {
+    match &cli.command {
         Commands::Replay { tx_hash } => {
             tracing::info!("Replaying transaction: {}", tx_hash);
             let tx_hash: TxHash = tx_hash.parse()?;
-            cmd::replay_transaction(tx_hash, &cli, &effective_rpc_url).await?
+            cmd::replay_transaction(tx_hash, &cli, &effective_rpc_url).await
         }
         Commands::Test { test_name, block } => {
             tracing::info!("Debugging test: {}", test_name);
-            cmd::debug_foundry_test(test_name, *block, &cli, &effective_rpc_url).await?
+            cmd::debug_foundry_test(test_name, *block, &cli, &effective_rpc_url).await
         }
-        Commands::ProxyStatus => unreachable!(), // Handled above
-    };
-
-    println!("Engine preparation complete. RPC server is running on {}", rpc_server_handle.addr);
-
-    // Launch Terminal UI
-    tracing::info!("Launching Terminal UI...");
-
-    // Find the edb-tui binary
-    let tui_binary = utils::find_tui_binary()?;
-    tracing::debug!("Found TUI binary at: {:?}", tui_binary);
-
-    // Spawn TUI as a child process with inherited stdio
-    let mut cmd = std::process::Command::new(&tui_binary);
-    cmd.arg("--url").arg(format!("http://{}", rpc_server_handle.addr));
-
-    // Only pass --mouse flag if requested and using TUI mode
-    if matches!(cli.ui, UiMode::Tui) && !cli.tui_options.disable_mouse {
-        cmd.arg("--mouse");
-    }
-
-    let mut child = cmd
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .map_err(|e| eyre::eyre!("Failed to spawn TUI: {}", e))?;
-
-    // Wait for TUI to exit
-    let status = child.wait()?;
-    tracing::info!("TUI exited with status: {:?}", status);
-
-    // Return a dummy handle since we're waiting synchronously
-    let ui_handle = tokio::spawn(async {});
-
-    tracing::info!("Both RPC server and UI are running. Press Ctrl+C to exit.");
-
-    // Wait for either:
-    // 1. Ctrl+C signal
-    // 2. UI task completion
-    // 3. Any other termination signal
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("Received Ctrl+C, shutting down...");
+        Commands::Server { ws_port } => {
+            tracing::info!("Starting WebSocket server on port {}", ws_port);
+            cmd::start_server(*ws_port, &cli, &effective_rpc_url).await
         }
-        _ = ui_handle => {
-            tracing::info!("UI task completed, shutting down...");
-        }
+        Commands::ProxyStatus => cmd::show_proxy_status(&cli).await,
     }
-
-    tracing::info!("Shutting down EDB...");
-
-    // Gracefully shutdown the RPC server
-    if let Err(e) = rpc_server_handle.shutdown() {
-        tracing::error!("Failed to shutdown RPC server: {}", e);
-    } else {
-        tracing::info!("RPC server shut down successfully");
-    }
-
-    Ok(())
 }
