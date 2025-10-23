@@ -13,7 +13,8 @@
   <a href="#installation">Installation</a> •
   <a href="#quickstart">Quickstart</a> •
   <a href="#why-edb">Why EDB?</a> •
-  <a href="#sponsors">Sponsors</a>
+  <a href="#sponsors">Sponsors</a> •
+  <a href="https://t.me/edb_feedback">TG Q&A</a>
 </p>
 
 EDB bridges the gap between high-level Solidity code and low-level EVM execution, providing four essential debugging features that have been missing from the Ethereum ecosystem:
@@ -105,6 +106,12 @@ By inserting strategic debugging hooks during compilation, EDB creates contracts
 - **Expression evaluation** - Evaluate arbitrary Solidity expressions against the current execution state
 - **Time-travel capabilities** - Navigate backward and forward through execution history
 - **Breakpoints & watchpoints** - Set conditional and unconditional breakpoints, and watchpoints on expressions
+
+## Community
+
+Join our Telegram Q&A group to ask questions, share insights, and connect with other EDB developers:
+
+👉 [Join the EDB Q&A Group on Telegram](https://t.me/edb_feedback)
 
 ## Sponsors
 
