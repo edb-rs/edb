@@ -589,7 +589,7 @@ impl CodePanel {
                 "Vim-like Navigation • Enter: Select • F: Close".to_string()
             } else {
                 let mut help = String::from("Vim-like Navigation");
-                help.push_str(" • s/S/n/N/c/C: Execution");
+                help.push_str(" • s/S/n/N/c/C/r/R: Execution");
                 if self.display_info.mode == CodeMode::Source {
                     help.push_str(" • F: Files");
                 }
@@ -1286,6 +1286,16 @@ impl PanelTr for CodePanel {
                 KeyCode::Char('C') => {
                     debug!("Previous call navigation requested");
                     dm.execution.prev_call()?;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('r') => {
+                    debug!("Run forward requested");
+                    dm.execution.goto(usize::MAX, true)?;
+                    Ok(EventResponse::Handled)
+                }
+                KeyCode::Char('R') => {
+                    debug!("Run backward requested");
+                    dm.execution.goto(0, true)?;
                     Ok(EventResponse::Handled)
                 }
                 _ => Ok(EventResponse::NotHandled),

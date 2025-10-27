@@ -98,7 +98,7 @@ enum PendingCommand {
     /// Step backward without going into callees
     StepBackwardNoCallees(usize),
     /// Goto to a specific snapshot
-    Goto(usize),
+    Goto(usize, Option<&'static str>),
     /// Fetch callable ABI for address
     CallableAbi(usize, Option<Address>),
     /// Show stack (top N items)
@@ -149,7 +149,7 @@ impl PendingCommand {
                     dm.execution.get_snapshot_info(id)?;
                     dm.execution.get_code(id)?;
                 }
-                PendingCommand::Goto(id) => {
+                PendingCommand::Goto(id, _) => {
                     dm.execution.get_snapshot_info(*id)?;
                     dm.execution.get_code(*id)?;
                 }
@@ -223,7 +223,10 @@ impl PendingCommand {
                     .prev_id;
                 Ok(format!("Stepped to Step {prev_id} without going into callees"))
             }
-            Self::Goto(id) => Ok(format!("Goto Step {id}")),
+            Self::Goto(id, msg) => match msg {
+                Some(m) => Ok(m.to_string()),
+                None => Ok(format!("Goto Step {id}")),
+            },
             Self::CallableAbi(id, address) => {
                 let address = if let Some(addr) = address {
                     *addr
@@ -696,6 +699,23 @@ impl TerminalPanel {
                 self.spinner.start_loading("Stepping to previous function call...");
                 dm.execution.prev_call()?;
             }
+            "run" | "r" => {
+                self.pending_command = Some(PendingCommand::Goto(
+                    usize::MAX,
+                    Some("Running until next breakpoint or end..."),
+                ));
+                self.spinner.start_loading("Running until next breakpoint or end...");
+                dm.execution.goto(usize::MAX, true)?;
+            }
+            "runback" | "rb" => {
+                self.pending_command = Some(PendingCommand::Goto(
+                    0,
+                    Some("Running backward until previous breakpoint or start..."),
+                ));
+                self.spinner
+                    .start_loading("Running backward until previous breakpoint or start...");
+                dm.execution.goto(0, true)?;
+            }
             "abi" => {
                 let id = dm.execution.get_current_snapshot();
                 let address = if parts.len() > 1 {
@@ -716,7 +736,7 @@ impl TerminalPanel {
                 let mut id =
                     if parts.len() > 1 { parts[1].parse::<usize>().unwrap_or(1) } else { 0 };
                 id = dm.execution.get_sanitized_id(id);
-                self.pending_command = Some(PendingCommand::Goto(id));
+                self.pending_command = Some(PendingCommand::Goto(id, None));
                 self.spinner.start_loading(&format!("Going to snapshot {id}..."));
                 dm.execution.goto(id, false)?; // we do not stop at breakpoints
             }
@@ -1079,6 +1099,8 @@ impl TerminalPanel {
         self.add_output("  reverse, rs <count> - Reverse step multiple snapshots");
         self.add_output("  call, c             - Step to next function call");
         self.add_output("  rcall, rc           - Step back from function call");
+        self.add_output("  run, r              - Run until next breakpoint or end");
+        self.add_output("  runback, rb         - Run backward until previous breakpoint or start");
         self.add_output("");
         self.add_output("🔍 Inspection:");
         self.add_output("  address                 - Show current address");
