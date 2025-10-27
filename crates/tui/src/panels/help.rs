@@ -257,6 +257,11 @@ impl HelpOverlay {
                         layout_specific: None,
                     },
                     HelpItem {
+                        keys: "r/R",
+                        description: "Run forward/backward until next breakpoint",
+                        layout_specific: None,
+                    },
+                    HelpItem {
                         keys: "Space",
                         description: "Switch to Trace panel",
                         layout_specific: Some(LayoutType::Full),
