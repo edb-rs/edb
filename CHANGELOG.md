@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Support for calldata variables ([#33](https://github.com/edb-rs/edb/pull/33))
+- Add new `r` and `R` commands in code panel (`run`/`runback` in terminal panels) to run forward/backward until the next breakpoint
 
 ### Fixed
 
