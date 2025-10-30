@@ -31,7 +31,7 @@ use edb_engine::Engine;
 use eyre::Result;
 use futures::{SinkExt, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tracing::{error, info, warn};
 
 use crate::ws_protocol::{ClientRequest, ServerResponse};
@@ -44,10 +44,8 @@ struct ServerState {
     engine: Arc<Engine>,
     /// Track number of active connections per tx_hash
     active_connections: Arc<Mutex<HashMap<TxHash, usize>>>,
-    /// RPC proxy URL for forking
-    rpc_url: String,
-    /// Quick mode flag
-    quick: bool,
+    /// Channel to send work to the LocalSet worker
+    worker_tx: mpsc::UnboundedSender<WorkerMessage>,
 }
 
 /// Start the WebSocket server
@@ -57,13 +55,16 @@ pub async fn start_server(ws_port: u16, cli: &crate::Cli, rpc_url: &str) -> Resu
     // Create the engine with configuration
     let engine_config = cli.to_engine_config(rpc_url);
     let engine = Engine::new(engine_config);
+    let engine = Arc::new(engine);
+
+    // Spawn the worker thread for handling requests
+    let worker_tx = spawn_worker(Arc::clone(&engine), rpc_url.to_string(), cli.quick);
 
     // Create shared state
     let state = ServerState {
-        engine: Arc::new(engine),
+        engine: Arc::clone(&engine),
         active_connections: Arc::new(Mutex::new(HashMap::new())),
-        rpc_url: rpc_url.to_string(),
-        quick: cli.quick,
+        worker_tx,
     };
 
     // Create the Axum router
@@ -76,12 +77,8 @@ pub async fn start_server(ws_port: u16, cli: &crate::Cli, rpc_url: &str) -> Resu
 
     info!("WebSocket server listening on {}", actual_addr);
 
-    // Run the server with LocalSet to support !Send futures from fork_and_prepare
-    // While Engine is now Send + Sync, fork_and_prepare still uses REVM's LocalContext
-    // Trade-off: Server handles one request at a time per connection, but Engine can
-    // still process different transactions concurrently via its internal locking
-    let local = tokio::task::LocalSet::new();
-    local.run_until(async move { axum::serve(listener, app).await.expect("Server failed") }).await;
+    // Run the server normally - the worker thread handles !Send operations
+    axum::serve(listener, app).await.expect("Server failed");
 
     Ok(())
 }
@@ -89,8 +86,7 @@ pub async fn start_server(ws_port: u16, cli: &crate::Cli, rpc_url: &str) -> Resu
 /// WebSocket upgrade handler
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) -> Response {
     ws.on_upgrade(|socket| async move {
-        // Spawn on LocalSet to handle !Send futures
-        tokio::task::spawn_local(handle_socket(socket, state)).await.ok();
+        let _ = handle_socket(socket, state).await;
     })
 }
 
@@ -132,10 +128,8 @@ async fn handle_socket(socket: WebSocket, state: ServerState) {
         };
 
         // Handle the request
-        // We don't need tokio::spawn here because:
-        // 1. Engine already handles per-tx-hash locking internally
-        // 2. fork_and_prepare contains !Send types (REVM's LocalContext)
-        // 3. Each WebSocket connection is already on its own async task
+        // Replay requests are delegated to the worker thread (handles !Send types)
+        // Other requests can be handled directly
         let response = match request {
             ClientRequest::Replay { tx_hash } => handle_replay_request(tx_hash, &state).await,
             ClientRequest::Test { test_name, block } => {
@@ -185,29 +179,29 @@ async fn handle_replay_request(tx_hash_str: String, state: &ServerState) -> Serv
         return ServerResponse::success(addr.port(), tx_hash_str, true);
     }
 
-    // Fork and prepare, then run engine.prepare
-    info!("Forking and preparing for tx: {:?}", tx_hash);
-    let fork_result = match fork_and_prepare(&state.rpc_url, tx_hash, state.quick).await {
-        Ok(result) => result,
-        Err(e) => {
-            error!("Failed to fork and prepare: {}", e);
-            return ServerResponse::error(format!("Fork failed: {e}"));
-        }
-    };
+    // Delegate to the worker thread for handling !Send operations
+    info!("Delegating to worker thread for tx: {:?}", tx_hash);
+    let (response_tx, response_rx) = oneshot::channel();
 
-    // Run engine.prepare - engine handles internal locking
-    // Multiple concurrent requests for the same tx will be deduplicated by Engine
-    info!("Running engine.prepare for tx: {:?}", tx_hash);
-    let addr = match state.engine.prepare(fork_result).await {
-        Ok(addr) => addr,
-        Err(e) => {
-            error!("Failed to prepare engine: {}", e);
+    if let Err(e) = state.worker_tx.send(WorkerMessage::Replay { tx_hash, response_tx }) {
+        error!("Failed to send message to worker: {}", e);
+        return ServerResponse::error("Internal error: worker unavailable".to_string());
+    }
+
+    // Wait for the worker to complete the preparation
+    let port = match response_rx.await {
+        Ok(Ok(port)) => port,
+        Ok(Err(e)) => {
+            error!("Worker failed to process request: {}", e);
             return ServerResponse::error(format!("Preparation failed: {e}"));
         }
+        Err(e) => {
+            error!("Worker channel closed: {}", e);
+            return ServerResponse::error(format!("Internal error: {e}"));
+        }
     };
 
-    let port = addr.port();
-    info!("RPC server started on port {} for tx: {:?}", port, tx_hash);
+    info!("Worker completed preparation, RPC server on port {} for tx: {:?}", port, tx_hash);
 
     // Initialize connection count to 1
     {
@@ -271,4 +265,90 @@ async fn track_connection(
             info!("RPC server shutdown successfully for tx: {:?}", tx_hash);
         }
     }
+}
+
+pub enum WorkerMessage {
+    Replay { tx_hash: TxHash, response_tx: oneshot::Sender<Result<u16>> },
+}
+
+/// Spawn the worker thread that handles requests
+///
+/// Returns a channel sender that can be used to send work to the worker
+pub fn spawn_worker(
+    engine: Arc<Engine>,
+    rpc_url: String,
+    quick: bool,
+) -> mpsc::UnboundedSender<WorkerMessage> {
+    let (worker_tx, worker_rx) = mpsc::unbounded_channel();
+
+    std::thread::spawn(move || {
+        // Create a multi-threaded runtime for this worker thread
+        // This is necessary because:
+        // 1. WrapDatabaseAsync (used in fork_and_prepare) requires a multi-threaded runtime
+        // 2. It calls block_in_place which needs ≥2 worker threads
+        //
+        // We use LocalSet to ensure !Send types stay on one thread:
+        // - The LocalSet task itself runs on one worker thread
+        // - When block_in_place is called (by WrapDatabaseAsync), it moves the
+        //   blocking database operation to another worker thread
+        // - The LocalSet task waits for the result but never moves threads
+        // - This satisfies both: block_in_place works AND !Send types (LocalContext) don't move
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to create worker runtime");
+
+        rt.block_on(async move {
+            worker_task(worker_rx, engine, rpc_url, quick).await;
+        });
+    });
+
+    worker_tx
+}
+
+/// Worker task that processes messages within a LocalSet
+/// The LocalSet ensures !Send types stay on one thread, while the multi-threaded
+/// runtime allows block_in_place to work by moving blocking ops to other threads
+async fn worker_task(
+    mut worker_rx: mpsc::UnboundedReceiver<WorkerMessage>,
+    engine: Arc<Engine>,
+    rpc_url: String,
+    quick: bool,
+) {
+    info!("Worker task started in LocalSet");
+
+    while let Some(msg) = worker_rx.recv().await {
+        match msg {
+            WorkerMessage::Replay { tx_hash, response_tx } => {
+                info!("Worker processing replay for tx: {:?}", tx_hash);
+
+                // Fork and prepare - this contains !Send types
+                let fork_result = match fork_and_prepare(&rpc_url, tx_hash, quick).await {
+                    Ok(result) => result,
+                    Err(e) => {
+                        error!("Failed to fork and prepare: {}", e);
+                        let _ = response_tx.send(Err(e));
+                        continue;
+                    }
+                };
+
+                // Run engine.prepare - this also uses !Send types
+                let result = match engine.prepare(fork_result).await {
+                    Ok(addr) => {
+                        info!("RPC server started on port {} for tx: {:?}", addr.port(), tx_hash);
+                        Ok(addr.port())
+                    }
+                    Err(e) => {
+                        error!("Failed to prepare engine: {}", e);
+                        Err(e)
+                    }
+                };
+
+                // Send the result back
+                let _ = response_tx.send(result);
+            }
+        }
+    }
+
+    info!("Worker task shutting down");
 }

@@ -171,8 +171,21 @@ pub async fn fork_and_prepare(
 
     // Create revm database: we start with AlloyDB.
     let alloy_db = AlloyDB::new(provider, (target_block_number - 1).into());
-    let state_db =
-        WrapDatabaseAsync::new(alloy_db).ok_or(eyre::eyre!("Failed to create AlloyDB"))?;
+
+    // Try to use the current runtime handle for WrapDatabaseAsync
+    // If we're in a LocalSet or CurrentThread runtime, this will return None
+    // In that case, we cannot use WrapDatabaseAsync and must fail gracefully
+    let state_db = match WrapDatabaseAsync::new(alloy_db) {
+        Some(db) => db,
+        None => {
+            return Err(eyre::eyre!(
+                "Cannot create WrapDatabaseAsync: current runtime context doesn't support it. \
+                 This can happen if running inside a LocalSet or single-threaded runtime. \
+                 fork_and_prepare must be called from a multi-threaded Tokio runtime context."
+            ));
+        }
+    };
+
     let debug_db = EdbDB::new(CacheDB::new(Arc::new(state_db)));
     let cache_db: CacheDB<_> = CacheDB::new(debug_db);
 
