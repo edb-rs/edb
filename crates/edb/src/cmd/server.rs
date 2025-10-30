@@ -44,7 +44,7 @@ struct ServerState {
     engine: Arc<Engine>,
     /// Track number of active connections per tx_hash
     active_connections: Arc<Mutex<HashMap<TxHash, usize>>>,
-    /// Channel to send work to the LocalSet worker
+    /// Channel to send work to the worker thread
     worker_tx: mpsc::UnboundedSender<WorkerMessage>,
 }
 
@@ -283,16 +283,6 @@ pub fn spawn_worker(
 
     std::thread::spawn(move || {
         // Create a multi-threaded runtime for this worker thread
-        // This is necessary because:
-        // 1. WrapDatabaseAsync (used in fork_and_prepare) requires a multi-threaded runtime
-        // 2. It calls block_in_place which needs ≥2 worker threads
-        //
-        // We use LocalSet to ensure !Send types stay on one thread:
-        // - The LocalSet task itself runs on one worker thread
-        // - When block_in_place is called (by WrapDatabaseAsync), it moves the
-        //   blocking database operation to another worker thread
-        // - The LocalSet task waits for the result but never moves threads
-        // - This satisfies both: block_in_place works AND !Send types (LocalContext) don't move
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -306,16 +296,14 @@ pub fn spawn_worker(
     worker_tx
 }
 
-/// Worker task that processes messages within a LocalSet
-/// The LocalSet ensures !Send types stay on one thread, while the multi-threaded
-/// runtime allows block_in_place to work by moving blocking ops to other threads
+/// Worker task that processes messages
 async fn worker_task(
     mut worker_rx: mpsc::UnboundedReceiver<WorkerMessage>,
     engine: Arc<Engine>,
     rpc_url: String,
     quick: bool,
 ) {
-    info!("Worker task started in LocalSet");
+    info!("Worker task started");
 
     while let Some(msg) = worker_rx.recv().await {
         match msg {
