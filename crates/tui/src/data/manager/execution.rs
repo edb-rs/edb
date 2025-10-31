@@ -614,7 +614,7 @@ impl ExecutionManager {
             return Ok(());
         }
 
-        let goto_id = id.max(0).min(self.state.snapshot_count - 1);
+        let goto_id = self.get_sanitized_id(id);
         let _ = self
             .goto_snapshot(goto_id, stop_on_breakpoint)
             .and_then(|to_id| self.display_snapshot(to_id));
@@ -628,8 +628,7 @@ impl ExecutionManager {
             return Ok(());
         }
 
-        let next_id =
-            self.current_snapshot.saturating_add(count).min(self.state.snapshot_count - 1);
+        let next_id = self.get_sanitized_id(self.current_snapshot.saturating_add(count));
         self.goto(next_id, true)
     }
 
@@ -949,10 +948,17 @@ impl ExecutionManager {
     fn find_breakpoint_hit_in_range(&mut self, from: usize, to: usize) -> usize {
         let _ = self.pull_from_core();
 
-        if to <= from + 1 {
-            // No intermediate snapshots to check
+        if to == from {
             return to;
         }
+
+        let (lb, ub, forward) = if from < to {
+            (from.saturating_add(1), to, true)
+        } else {
+            (to, from.saturating_sub(1), false)
+        };
+        let lb = self.get_sanitized_id(lb);
+        let ub = self.get_sanitized_id(ub);
 
         let enabled_bps = self
             .breakpoints
@@ -962,16 +968,23 @@ impl ExecutionManager {
             .map(|(idx, _)| idx)
             .collect::<Vec<usize>>();
 
-        enabled_bps
-            .into_iter()
-            .filter_map(|idx| {
-                let (bp, _) = self.breakpoints[idx].clone();
-                self.get_breakpoint_hits(&bp).and_then(|hits| {
-                    hits.iter().filter(|&&hit_id| hit_id > from && hit_id <= to).min().cloned()
-                })
+        let inscope_bps = enabled_bps.into_iter().filter_map(|idx| {
+            let (bp, _) = self.breakpoints[idx].clone();
+            self.get_breakpoint_hits(&bp).and_then(|hits| {
+                let inscope_hits = hits.iter().filter(|&&hit_id| hit_id >= lb && hit_id <= ub);
+                if forward {
+                    inscope_hits.min().cloned()
+                } else {
+                    inscope_hits.max().cloned()
+                }
             })
-            .min()
-            .unwrap_or(to)
+        });
+
+        if forward {
+            inscope_bps.min().unwrap_or(to)
+        } else {
+            inscope_bps.max().unwrap_or(to)
+        }
     }
 }
 
