@@ -42,7 +42,7 @@ pub async fn replay_transaction(tx_hash: TxHash, cli: &crate::Cli, rpc_url: &str
     // Step 3: Call engine::prepare with forked database and EVM config
     tracing::info!("Calling engine::prepare with prepared inputs");
     let engine = Engine::new(engine_config);
-    let rpc_server_addr = engine.prepare(fork_result).await?;
+    let rpc_server_addr = engine.prepare(fork_result, None).await?;
 
     // Step 4: Launch TUI and wait for user to exit
     utils::start_tui(&cli.tui_options, rpc_server_addr).await?;

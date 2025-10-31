@@ -354,7 +354,7 @@ pub mod engine {
 
         // Create the engine and run preparation
         let engine = Engine::new(engine_config);
-        let rpc_handle_addr = engine.prepare(fork_result).await?;
+        let rpc_handle_addr = engine.prepare(fork_result, None).await?;
 
         info!("Engine preparation completed successfully");
 

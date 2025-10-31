@@ -46,6 +46,9 @@ pub enum ClientRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum ServerResponse {
+    Progress {
+        message: String,
+    },
     /// Successful response with RPC server information
     Success {
         /// Port of the RPC debug server

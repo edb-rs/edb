@@ -52,7 +52,7 @@ use edb_common::ForkResult;
 use eyre::Result;
 use revm::{context::Host, database::CacheDB, Database, DatabaseCommit, DatabaseRef};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tracing::info;
 
 use crate::{
@@ -181,12 +181,23 @@ impl Engine {
     /// Per-transaction locking ensures that only one thread can analyze a given transaction
     /// at a time. If a transaction is already being analyzed by another thread, subsequent
     /// calls will wait for the analysis to complete and then return the cached result.
-    pub async fn prepare<DB>(&self, fork_result: ForkResult<DB>) -> Result<SocketAddr>
+    pub async fn prepare<DB>(
+        &self,
+        fork_result: ForkResult<DB>,
+        progress_tx: Option<mpsc::UnboundedSender<String>>,
+    ) -> Result<SocketAddr>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
         <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
         <DB as Database>::Error: Clone + Send + Sync,
     {
+        // a utility macro to send progress message to the progress channel, if it exists
+        macro_rules! send_progress {
+            ($($message:tt)*) => {
+                progress_tx.as_ref().map(|tx| tx.send(format!($($message)*)).ok());
+            };
+        }
+
         let tx_hash = fork_result.target_tx_hash;
 
         // Get or create per-transaction lock
@@ -203,6 +214,7 @@ impl Engine {
                 tx_hash,
                 existing_handle.addr()
             );
+            send_progress!("Transaction {:?} already analyzed", tx_hash);
             return Ok(existing_handle.addr());
         }
 
@@ -213,9 +225,13 @@ impl Engine {
             fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
+        send_progress!(
+            "Replaying the target transaction to collect call trace and touched contracts..."
+        );
         let replay_result = orchestration::replay_and_collect_trace(ctx.clone(), tx.clone())?;
 
         // Step 2: Download verified source code for each contract
+        send_progress!("Downloading verified source code for each contract...");
         let artifacts = orchestration::download_verified_source_code(
             &self.config,
             &replay_result,
@@ -224,13 +240,16 @@ impl Engine {
         .await?;
 
         // Step 3: Analyze source code to identify instrumentation points
+        send_progress!("Analyzing source code to identify instrumentation points...");
         let analysis_results = orchestration::analyze_source_code(&artifacts)?;
 
         // Step 4: Instrument source code
+        send_progress!("Instrumenting source code...");
         let recompiled_artifacts =
             orchestration::instrument_and_recompile_source_code(&artifacts, &analysis_results)?;
 
         // Step 5: Collect opcode-level step execution results
+        send_progress!("Collecting opcode-level step execution results...");
         let opcode_snapshots = orchestration::capture_opcode_level_snapshots(
             ctx.clone(),
             tx.clone(),
@@ -239,6 +258,7 @@ impl Engine {
         )?;
 
         // Step 6: Replace original bytecode with instrumented versions
+        send_progress!("Replacing original bytecode with instrumented versions...");
         let contracts_in_tx = orchestration::tweak_bytecode(
             &self.config,
             &mut ctx,
@@ -249,6 +269,7 @@ impl Engine {
         .await?;
 
         // Step 7: Re-execute the transaction with snapshot collection
+        send_progress!("Collecting creation hooks for contracts in transaction...");
         let hook_creation = orchestration::collect_creation_hooks(
             &artifacts,
             &recompiled_artifacts,
@@ -263,11 +284,13 @@ impl Engine {
         )?;
 
         // Step 8: Start RPC server with analysis results and snapshots
+        send_progress!("Collecting opcode-level and hook-level snapshots...");
         let mut snapshots =
             orchestration::get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         snapshots.analyze(&replay_result.execution_trace, &analysis_results)?;
 
         // Let's pack the debug context
+        send_progress!("Packing debug context...");
         let context = EngineContext::build(
             fork_info,
             ctx.cfg.clone(),
