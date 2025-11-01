@@ -152,7 +152,7 @@ pub async fn get_or_create_fixture(name: &str) -> Result<EngineFixture> {
         panic!("Engine creation failed for {}: {:?}", name, result.errors);
     }
 
-    let rpc_url = format!("http://127.0.0.1:{}", result.rpc_handle.port());
+    let rpc_url = format!("http://{}", result.rpc_handle_addr);
     info!("Engine RPC server started at: {}", rpc_url);
 
     let fixture = EngineFixture {

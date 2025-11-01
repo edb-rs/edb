@@ -47,10 +47,12 @@
 //! - **Comprehensive inspection**: Opcode and source-level snapshot collection
 
 use alloy_primitives::TxHash;
+use dashmap::DashMap;
 use edb_common::ForkResult;
 use eyre::Result;
 use revm::{context::Host, database::CacheDB, Database, DatabaseCommit, DatabaseRef};
-use std::{collections::HashMap, net::SocketAddr};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::{mpsc, Mutex};
 use tracing::info;
 
 use crate::{
@@ -110,10 +112,18 @@ impl EngineConfig {
 }
 
 /// The main Engine struct that performs transaction analysis
+///
+/// This struct is thread-safe and can be shared across multiple threads.
+/// It uses per-transaction locking to ensure that only one thread can analyze
+/// a given transaction at a time, while allowing concurrent analysis of different transactions.
 #[derive(Debug)]
 pub struct Engine {
-    /// Map of transaction hashes to their RPC server handles
-    pub server_handles: HashMap<TxHash, SocketAddr>,
+    /// Concurrent map of transaction hashes to their RPC server handles
+    server_handles: Arc<DashMap<TxHash, RpcServerHandle>>,
+
+    /// Per-transaction locks to prevent duplicate analysis of the same transaction
+    /// Each transaction hash gets its own lock, allowing parallel analysis of different transactions
+    in_flight: Arc<DashMap<TxHash, Arc<Mutex<()>>>>,
 
     /// Configuration for the engine
     config: EngineConfig,
@@ -128,7 +138,29 @@ impl Default for Engine {
 impl Engine {
     /// Create a new Engine instance from configuration
     pub fn new(config: EngineConfig) -> Self {
-        Self { server_handles: HashMap::new(), config }
+        Self {
+            server_handles: Arc::new(DashMap::new()),
+            in_flight: Arc::new(DashMap::new()),
+            config,
+        }
+    }
+
+    /// Get the RPC server address for a given transaction hash, if it exists
+    pub fn get_rpc_server_addr(&self, tx_hash: &TxHash) -> Option<SocketAddr> {
+        self.server_handles.get(tx_hash).map(|handle| handle.addr())
+    }
+
+    /// Shut down the RPC server for a given transaction hash, if it exists
+    /// Returns true if the server was found and shut down, false otherwise
+    pub fn shutdown_rpc_server(&self, tx_hash: &TxHash) -> Result<bool> {
+        if let Some((_, handle)) = self.server_handles.remove(tx_hash) {
+            handle.shutdown()?;
+            info!("Shut down RPC server for transaction: {:?}", tx_hash);
+            Ok(true)
+        } else {
+            info!("No RPC server found for transaction: {:?}", tx_hash);
+            Ok(false)
+        }
     }
 
     /// Main preparation method for the engine
@@ -142,22 +174,79 @@ impl Engine {
     /// 5. Collect opcode-level step execution results
     /// 6. Re-executes the transaction with state snapshots
     /// 7. Starts a JSON-RPC server with the analysis results and snapshots
-    pub async fn prepare<DB>(&mut self, fork_result: ForkResult<DB>) -> Result<RpcServerHandle>
+    ///
+    /// # Thread Safety
+    ///
+    /// This method is thread-safe and can be called concurrently from multiple threads.
+    /// Per-transaction locking ensures that only one thread can analyze a given transaction
+    /// at a time. If a transaction is already being analyzed by another thread, subsequent
+    /// calls will wait for the analysis to complete and then return the cached result.
+    pub async fn prepare<DB>(
+        &self,
+        fork_result: ForkResult<DB>,
+        progress_tx: Option<mpsc::UnboundedSender<edb_common::ProgressMessage>>,
+    ) -> Result<SocketAddr>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
         <CacheDB<DB> as Database>::Error: Clone + Send + Sync,
         <DB as Database>::Error: Clone + Send + Sync,
     {
-        info!("Starting engine preparation for transaction: {:?}", fork_result.target_tx_hash);
+        // a utility macro to send progress message to the progress channel, if it exists
+        macro_rules! send_progress {
+            // With step tracking: send_progress!(current, total, "message")
+            ($current:expr, $total:expr, $($message:tt)*) => {
+                progress_tx.as_ref().map(|tx| {
+                    tx.send(edb_common::ProgressMessage::with_steps(
+                        format!($($message)*),
+                        $current,
+                        $total
+                    )).ok()
+                });
+            };
+            // Without step tracking: send_progress!("message")
+            ($($message:tt)*) => {
+                progress_tx.as_ref().map(|tx| {
+                    tx.send(edb_common::ProgressMessage::new(format!($($message)*))).ok()
+                });
+            };
+        }
+
+        let tx_hash = fork_result.target_tx_hash;
+
+        // Get or create per-transaction lock
+        let lock =
+            self.in_flight.entry(tx_hash).or_insert_with(|| Arc::new(Mutex::new(()))).clone();
+
+        // Acquire lock - blocks if another thread is processing this transaction
+        let _guard = lock.lock().await;
+
+        // Check if this transaction has already been analyzed
+        if let Some(existing_handle) = self.server_handles.get(&tx_hash) {
+            info!(
+                "Transaction {:?} already analyzed, returning existing RPC server at {}",
+                tx_hash,
+                existing_handle.addr()
+            );
+            send_progress!("Transaction {:?} already analyzed", tx_hash);
+            return Ok(existing_handle.addr());
+        }
+
+        info!("Starting engine preparation for transaction: {:?}", tx_hash);
 
         // Step 0: Initialize context and database
         let ForkResult { context: mut ctx, target_tx_env: tx, target_tx_hash: tx_hash, fork_info } =
             fork_result;
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
+        send_progress!(
+            1,
+            8,
+            "Replaying the target transaction to collect call trace and touched contracts..."
+        );
         let replay_result = orchestration::replay_and_collect_trace(ctx.clone(), tx.clone())?;
 
         // Step 2: Download verified source code for each contract
+        send_progress!(2, 8, "Downloading verified source code for each contract...");
         let artifacts = orchestration::download_verified_source_code(
             &self.config,
             &replay_result,
@@ -166,13 +255,16 @@ impl Engine {
         .await?;
 
         // Step 3: Analyze source code to identify instrumentation points
+        send_progress!(3, 8, "Analyzing source code to identify instrumentation points...");
         let analysis_results = orchestration::analyze_source_code(&artifacts)?;
 
         // Step 4: Instrument source code
+        send_progress!(4, 8, "Instrumenting source code...");
         let recompiled_artifacts =
             orchestration::instrument_and_recompile_source_code(&artifacts, &analysis_results)?;
 
         // Step 5: Collect opcode-level step execution results
+        send_progress!(5, 8, "Collecting opcode-level step execution results...");
         let opcode_snapshots = orchestration::capture_opcode_level_snapshots(
             ctx.clone(),
             tx.clone(),
@@ -181,6 +273,7 @@ impl Engine {
         )?;
 
         // Step 6: Replace original bytecode with instrumented versions
+        send_progress!(6, 8, "Replacing original bytecode with instrumented versions...");
         let contracts_in_tx = orchestration::tweak_bytecode(
             &self.config,
             &mut ctx,
@@ -191,6 +284,7 @@ impl Engine {
         .await?;
 
         // Step 7: Re-execute the transaction with snapshot collection
+        send_progress!(7, 8, "Collecting creation hooks for contracts in transaction...");
         let hook_creation = orchestration::collect_creation_hooks(
             &artifacts,
             &recompiled_artifacts,
@@ -205,6 +299,7 @@ impl Engine {
         )?;
 
         // Step 8: Start RPC server with analysis results and snapshots
+        send_progress!(8, 8, "Collecting opcode-level and hook-level snapshots...");
         let mut snapshots =
             orchestration::get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         snapshots.analyze(&replay_result.execution_trace, &analysis_results)?;
@@ -227,8 +322,9 @@ impl Engine {
         info!("Debug RPC server started on {}", rpc_handle.addr());
 
         // Store the server handle for future reference
-        self.server_handles.insert(tx_hash, rpc_handle.addr());
+        let addr = rpc_handle.addr();
+        self.server_handles.insert(tx_hash, rpc_handle);
 
-        Ok(rpc_handle)
+        Ok(addr)
     }
 }

@@ -38,6 +38,10 @@ revm = { workspace = true, features = ["std", "serde"] }
 # async
 tokio = { workspace = true, features = ["full"] }
 
+# websocket
+axum = { workspace = true, features = ["ws"] }
+tokio-tungstenite.workspace = true
+
 # cli
 clap = { workspace = true, features = ["default", "derive", "env"] }
 
@@ -46,8 +50,10 @@ dotenv.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+serde.workspace = true
 serde_json.workspace = true
 reqwest = { workspace = true, features = ["json"] }
+futures.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

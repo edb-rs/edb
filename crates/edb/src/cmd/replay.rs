@@ -18,15 +18,13 @@
 
 use alloy_primitives::TxHash;
 use edb_common::fork_and_prepare;
-use edb_engine::{Engine, EngineConfig, RpcServerHandle};
+use edb_engine::Engine;
 use eyre::Result;
 
+use crate::utils;
+
 /// Replay an existing transaction following the correct architecture
-pub async fn replay_transaction(
-    tx_hash: TxHash,
-    cli: &crate::Cli,
-    rpc_url: &str,
-) -> Result<RpcServerHandle> {
+pub async fn replay_transaction(tx_hash: TxHash, cli: &crate::Cli, rpc_url: &str) -> Result<()> {
     tracing::info!("Starting transaction replay workflow");
 
     // Step 1: Fork the chain and replay earlier transactions in the block
@@ -39,16 +37,19 @@ pub async fn replay_transaction(
     );
 
     // Step 2: Build inputs for the engine
-    let mut engine_config =
-        EngineConfig::default().with_quick_mode(cli.quick).with_rpc_proxy_url(rpc_url.into());
-    if let Some(api_key) = &cli.etherscan_api_key {
-        engine_config = engine_config.with_etherscan_api_key(api_key.clone());
-    }
+    let engine_config = cli.to_engine_config(rpc_url);
 
     // Step 3: Call engine::prepare with forked database and EVM config
     tracing::info!("Calling engine::prepare with prepared inputs");
+    let engine = Engine::new(engine_config);
+    let rpc_server_addr = engine.prepare(fork_result, None).await?;
 
-    // Create the engine and run preparation
-    let mut engine = Engine::new(engine_config);
-    engine.prepare(fork_result).await
+    // Step 4: Launch TUI and wait for user to exit
+    utils::start_tui(&cli.tui_options, rpc_server_addr).await?;
+
+    // Step 5: Shutdown EDB
+    tracing::info!("Shutting down EDB...");
+    engine.shutdown_rpc_server(&tx_hash)?;
+
+    Ok(())
 }

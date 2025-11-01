@@ -144,14 +144,17 @@ futures = "0.3"
 tokio = "1.0"
 
 # serialization
-serde = "1.0"
-serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 toml = "0.9"
 
 # web server
 axum = "0.8"
 tower = "0.5"
 tower-http = "0.6"
+
+# websocket
+tokio-tungstenite = "0.28.0"
 
 # rpc client
 jsonrpsee = "0.24"
@@ -166,6 +169,7 @@ clap = "4"
 # misc
 auto_impl = "1"
 chrono = "0.4"
+dashmap = "6"
 delegate = "0.13"
 derive_more = "2"
 dirs = "6"

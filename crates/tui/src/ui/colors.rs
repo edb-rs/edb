@@ -135,13 +135,14 @@ pub struct ColorScheme {
 }
 
 /// Available themes
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Theme {
     /// Dark cyberpunk theme with purples and neon colors
     CyberpunkDark,
     /// Classic terminal hacker theme with green on black
     TerminalHacker,
     /// Modern IDE theme with soft grays and blues
+    #[default]
     ModernIDE,
     /// High contrast theme for accessibility
     HighContrast,
@@ -155,12 +156,6 @@ pub enum Theme {
     DraculaDark,
     /// VS Code light theme with light background
     VSCodeLight,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self::ModernIDE
-    }
 }
 
 impl Theme {
