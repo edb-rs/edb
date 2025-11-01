@@ -302,6 +302,7 @@ async fn track_connection(
     }
 }
 
+/// Represents messages sent to the worker thread for handling operations involving types that are not `Send`.
 pub enum WorkerMessage {
     Replay {
         tx_hash: TxHash,
@@ -350,7 +351,7 @@ async fn worker_task(
                 info!("Worker processing replay for tx: {:?}", tx_hash);
 
                 // Fork and prepare - this contains !Send types
-                progress_tx.send("Forking and preparing database".to_string()).unwrap();
+                progress_tx.send("Forking and preparing database".to_string()).ok();
                 let fork_result = match fork_and_prepare(&rpc_url, tx_hash, quick).await {
                     Ok(result) => result,
                     Err(e) => {

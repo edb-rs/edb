@@ -114,7 +114,7 @@ pub async fn start_tui(options: &TuiOptions, rpc_server_addr: SocketAddr) -> Res
     tracing::debug!("Found TUI binary at: {:?}", tui_binary);
 
     // Spawn TUI as a child process with inherited stdio
-    let mut cmd = std::process::Command::new(&tui_binary);
+    let mut cmd = tokio::process::Command::new(&tui_binary);
     cmd.arg("--url").arg(format!("http://{rpc_server_addr}"));
 
     // Only pass --mouse flag if requested and using TUI mode
@@ -122,19 +122,12 @@ pub async fn start_tui(options: &TuiOptions, rpc_server_addr: SocketAddr) -> Res
         cmd.arg("--mouse");
     }
 
-    let mut child = cmd
+    let mut ui_handle = cmd
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .spawn()
         .map_err(|e| eyre::eyre!("Failed to spawn TUI: {}", e))?;
-
-    // Wait for TUI to exit
-    let status = child.wait()?;
-    tracing::info!("TUI exited with status: {:?}", status);
-
-    // Return a dummy handle since we're waiting synchronously
-    let ui_handle = tokio::spawn(async {});
 
     tracing::info!("Both RPC server and UI are running. Press Ctrl+C to exit.");
 
@@ -146,7 +139,7 @@ pub async fn start_tui(options: &TuiOptions, rpc_server_addr: SocketAddr) -> Res
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, shutting down...");
         }
-        _ = ui_handle => {
+        _ = ui_handle.wait() => {
             tracing::info!("UI task completed, shutting down...");
         }
     }

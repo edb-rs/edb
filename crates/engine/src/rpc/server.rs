@@ -71,9 +71,6 @@ pub struct RpcServerHandle {
     shutdown_tx: oneshot::Sender<()>,
 }
 
-unsafe impl Send for RpcServerHandle {}
-unsafe impl Sync for RpcServerHandle {}
-
 impl RpcServerHandle {
     /// Get the server address
     pub fn addr(&self) -> SocketAddr {
