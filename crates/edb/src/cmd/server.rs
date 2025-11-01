@@ -37,7 +37,7 @@ use tokio::{
 };
 use tracing::{error, info, warn};
 
-use crate::ws_protocol::{ClientRequest, ServerResponse};
+use crate::ws_protocol::{ClientRequest, ProgressMessage, ServerResponse};
 
 /// Server state shared across WebSocket connections
 #[derive(Clone)]
@@ -132,7 +132,7 @@ async fn handle_socket(socket: WebSocket, state: ServerState) {
         };
 
         // Create a progress channel to send progress messages to the client
-        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel();
+        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressMessage>();
 
         // Handle the request
         // Replay requests are delegated to the worker thread (handles !Send types)
@@ -153,7 +153,11 @@ async fn handle_socket(socket: WebSocket, state: ServerState) {
         let response = loop {
             select! {
                 Some(msg) = progress_rx.recv() => {
-                    let response = ServerResponse::Progress { message: msg };
+                    let response = ServerResponse::Progress {
+                        message: msg.message,
+                        current_step: msg.current_step,
+                        total_steps: msg.total_steps,
+                    };
                     let response_json = serde_json::to_string(&response).expect("Failed to serialize progress message");
                     if let Err(e) = sender.send(Message::Text(response_json.into())).await {
                         error!("Failed to send progress message: {}", e);
@@ -187,7 +191,7 @@ async fn handle_socket(socket: WebSocket, state: ServerState) {
 async fn handle_replay_request(
     tx_hash_str: String,
     state: &ServerState,
-    progress_tx: mpsc::UnboundedSender<String>,
+    progress_tx: mpsc::UnboundedSender<ProgressMessage>,
 ) -> ServerResponse {
     // Parse transaction hash
     let tx_hash: TxHash = match tx_hash_str.parse() {
@@ -251,7 +255,7 @@ async fn handle_test_request(
     _test_name: String,
     _block: Option<u64>,
     _state: &ServerState,
-    _progress_tx: mpsc::UnboundedSender<String>,
+    _progress_tx: mpsc::UnboundedSender<ProgressMessage>,
 ) -> ServerResponse {
     ServerResponse::error("Test debugging not yet implemented")
 }
@@ -306,7 +310,7 @@ async fn track_connection(
 pub enum WorkerMessage {
     Replay {
         tx_hash: TxHash,
-        progress_tx: mpsc::UnboundedSender<String>,
+        progress_tx: mpsc::UnboundedSender<ProgressMessage>,
         response_tx: oneshot::Sender<Result<u16>>,
     },
 }
@@ -351,7 +355,7 @@ async fn worker_task(
                 info!("Worker processing replay for tx: {:?}", tx_hash);
 
                 // Fork and prepare - this contains !Send types
-                progress_tx.send("Forking and preparing database".to_string()).ok();
+                progress_tx.send(ProgressMessage::new("Forking and preparing database")).ok();
                 let fork_result = match fork_and_prepare(&rpc_url, tx_hash, quick).await {
                     Ok(result) => result,
                     Err(e) => {
@@ -362,7 +366,7 @@ async fn worker_task(
                 };
 
                 // Run engine.prepare - this also uses !Send types
-                progress_tx.send("Preparing engine".to_string()).unwrap();
+                progress_tx.send(ProgressMessage::new("Preparing engine")).unwrap();
                 let result = match engine.prepare(fork_result, Some(progress_tx)).await {
                     Ok(addr) => {
                         info!("RPC server started on port {} for tx: {:?}", addr.port(), tx_hash);

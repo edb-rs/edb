@@ -184,7 +184,7 @@ impl Engine {
     pub async fn prepare<DB>(
         &self,
         fork_result: ForkResult<DB>,
-        progress_tx: Option<mpsc::UnboundedSender<String>>,
+        progress_tx: Option<mpsc::UnboundedSender<edb_common::ProgressMessage>>,
     ) -> Result<SocketAddr>
     where
         DB: Database + DatabaseCommit + DatabaseRef + Clone + Send + Sync + 'static,
@@ -193,8 +193,21 @@ impl Engine {
     {
         // a utility macro to send progress message to the progress channel, if it exists
         macro_rules! send_progress {
+            // With step tracking: send_progress!(current, total, "message")
+            ($current:expr, $total:expr, $($message:tt)*) => {
+                progress_tx.as_ref().map(|tx| {
+                    tx.send(edb_common::ProgressMessage::with_steps(
+                        format!($($message)*),
+                        $current,
+                        $total
+                    )).ok()
+                });
+            };
+            // Without step tracking: send_progress!("message")
             ($($message:tt)*) => {
-                progress_tx.as_ref().map(|tx| tx.send(format!($($message)*)).ok());
+                progress_tx.as_ref().map(|tx| {
+                    tx.send(edb_common::ProgressMessage::new(format!($($message)*))).ok()
+                });
             };
         }
 
@@ -226,12 +239,14 @@ impl Engine {
 
         // Step 1: Replay the target transaction to collect call trace and touched contracts
         send_progress!(
+            1,
+            8,
             "Replaying the target transaction to collect call trace and touched contracts..."
         );
         let replay_result = orchestration::replay_and_collect_trace(ctx.clone(), tx.clone())?;
 
         // Step 2: Download verified source code for each contract
-        send_progress!("Downloading verified source code for each contract...");
+        send_progress!(2, 8, "Downloading verified source code for each contract...");
         let artifacts = orchestration::download_verified_source_code(
             &self.config,
             &replay_result,
@@ -240,16 +255,16 @@ impl Engine {
         .await?;
 
         // Step 3: Analyze source code to identify instrumentation points
-        send_progress!("Analyzing source code to identify instrumentation points...");
+        send_progress!(3, 8, "Analyzing source code to identify instrumentation points...");
         let analysis_results = orchestration::analyze_source_code(&artifacts)?;
 
         // Step 4: Instrument source code
-        send_progress!("Instrumenting source code...");
+        send_progress!(4, 8, "Instrumenting source code...");
         let recompiled_artifacts =
             orchestration::instrument_and_recompile_source_code(&artifacts, &analysis_results)?;
 
         // Step 5: Collect opcode-level step execution results
-        send_progress!("Collecting opcode-level step execution results...");
+        send_progress!(5, 8, "Collecting opcode-level step execution results...");
         let opcode_snapshots = orchestration::capture_opcode_level_snapshots(
             ctx.clone(),
             tx.clone(),
@@ -258,7 +273,7 @@ impl Engine {
         )?;
 
         // Step 6: Replace original bytecode with instrumented versions
-        send_progress!("Replacing original bytecode with instrumented versions...");
+        send_progress!(6, 8, "Replacing original bytecode with instrumented versions...");
         let contracts_in_tx = orchestration::tweak_bytecode(
             &self.config,
             &mut ctx,
@@ -269,7 +284,7 @@ impl Engine {
         .await?;
 
         // Step 7: Re-execute the transaction with snapshot collection
-        send_progress!("Collecting creation hooks for contracts in transaction...");
+        send_progress!(7, 8, "Collecting creation hooks for contracts in transaction...");
         let hook_creation = orchestration::collect_creation_hooks(
             &artifacts,
             &recompiled_artifacts,
@@ -284,13 +299,12 @@ impl Engine {
         )?;
 
         // Step 8: Start RPC server with analysis results and snapshots
-        send_progress!("Collecting opcode-level and hook-level snapshots...");
+        send_progress!(8, 8, "Collecting opcode-level and hook-level snapshots...");
         let mut snapshots =
             orchestration::get_time_travel_snapshots(opcode_snapshots, hook_snapshots)?;
         snapshots.analyze(&replay_result.execution_trace, &analysis_results)?;
 
         // Let's pack the debug context
-        send_progress!("Packing debug context...");
         let context = EngineContext::build(
             fork_info,
             ctx.cfg.clone(),

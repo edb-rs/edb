@@ -40,6 +40,8 @@ pub mod logging;
 pub mod macros;
 /// Extended opcode analysis utilities for EVM state modification detection and debugging
 pub mod opcode;
+/// Progress message types for tracking operation progress
+pub mod progress;
 /// Specification ID utilities for handling different Ethereum hardforks and protocol versions
 pub mod spec_id;
 /// Testing utilities and helpers for integration and unit tests
@@ -51,4 +53,5 @@ pub use expression::*;
 pub use forking::*;
 pub use logging::*;
 pub use opcode::*;
+pub use progress::*;
 pub use spec_id::*;

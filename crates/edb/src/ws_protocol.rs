@@ -23,6 +23,9 @@
 
 use serde::{Deserialize, Serialize};
 
+// Re-export ProgressMessage from common crate
+pub use edb_common::ProgressMessage;
+
 /// Request sent from client to server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -48,6 +51,10 @@ pub enum ClientRequest {
 pub enum ServerResponse {
     Progress {
         message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        current_step: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        total_steps: Option<usize>,
     },
     /// Successful response with RPC server information
     Success {
@@ -114,6 +121,34 @@ mod tests {
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("\"status\":\"error\""));
         assert!(json.contains("\"message\":\"Invalid transaction hash\""));
+    }
+
+    #[test]
+    fn test_server_response_progress_without_steps() {
+        let response = ServerResponse::Progress {
+            message: "Processing".to_string(),
+            current_step: None,
+            total_steps: None,
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"status\":\"progress\""));
+        assert!(json.contains("\"message\":\"Processing\""));
+        assert!(!json.contains("current_step"));
+        assert!(!json.contains("total_steps"));
+    }
+
+    #[test]
+    fn test_server_response_progress_with_steps() {
+        let response = ServerResponse::Progress {
+            message: "Step 2 of 5".to_string(),
+            current_step: Some(2),
+            total_steps: Some(5),
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"status\":\"progress\""));
+        assert!(json.contains("\"message\":\"Step 2 of 5\""));
+        assert!(json.contains("\"current_step\":2"));
+        assert!(json.contains("\"total_steps\":5"));
     }
 
     #[test]
