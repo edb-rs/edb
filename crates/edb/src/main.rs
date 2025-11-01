@@ -79,7 +79,7 @@ impl Cli {
     /// Validate CLI arguments and warn about misused options
     pub fn validate(&self) {
         // Warn if TUI options are used with non-TUI mode
-        if self.command.enables_tui() && self.tui_options.disable_mouse {
+        if !self.command.enables_tui() && self.tui_options.disable_mouse {
             tracing::warn!("--disable-mouse flag has no effect when not using TUI");
             eprintln!("Warning: --disable-mouse flag has no effect when not using TUI");
         }
