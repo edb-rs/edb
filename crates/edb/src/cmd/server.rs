@@ -366,7 +366,7 @@ async fn worker_task(
                 };
 
                 // Run engine.prepare - this also uses !Send types
-                progress_tx.send(ProgressMessage::new("Preparing engine")).unwrap();
+                progress_tx.send(ProgressMessage::new("Preparing engine")).ok();
                 let result = match engine.prepare(fork_result, Some(progress_tx)).await {
                     Ok(addr) => {
                         info!("RPC server started on port {} for tx: {:?}", addr.port(), tx_hash);
