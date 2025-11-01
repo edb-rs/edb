@@ -16,7 +16,6 @@
 
 //! CLI tests for EDB
 
-use assert_cmd::Command;
 use predicates::prelude::*;
 use tracing::info;
 
@@ -25,7 +24,7 @@ fn test_help_command() {
     edb_common::ensure_test_logging(None);
     info!("Testing CLI help command");
 
-    let mut cmd = Command::cargo_bin("edb").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("edb");
     cmd.arg("--help").assert().success().stdout(predicate::str::contains("Ethereum Debugger"));
 }
 
@@ -33,7 +32,7 @@ fn test_help_command() {
 fn test_version_command() {
     edb_common::logging::ensure_test_logging(None);
     info!("Running test");
-    let mut cmd = Command::cargo_bin("edb").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("edb");
     cmd.arg("--version").assert().success().stdout(predicate::str::contains("edb"));
 }
 
@@ -41,7 +40,7 @@ fn test_version_command() {
 fn test_replay_subcommand_help() {
     edb_common::logging::ensure_test_logging(None);
     info!("Running test");
-    let mut cmd = Command::cargo_bin("edb").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("edb");
     cmd.arg("replay")
         .arg("--help")
         .assert()
@@ -53,7 +52,7 @@ fn test_replay_subcommand_help() {
 fn test_test_subcommand_help() {
     edb_common::logging::ensure_test_logging(None);
     info!("Running test");
-    let mut cmd = Command::cargo_bin("edb").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("edb");
     cmd.arg("test")
         .arg("--help")
         .assert()
@@ -65,7 +64,7 @@ fn test_test_subcommand_help() {
 fn test_invalid_tx_hash() {
     edb_common::logging::ensure_test_logging(None);
     info!("Running test");
-    let mut cmd = Command::cargo_bin("edb").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("edb");
     cmd.arg("replay").arg("invalid_hash").assert().failure();
 }
 
@@ -73,6 +72,6 @@ fn test_invalid_tx_hash() {
 fn test_missing_subcommand() {
     edb_common::logging::ensure_test_logging(None);
     info!("Running test");
-    let mut cmd = Command::cargo_bin("edb").unwrap();
+    let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("edb");
     cmd.assert().failure().stderr(predicate::str::contains("Usage"));
 }
