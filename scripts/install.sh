@@ -122,13 +122,13 @@ try_binary_install() {
     cd "$TEMP_DIR"
 
     if command -v shasum &> /dev/null; then
-        if ! shasum -a 256 -c "edb${EXTENSION}.sha256" 2>/dev/null; then
+        if ! shasum -a 256 "edb${EXTENSION}.sha256" 2>/dev/null; then
             print_error "Checksum verification failed!"
             print_error "The downloaded file may be corrupted or tampered with."
             return 1
         fi
     elif command -v sha256sum &> /dev/null; then
-        if ! sha256sum -c "edb${EXTENSION}.sha256" 2>/dev/null; then
+        if ! sha256sum "edb${EXTENSION}.sha256" 2>/dev/null; then
             print_error "Checksum verification failed!"
             print_error "The downloaded file may be corrupted or tampered with."
             return 1
