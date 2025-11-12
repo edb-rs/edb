@@ -285,24 +285,36 @@ impl PendingCommand {
                 match info.detail() {
                     SnapshotInfoDetail::Opcode(detail) => {
                         let memory = &detail.memory;
-                        if memory.is_empty() {
-                            Ok("Memory is empty".to_string())
+                        let start = *offset;
+                        let end = start.saturating_add(*count);
+
+                        // Determine overlap between requested range and actual memory
+                        let memory_end = memory.len();
+
+                        let slice: Vec<u8> = if start >= memory_end {
+                            // Completely out of bounds - all zeros
+                            vec![0; end - start]
+                        } else if end <= memory_end {
+                            // Completely in bounds - direct slice
+                            memory[start..end].to_vec()
                         } else {
-                            let start = *offset;
-                            let end = std::cmp::min(start.saturating_add(*count), memory.len());
-                            let slice = &memory[start..end];
-                            Ok(format!(
-                                "Memory from offset {} ({} bytes):\n{}",
-                                start,
-                                slice.len(),
-                                utils::format_bytes_with_decode(slice)
-                                    .split('\n')
-                                    .enumerate()
-                                    .map(|(i, line)| format!("{:>4} | {}", start + i * 32, line))
-                                    .collect::<Vec<_>>()
-                                    .join("\n")
-                            ))
-                        }
+                            // Partially in bounds - slice + padding
+                            let mut result = memory[start..memory_end].to_vec();
+                            result.resize(end - start, 0);
+                            result
+                        };
+
+                        Ok(format!(
+                            "Memory from offset {} ({} bytes):\n{}",
+                            start,
+                            slice.len(),
+                            utils::format_bytes_with_decode(&slice)
+                                .split('\n')
+                                .enumerate()
+                                .map(|(i, line)| format!("{:>4} | {}", start + i * 32, line))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        ))
                     }
                     SnapshotInfoDetail::Hook(_) => {
                         bail!("No memory info available in source mode.")
