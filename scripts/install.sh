@@ -89,24 +89,26 @@ try_binary_install() {
     local TEMP_DIR=$(mktemp -d)
     trap "rm -rf $TEMP_DIR" EXIT
 
-    # Download the binary archive
+    # Download the binary archive (keep original filename for checksum verification)
+    local ARCHIVE_FILE="${BINARY_NAME}${EXTENSION}"
+
     if command -v curl &> /dev/null; then
-        if ! curl -L --fail -o "$TEMP_DIR/edb${EXTENSION}" "$DOWNLOAD_URL" 2>/dev/null; then
+        if ! curl -L --fail -o "$TEMP_DIR/$ARCHIVE_FILE" "$DOWNLOAD_URL" 2>/dev/null; then
             print_info "Failed to download pre-built binaries"
             return 1
         fi
         # Download checksum file
-        if ! curl -L --fail -o "$TEMP_DIR/edb${EXTENSION}.sha256" "${DOWNLOAD_URL}.sha256" 2>/dev/null; then
+        if ! curl -L --fail -o "$TEMP_DIR/${ARCHIVE_FILE}.sha256" "${DOWNLOAD_URL}.sha256" 2>/dev/null; then
             print_info "Failed to download checksum file"
             return 1
         fi
     elif command -v wget &> /dev/null; then
-        if ! wget -q -O "$TEMP_DIR/edb${EXTENSION}" "$DOWNLOAD_URL" 2>/dev/null; then
+        if ! wget -q -O "$TEMP_DIR/$ARCHIVE_FILE" "$DOWNLOAD_URL" 2>/dev/null; then
             print_info "Failed to download pre-built binaries"
             return 1
         fi
         # Download checksum file
-        if ! wget -q -O "$TEMP_DIR/edb${EXTENSION}.sha256" "${DOWNLOAD_URL}.sha256" 2>/dev/null; then
+        if ! wget -q -O "$TEMP_DIR/${ARCHIVE_FILE}.sha256" "${DOWNLOAD_URL}.sha256" 2>/dev/null; then
             print_info "Failed to download checksum file"
             return 1
         fi
@@ -122,13 +124,13 @@ try_binary_install() {
 
     # Change to temp dir and verify (using subshell to avoid cd issues)
     if command -v shasum &> /dev/null; then
-        if ! (cd "$TEMP_DIR" && shasum -a 256 -c "edb${EXTENSION}.sha256") 2>/dev/null; then
+        if ! (cd "$TEMP_DIR" && shasum -a 256 -c "${ARCHIVE_FILE}.sha256") 2>/dev/null; then
             print_error "Checksum verification failed!"
             print_error "The downloaded file may be corrupted or tampered with."
             return 1
         fi
     elif command -v sha256sum &> /dev/null; then
-        if ! (cd "$TEMP_DIR" && sha256sum -c "edb${EXTENSION}.sha256") 2>/dev/null; then
+        if ! (cd "$TEMP_DIR" && sha256sum -c "${ARCHIVE_FILE}.sha256") 2>/dev/null; then
             print_error "Checksum verification failed!"
             print_error "The downloaded file may be corrupted or tampered with."
             return 1
@@ -144,12 +146,12 @@ try_binary_install() {
     # Extract the archive
     print_info "Extracting binaries..."
     if [ "$OS" = "windows" ]; then
-        if ! unzip -q "$TEMP_DIR/edb${EXTENSION}" -d "$TEMP_DIR" 2>/dev/null; then
+        if ! unzip -q "$TEMP_DIR/$ARCHIVE_FILE" -d "$TEMP_DIR" 2>/dev/null; then
             print_error "Failed to extract archive"
             return 1
         fi
     else
-        if ! tar xzf "$TEMP_DIR/edb${EXTENSION}" -C "$TEMP_DIR" 2>/dev/null; then
+        if ! tar xzf "$TEMP_DIR/$ARCHIVE_FILE" -C "$TEMP_DIR" 2>/dev/null; then
             print_error "Failed to extract archive"
             return 1
         fi
