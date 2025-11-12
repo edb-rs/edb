@@ -29,7 +29,7 @@
 
 use alloy_primitives::{Address, Bytes, U256};
 use edb_common::{
-    edb_debug_assert_eq,
+    edb_debug_assert, edb_debug_assert_eq,
     types::{ExecutionFrameId, Trace},
     EdbContext, OpcodeTr,
 };
@@ -51,7 +51,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::Stack;
 
@@ -352,6 +352,8 @@ where
 
     /// Record a snapshot at the current step
     fn record_snapshot(&mut self, interp: &Interpreter, ctx: &mut EdbContext<DB>) {
+        debug!("Recording snapshot at PC {}", interp.bytecode.pc());
+
         // Get current opcode safely
         let opcode = unsafe { OpCode::new_unchecked(interp.bytecode.opcode()) };
 
@@ -376,10 +378,9 @@ where
         let frame_state =
             self.frame_states.entry(frame_id).or_insert(FrameState::from_interp(interp));
         let memory = frame_state.last_memory.clone();
-        edb_debug_assert_eq!(
-            memory.len(),
-            interp.memory.borrow().context_memory().len(),
-            "inconsistent memory"
+        edb_debug_assert!(
+            check_memory_consistency(memory.deref(), &interp.memory.borrow().context_memory()),
+            "inconsistent memory content"
         );
 
         // Get or create trace state
@@ -752,4 +753,27 @@ where
             snapshot.memory.len()
         );
     }
+}
+
+#[cfg(debug_assertions)]
+fn check_memory_consistency(origin: &[u8], reference: &[u8]) -> bool {
+    let (shorter, longer) =
+        if origin.len() <= reference.len() { (origin, reference) } else { (reference, origin) };
+
+    // Check common portion
+    if shorter != &longer[..shorter.len()] {
+        return false;
+    }
+
+    // Check if extra bytes in longer slice are all zeros
+    if let Some((i, &byte)) = longer[shorter.len()..].iter().enumerate().find(|(_, &b)| b != 0) {
+        let absolute_idx = shorter.len() + i;
+        debug!(
+            "Memory length mismatch at byte {}: expected a padding 0, got {:02x}",
+            absolute_idx, byte
+        );
+        return false;
+    }
+
+    true
 }
