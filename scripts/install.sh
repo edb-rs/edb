@@ -95,9 +95,19 @@ try_binary_install() {
             print_info "Failed to download pre-built binaries"
             return 1
         fi
+        # Download checksum file
+        if ! curl -L --fail -o "$TEMP_DIR/edb${EXTENSION}.sha256" "${DOWNLOAD_URL}.sha256" 2>/dev/null; then
+            print_info "Failed to download checksum file"
+            return 1
+        fi
     elif command -v wget &> /dev/null; then
         if ! wget -q -O "$TEMP_DIR/edb${EXTENSION}" "$DOWNLOAD_URL" 2>/dev/null; then
             print_info "Failed to download pre-built binaries"
+            return 1
+        fi
+        # Download checksum file
+        if ! wget -q -O "$TEMP_DIR/edb${EXTENSION}.sha256" "${DOWNLOAD_URL}.sha256" 2>/dev/null; then
+            print_info "Failed to download checksum file"
             return 1
         fi
     else
@@ -106,6 +116,31 @@ try_binary_install() {
     fi
 
     print_success "✓ Downloaded pre-built binaries"
+
+    # Verify checksum
+    print_info "Verifying checksum..."
+    cd "$TEMP_DIR"
+
+    if command -v shasum &> /dev/null; then
+        if ! shasum -a 256 -c "edb${EXTENSION}.sha256" 2>/dev/null; then
+            print_error "Checksum verification failed!"
+            print_error "The downloaded file may be corrupted or tampered with."
+            return 1
+        fi
+    elif command -v sha256sum &> /dev/null; then
+        if ! sha256sum -c "edb${EXTENSION}.sha256" 2>/dev/null; then
+            print_error "Checksum verification failed!"
+            print_error "The downloaded file may be corrupted or tampered with."
+            return 1
+        fi
+    else
+        print_info "⚠️  Warning: No SHA256 tool available (shasum/sha256sum)"
+        print_info "⚠️  Skipping checksum verification"
+        echo ""
+    fi
+
+    cd - > /dev/null
+    print_success "✓ Checksum verified"
 
     # Extract the archive
     print_info "Extracting binaries..."
@@ -192,10 +227,10 @@ check_cargo() {
         echo ""
         echo "Please install Rust and Cargo first:"
         case "$OS" in
-            Linux|macOS)
+            linux|macos)
                 echo "  Run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
                 ;;
-            Windows)
+            windows)
                 echo "  Download from: https://rustup.rs/"
                 ;;
             *)
