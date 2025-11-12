@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
-# This script installs EDB from source
+# This script installs EDB (tries pre-built binaries first, falls back to source)
 # Run with: curl -sSL https://install.edb.sh | bash
 
 set -e
@@ -43,16 +43,119 @@ print_info() {
 # Detect OS
 detect_os() {
     case "$(uname -s)" in
-        Linux*)     echo "Linux";;
-        Darwin*)    echo "macOS";;
-        CYGWIN*)    echo "Windows";;
-        MINGW*)     echo "Windows";;
-        *)          echo "Unknown";;
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*)    echo "windows";;
+        MINGW*)     echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
+# Detect architecture
+detect_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64)   echo "x86_64";;
+        aarch64|arm64)  echo "aarch64";;
+        *)              echo "unknown";;
     esac
 }
 
 OS=$(detect_os)
+ARCH=$(detect_arch)
 print_info "Detected OS: $OS"
+print_info "Detected Architecture: $ARCH"
+
+# Try to download and install pre-built binaries
+try_binary_install() {
+    # Check if platform is supported for binary releases
+    if [ "$OS" = "unknown" ] || [ "$ARCH" = "unknown" ]; then
+        print_info "Pre-built binaries not available for $OS-$ARCH"
+        return 1
+    fi
+
+    # Construct the binary name
+    local BINARY_NAME="edb-${OS}-${ARCH}"
+    local EXTENSION=".tar.gz"
+    if [ "$OS" = "windows" ]; then
+        EXTENSION=".zip"
+    fi
+
+    local DOWNLOAD_URL="https://github.com/edb-rs/edb/releases/latest/download/${BINARY_NAME}${EXTENSION}"
+
+    print_info "Attempting to download pre-built binaries from GitHub releases..."
+    print_info "URL: $DOWNLOAD_URL"
+
+    # Create temporary directory
+    local TEMP_DIR=$(mktemp -d)
+    trap "rm -rf $TEMP_DIR" EXIT
+
+    # Download the binary archive
+    if command -v curl &> /dev/null; then
+        if ! curl -L --fail -o "$TEMP_DIR/edb${EXTENSION}" "$DOWNLOAD_URL" 2>/dev/null; then
+            print_info "Failed to download pre-built binaries"
+            return 1
+        fi
+    elif command -v wget &> /dev/null; then
+        if ! wget -q -O "$TEMP_DIR/edb${EXTENSION}" "$DOWNLOAD_URL" 2>/dev/null; then
+            print_info "Failed to download pre-built binaries"
+            return 1
+        fi
+    else
+        print_info "Neither curl nor wget available for downloading"
+        return 1
+    fi
+
+    print_success "✓ Downloaded pre-built binaries"
+
+    # Extract the archive
+    print_info "Extracting binaries..."
+    if [ "$OS" = "windows" ]; then
+        if ! unzip -q "$TEMP_DIR/edb${EXTENSION}" -d "$TEMP_DIR" 2>/dev/null; then
+            print_error "Failed to extract archive"
+            return 1
+        fi
+    else
+        if ! tar xzf "$TEMP_DIR/edb${EXTENSION}" -C "$TEMP_DIR" 2>/dev/null; then
+            print_error "Failed to extract archive"
+            return 1
+        fi
+    fi
+
+    print_success "✓ Extracted binaries"
+
+    # Create cargo bin directory if it doesn't exist
+    local CARGO_BIN="$HOME/.cargo/bin"
+    mkdir -p "$CARGO_BIN"
+
+    # Install binaries
+    print_info "Installing binaries to $CARGO_BIN..."
+
+    local EXT=""
+    if [ "$OS" = "windows" ]; then
+        EXT=".exe"
+    fi
+
+    if [ -f "$TEMP_DIR/edb${EXT}" ]; then
+        cp "$TEMP_DIR/edb${EXT}" "$CARGO_BIN/"
+        chmod +x "$CARGO_BIN/edb${EXT}"
+    else
+        print_error "Binary edb${EXT} not found in archive"
+        return 1
+    fi
+
+    if [ -f "$TEMP_DIR/edb-rpc-proxy${EXT}" ]; then
+        cp "$TEMP_DIR/edb-rpc-proxy${EXT}" "$CARGO_BIN/"
+        chmod +x "$CARGO_BIN/edb-rpc-proxy${EXT}"
+    fi
+
+    if [ -f "$TEMP_DIR/edb-tui${EXT}" ]; then
+        cp "$TEMP_DIR/edb-tui${EXT}" "$CARGO_BIN/"
+        chmod +x "$CARGO_BIN/edb-tui${EXT}"
+    fi
+
+    print_success "✓ Installed binaries to $CARGO_BIN"
+    return 0
+}
 
 # Check if git is installed
 check_git() {
@@ -61,16 +164,16 @@ check_git() {
         echo ""
         echo "Please install git first:"
         case "$OS" in
-            Linux)
+            linux)
                 echo "  Ubuntu/Debian: sudo apt-get install git"
                 echo "  Fedora/RHEL:   sudo dnf install git"
                 echo "  Arch:          sudo pacman -S git"
                 ;;
-            macOS)
+            macos)
                 echo "  Using Homebrew: brew install git"
                 echo "  Or download from: https://git-scm.com/download/mac"
                 ;;
-            Windows)
+            windows)
                 echo "  Download from: https://git-scm.com/download/win"
                 ;;
             *)
@@ -159,8 +262,8 @@ clone_repo() {
     fi
 }
 
-# Check if cargo bin directory is in PATH
-check_cargo_path() {
+# Ensure cargo bin directory is in PATH
+ensure_cargo_path() {
     CARGO_BIN="$HOME/.cargo/bin"
 
     if [[ ":$PATH:" != *":$CARGO_BIN:"* ]]; then
@@ -171,7 +274,7 @@ check_cargo_path() {
         echo "Add the following line to your shell configuration file:"
         echo ""
         case "$OS" in
-            Linux)
+            linux)
                 if [ -f "$HOME/.bashrc" ]; then
                     echo "  echo 'export PATH=\"\$HOME/.cargo/bin:\$PATH\"' >> ~/.bashrc"
                     echo "  source ~/.bashrc"
@@ -182,7 +285,7 @@ check_cargo_path() {
                     echo "  export PATH=\"\$HOME/.cargo/bin:\$PATH\""
                 fi
                 ;;
-            macOS)
+            macos)
                 if [ -f "$HOME/.zshrc" ]; then
                     echo "  echo 'export PATH=\"\$HOME/.cargo/bin:\$PATH\"' >> ~/.zshrc"
                     echo "  source ~/.zshrc"
@@ -200,6 +303,8 @@ check_cargo_path() {
         echo ""
         echo "Or restart your terminal after installation."
         echo ""
+    else
+        print_success "✓ $CARGO_BIN is in your PATH"
     fi
 }
 
@@ -245,29 +350,67 @@ main() {
     print_info "=========================================="
     echo ""
 
+    # Try binary installation first
+    print_info "Step 1/2: Attempting to install pre-built binaries..."
+    echo ""
+
+    if try_binary_install; then
+        print_success "✓ Successfully installed pre-built binaries"
+        echo ""
+
+        # Ensure PATH includes cargo bin
+        ensure_cargo_path
+
+        # Success message
+        echo ""
+        print_success "=========================================="
+        print_success "  EDB Installation Complete!"
+        print_success "=========================================="
+        echo ""
+        print_info "You can now use EDB by running:"
+        echo "  edb --help"
+        echo ""
+        print_info "To debug a transaction:"
+        echo "  edb --rpc-urls <RPC_ENDPOINT> replay <TX_HASH>"
+        echo ""
+        print_info "For more information, visit:"
+        echo "  https://github.com/edb-rs/edb"
+        echo ""
+        return 0
+    fi
+
+    # Fallback to source installation
+    echo ""
+    print_info "=========================================="
+    print_info "  Falling back to source installation"
+    print_info "=========================================="
+    echo ""
+
     # Step 1: Check prerequisites
-    print_info "Step 1/4: Checking prerequisites..."
+    print_info "Step 2/2: Installing from source..."
+    echo ""
+    print_info "Checking prerequisites..."
     check_git
     check_cargo
     echo ""
 
     # Step 2: Create ~/.edb directory
-    print_info "Step 2/4: Setting up installation directory..."
+    print_info "Setting up installation directory..."
     create_edb_dir
     echo ""
 
     # Step 3: Clone repository
-    print_info "Step 3/4: Cloning EDB repository..."
+    print_info "Cloning EDB repository..."
     clone_repo
     echo ""
 
     # Step 4: Install components
-    print_info "Step 4/4: Building and installing EDB..."
+    print_info "Building and installing EDB (this may take several minutes)..."
     install_edb
     echo ""
 
-    # Check PATH configuration
-    check_cargo_path
+    # Ensure PATH includes cargo bin
+    ensure_cargo_path
 
     # Success message
     echo ""
