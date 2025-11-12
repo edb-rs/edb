@@ -119,16 +119,16 @@ try_binary_install() {
 
     # Verify checksum
     print_info "Verifying checksum..."
-    cd "$TEMP_DIR"
 
+    # Change to temp dir and verify (using subshell to avoid cd issues)
     if command -v shasum &> /dev/null; then
-        if ! shasum -a 256 "edb${EXTENSION}.sha256" 2>/dev/null; then
+        if ! (cd "$TEMP_DIR" && shasum -a 256 -c "edb${EXTENSION}.sha256") 2>/dev/null; then
             print_error "Checksum verification failed!"
             print_error "The downloaded file may be corrupted or tampered with."
             return 1
         fi
     elif command -v sha256sum &> /dev/null; then
-        if ! sha256sum "edb${EXTENSION}.sha256" 2>/dev/null; then
+        if ! (cd "$TEMP_DIR" && sha256sum -c "edb${EXTENSION}.sha256") 2>/dev/null; then
             print_error "Checksum verification failed!"
             print_error "The downloaded file may be corrupted or tampered with."
             return 1
@@ -139,7 +139,6 @@ try_binary_install() {
         echo ""
     fi
 
-    cd - > /dev/null
     print_success "✓ Checksum verified"
 
     # Extract the archive
@@ -417,7 +416,47 @@ main() {
     # Fallback to source installation
     echo ""
     print_info "=========================================="
-    print_info "  Falling back to source installation"
+    print_info "  Pre-built binaries not available"
+    print_info "=========================================="
+    echo ""
+
+    print_info "Pre-built binaries are available for:"
+    echo "  • Linux:   x86_64, aarch64"
+    echo "  • macOS:   x86_64 (Intel), aarch64 (Apple Silicon)"
+    echo "  • Windows: x86_64"
+    echo ""
+
+    print_info "Your platform: $OS-$ARCH"
+    echo ""
+
+    if [ "$OS" != "unknown" ] && [ "$ARCH" != "unknown" ]; then
+        print_info "If your platform should be supported, this might be a download issue."
+        print_info "Please report this at: https://github.com/edb-rs/edb/issues"
+        echo ""
+    fi
+
+    print_info "Fallback option: Install from source (requires git and Rust toolchain)"
+    print_info "⚠️  Warning: Building from source may take 10-20 minutes"
+    echo ""
+
+    # Check if running in interactive mode
+    if [ -t 0 ]; then
+        read -p "Do you want to proceed with source installation? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo ""
+            print_info "Installation cancelled."
+            print_info "You can try again later or report an issue if you believe"
+            print_info "pre-built binaries should be available for your platform."
+            exit 0
+        fi
+    else
+        print_info "Non-interactive mode detected, proceeding with source installation..."
+    fi
+
+    echo ""
+    print_info "=========================================="
+    print_info "  Installing from source"
     print_info "=========================================="
     echo ""
 
