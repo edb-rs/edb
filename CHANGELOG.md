@@ -8,15 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-
 - Support for calldata variables ([#33](https://github.com/edb-rs/edb/pull/33))
 - Add new `r` and `R` commands in code panel (`run`/`runback` in terminal panels) to run forward/backward until the next breakpoint
 - Add `edb server` which collectively spawns edb debug server. ([#46](https://github.com/edb-rs/edb/pull/46))
+- Add `release.yml` for automatic release publishing to GitHub Releases
 
 ### Fixed
-
 - Struct fields are no longer be incorrectly treated as variables ([#33](https://github.com/edb-rs/edb/pull/33))
 - Gas limit relaxation is now correctly applied at callsites ([#39](https://github.com/edb-rs/edb/issues/39))
+
+### Changed
+
+- Update `install.sh` to download the latest release from GitHub Releases first, and fallback to building from source if no releases are found.
 
 ## [0.0.2] - 2024-10-11
 
