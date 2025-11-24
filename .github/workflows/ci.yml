@@ -19,8 +19,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -51,8 +49,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -83,8 +79,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -115,8 +109,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -147,8 +139,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
