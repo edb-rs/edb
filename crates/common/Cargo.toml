@@ -30,13 +30,7 @@ foundry-block-explorers = { workspace = true, features = ["foundry-compilers"] }
 foundry-compilers = { workspace = true, features = ["svm-solc"] }
 
 # revm
-revm = { workspace = true, features = ["std", "serde", "alloydb"] }
-revm-context = { workspace = true, features = [
-    "std",
-    "serde",
-    "optional_block_gas_limit",
-    "optional_no_base_fee",
-] }
+revm = { workspace = true, features = ["std", "serde", "alloydb", "optional_block_gas_limit", "optional_no_base_fee", "optional_balance_check"] }
 
 # async
 futures.workspace = true

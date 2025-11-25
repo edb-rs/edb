@@ -265,7 +265,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
         entry.self_destruct = Some((target, value));
     }
 
-    fn log(&mut self, _interp: &mut Interpreter, _context: &mut CTX, log: Log) {
+    fn log(&mut self, _context: &mut CTX, log: Log) {
         let Some(entry) = self.trace.last_mut() else {
             error!("Trace is empty, cannot log");
             return;
