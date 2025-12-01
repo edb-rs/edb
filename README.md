@@ -118,7 +118,7 @@ Join our Telegram Q&A group to ask questions, share insights, and connect with o
 <br>
 <div align="center">
   <a href="https://esp.ethereum.foundation/" target="_blank">
-    <img src="https://esp.ethereum.foundation/_next/static/media/esp-logo.96fc01cc.svg" alt="Ethereum Foundation ESP" height="60" style="margin: 20px;">
+    <img src="https://esp.ethereum.foundation/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Fecosystem-support-logo.bc443ce4.png&w=256&q=75" alt="Ethereum Foundation ESP" height="60" style="margin: 20px;">
   </a>
 </div>
 <br>
