@@ -92,7 +92,7 @@ alloy-consensus = { version = "1.1.2", default-features = false }
 alloy-contract = { version = "1.1.2", default-features = false }
 alloy-dyn-abi = { version = "1.4.1", features = ["eip712"] }
 alloy-eips = { version = "1.1.2", default-features = false }
-alloy-evm = "0.24.1"
+alloy-evm = "0.25.1"
 alloy-genesis = { version = "1.1.2", default-features = false }
 alloy-hardforks = { version = "0.4.0", default-features = false }
 alloy-json-abi = "1.4.1"
