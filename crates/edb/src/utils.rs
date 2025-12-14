@@ -16,7 +16,7 @@
 
 //! Utility functions for the EDB binary
 
-use clap::{command, Args};
+use clap::Args;
 use eyre::{eyre, Result};
 use std::net::SocketAddr;
 use std::path::PathBuf;

@@ -72,13 +72,13 @@ enum SerializedDynSolValue {
     /// String value
     String(String),
     /// Dynamic array of values
-    Array(Vec<SerializedDynSolValue>),
+    Array(Vec<Self>),
     /// Fixed-size array of values
-    FixedArray(Vec<SerializedDynSolValue>),
+    FixedArray(Vec<Self>),
     /// Tuple of multiple values
-    Tuple(Vec<SerializedDynSolValue>),
+    Tuple(Vec<Self>),
     /// Custom struct with name, property names, and tuple data
-    CustomStruct { name: String, prop_names: Vec<String>, tuple: Vec<SerializedDynSolValue> },
+    CustomStruct { name: String, prop_names: Vec<String>, tuple: Vec<Self> },
 }
 
 impl From<&DynSolValue> for SerializedDynSolValue {
