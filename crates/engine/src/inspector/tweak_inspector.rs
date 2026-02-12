@@ -349,7 +349,7 @@ where
         inputs: &mut CreateInputs,
     ) -> Option<CreateOutcome> {
         // Get the nonce from the caller account
-        let account = context.journaled_state.load_account(inputs.caller).ok()?;
+        let account = context.journaled_state.load_account(inputs.caller()).ok()?;
         let nonce = account.info.nonce;
 
         // Calculate what address would be created using the built-in method
@@ -357,7 +357,9 @@ where
 
         debug!(
             "CREATE intercepted: deployer={:?}, predicted={:?}, target={:?}",
-            inputs.caller, predicted_address, self.target_address
+            inputs.caller(),
+            predicted_address,
+            self.target_address
         );
 
         // Check if this is our target deployment
@@ -370,11 +372,11 @@ where
             self.found_target = true;
 
             // Replace the init code with our custom code + constructor args
-            inputs.init_code = self.get_full_init_code(&inputs.init_code).unwrap_or_default();
+            inputs.set_init_code(self.get_full_init_code(inputs.init_code()).unwrap_or_default());
 
             // Force the address to be our target (in case of any calculation differences)
             // Convert to Custom scheme to ensure the exact address
-            inputs.scheme = CreateScheme::Custom { address: self.target_address };
+            inputs.set_scheme(CreateScheme::Custom { address: self.target_address });
         }
 
         // Continue with normal execution
@@ -389,7 +391,7 @@ where
     ) {
         // Check if this was our target deployment and it succeeded
         if self.found_target
-            && matches!(inputs.scheme, CreateScheme::Custom { address } if address == self.target_address)
+            && matches!(inputs.scheme(), CreateScheme::Custom { address } if address == self.target_address)
         {
             if outcome.result.is_ok() {
                 // Get the deployed bytecode from the context

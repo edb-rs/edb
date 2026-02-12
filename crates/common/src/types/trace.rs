@@ -50,7 +50,7 @@ impl IntoCallType for CallInputs {
 
 impl IntoCallType for CreateInputs {
     fn convert_to_call_type(&self) -> CallType {
-        CallType::Create(self.scheme)
+        CallType::Create(self.scheme())
     }
 }
 

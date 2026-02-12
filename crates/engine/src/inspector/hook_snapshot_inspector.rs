@@ -550,8 +550,8 @@ where
         ctx: &mut EdbContext<DB>,
     ) {
         // Get the nonce from the caller account
-        let Ok(account) = ctx.journaled_state.load_account(inputs.caller) else {
-            error!("Failed to load account for caller {:?}", inputs.caller);
+        let Ok(account) = ctx.journaled_state.load_account(inputs.caller()) else {
+            error!("Failed to load account for caller {:?}", inputs.caller());
             return;
         };
 
@@ -561,14 +561,14 @@ where
 
         for (original_bytecode, hooked_bytecode, constructor_args) in &self.creation_hooks {
             // Check if constructor arguments are at the tail of input bytes
-            if inputs.init_code.len() >= constructor_args.len() {
-                let input_args_start = inputs.init_code.len() - constructor_args.len();
-                let input_args = &inputs.init_code[input_args_start..];
+            if inputs.init_code().len() >= constructor_args.len() {
+                let input_args_start = inputs.init_code().len() - constructor_args.len();
+                let input_args = &inputs.init_code()[input_args_start..];
 
                 // Check if constructor args match
                 if input_args == constructor_args.as_ref() {
                     // Get the creation bytecode (without constructor args)
-                    let input_bytecode = &inputs.init_code[..input_args_start];
+                    let input_bytecode = &inputs.init_code()[..input_args_start];
 
                     // Check if bytecode is very similar to original
                     // For now, we do exact match, but could be made fuzzy
@@ -576,15 +576,16 @@ where
                         // Match found! Replace with hooked bytecode + constructor args
                         let mut new_init_code = Vec::from(hooked_bytecode.as_ref());
                         new_init_code.extend_from_slice(constructor_args.as_ref());
-                        inputs.init_code = Bytes::from(new_init_code);
+                        inputs.set_init_code(Bytes::from(new_init_code));
 
                         // Update creation schema
-                        inputs.scheme = CreateScheme::Custom { address: predicted_address };
+                        inputs.set_scheme(CreateScheme::Custom { address: predicted_address });
 
                         // Log the replacement
                         debug!(
                             "Replaced creation bytecode with hooked version for {:?} -> {:?}",
-                            inputs.caller, predicted_address
+                            inputs.caller(),
+                            predicted_address
                         );
 
                         break; // Found a match, no need to check other hooks
