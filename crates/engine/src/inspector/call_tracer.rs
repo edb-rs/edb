@@ -165,7 +165,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
 
     fn create(&mut self, _context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         let call_type = inputs.into();
-        let caller = inputs.caller;
+        let caller = inputs.caller();
 
         // Mark addresses
         self.mark_address_visited(caller, false);
@@ -183,13 +183,13 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
             caller,
             target: Address::ZERO,       // Target is not known yet
             code_address: Address::ZERO, // Code address is not known yet
-            input: inputs.init_code.clone(),
-            value: inputs.value,
+            input: inputs.init_code().clone(),
+            value: inputs.value(),
             result: None,            // Will be filled in create_end
             events: vec![],          // Will be filled in log
             self_destruct: None,     // Will be filled in self_destruct
             created_contract: false, // Will be updated in create_end
-            create_scheme: Some(inputs.scheme),
+            create_scheme: Some(inputs.scheme()),
             bytecode: None,          // Will be set in step
             target_label: None,      // Will be set in post-analysis
             first_snapshot_id: None, // Will be set in post-analysis
@@ -220,7 +220,7 @@ impl<CTX: ContextTr> Inspector<CTX> for CallTracer {
         };
 
         // Check caller consistence first, and no need to return
-        let caller = inputs.caller;
+        let caller = inputs.caller();
         if trace_entry.caller != caller {
             error!("Create stack entry mismatch");
         }
