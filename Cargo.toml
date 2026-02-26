@@ -160,7 +160,7 @@ jsonrpsee = "0.24"
 
 # tui
 crossterm = "0.28"
-ratatui = "0.29"
+ratatui = "0.30"
 
 # cli
 clap = "4"
@@ -173,7 +173,7 @@ delegate = "0.13"
 derive_more = "2"
 dirs = "6"
 dirs-next = "2"
-dotenv = "0.15"
+dotenv = { version = "0.15", package = "dotenvy" }
 eyre = "0.6"
 hex = "0.4"
 indicatif = "0.18"
