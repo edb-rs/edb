@@ -43,7 +43,11 @@ mod widgets;
 use app::App;
 use remote::RemoteProxyClient;
 
-async fn run_tui_loop<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
+async fn run_tui_loop<B>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()>
+where
+    B: Backend,
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
     let mut last_tick = Instant::now();
     let tick_rate = Duration::from_millis(app.refresh_interval); // 4 FPS
 
