@@ -737,6 +737,7 @@ mod tests {
     use super::*;
     use crate::cache::CacheManager;
     use edb_common::logging;
+    use std::io::ErrorKind;
     use tempfile::TempDir;
     use tracing::{debug, info};
     use wiremock::{
@@ -744,7 +745,28 @@ mod tests {
         Mock, MockServer, ResponseTemplate,
     };
 
-    async fn create_test_rpc_handler() -> (RpcHandler, MockServer, TempDir) {
+    async fn skip_if_loopback_binds_restricted(test_name: &str) -> bool {
+        match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+            Ok(listener) => {
+                drop(listener);
+                false
+            }
+            Err(error)
+                if matches!(error.kind(), ErrorKind::PermissionDenied)
+                    || error.raw_os_error() == Some(1) =>
+            {
+                info!("Skipping {test_name} because loopback binds are restricted: {error}");
+                true
+            }
+            Err(error) => panic!("Failed to probe loopback bind availability: {error}"),
+        }
+    }
+
+    async fn create_test_rpc_handler(test_name: &str) -> Option<(RpcHandler, MockServer, TempDir)> {
+        if skip_if_loopback_binds_restricted(test_name).await {
+            return None;
+        }
+
         let mock_server = MockServer::start().await;
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("test_cache.json");
@@ -773,12 +795,16 @@ mod tests {
 
         let handler = RpcHandler::new(provider_manager, cache_manager, metrics_collector).unwrap();
 
-        (handler, mock_server, temp_dir)
+        Some((handler, mock_server, temp_dir))
     }
 
     #[tokio::test]
     async fn test_cacheable_method_caching() {
-        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_cacheable_method_caching").await
+        else {
+            return;
+        };
 
         let response_data = serde_json::json!({
             "jsonrpc": "2.0",
@@ -816,7 +842,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_cacheable_method_passthrough() {
-        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_non_cacheable_method_passthrough").await
+        else {
+            return;
+        };
 
         let response_data = serde_json::json!({
             "jsonrpc": "2.0",
@@ -848,7 +878,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_deterministic_block_params_bypass_cache() {
-        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_non_deterministic_block_params_bypass_cache").await
+        else {
+            return;
+        };
 
         let response_data = serde_json::json!({
             "jsonrpc": "2.0",
@@ -883,7 +917,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_deterministic_vs_non_deterministic_params() {
-        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_deterministic_vs_non_deterministic_params").await
+        else {
+            return;
+        };
 
         let response_data = serde_json::json!({
             "jsonrpc": "2.0",
@@ -929,7 +967,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_non_deterministic_block_params() {
-        let (handler, _mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, _mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_has_non_deterministic_block_params").await
+        else {
+            return;
+        };
 
         // Test various non-deterministic block parameters
         let test_cases = vec![
@@ -984,7 +1026,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_error_response_not_cached() {
-        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_error_response_not_cached").await
+        else {
+            return;
+        };
 
         let error_response = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1019,6 +1065,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_provider_weighted_distribution() {
+        if skip_if_loopback_binds_restricted("test_multi_provider_weighted_distribution").await {
+            return;
+        }
         // Create 3 mock servers for weighted distribution testing
         let mock1 = MockServer::start().await;
         let mock2 = MockServer::start().await;
@@ -1130,6 +1179,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_provider_tried_once_per_request() {
+        if skip_if_loopback_binds_restricted("test_provider_tried_once_per_request").await {
+            return;
+        }
         edb_common::logging::ensure_test_logging(None);
         info!("Testing that each provider is only tried once per request with Option 1");
 
@@ -1214,6 +1266,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_provider_caching_behavior() {
+        if skip_if_loopback_binds_restricted("test_multi_provider_caching_behavior").await {
+            return;
+        }
         logging::ensure_test_logging(None);
 
         // Create 2 mock servers
@@ -1291,6 +1346,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limit_detection() {
+        if skip_if_loopback_binds_restricted("test_rate_limit_detection").await {
+            return;
+        }
         // Create test handler with minimal setup
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("test_cache.json");
@@ -1386,6 +1444,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_error_detection() {
+        if skip_if_loopback_binds_restricted("test_user_error_detection").await {
+            return;
+        }
         // Similar minimal setup
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("test_cache.json");
@@ -1494,6 +1555,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limit_fallback_to_healthy_provider() {
+        if skip_if_loopback_binds_restricted("test_rate_limit_fallback_to_healthy_provider").await {
+            return;
+        }
         // Create 2 mock servers - first returns rate limit, second succeeds
         let mock1 = MockServer::start().await;
         let mock2 = MockServer::start().await;
@@ -1561,6 +1625,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_error_deduplication() {
+        if skip_if_loopback_binds_restricted("test_error_deduplication").await {
+            return;
+        }
         // Create 3 mock servers that all return the same error
         let mock1 = MockServer::start().await;
         let mock2 = MockServer::start().await;
@@ -1641,7 +1708,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_eth_call_caching_with_deterministic_block() {
-        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_eth_call_caching_with_deterministic_block").await
+        else {
+            return;
+        };
 
         let response_data = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1683,7 +1754,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_eth_call_not_cached_with_latest() {
-        let (handler, mock_server, _temp_dir) = create_test_rpc_handler().await;
+        let Some((handler, mock_server, _temp_dir)) =
+            create_test_rpc_handler("test_eth_call_not_cached_with_latest").await
+        else {
+            return;
+        };
 
         let response_data = serde_json::json!({
             "jsonrpc": "2.0",
@@ -1724,6 +1799,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_debug_trace_validation_with_unsupported_response() {
+        if skip_if_loopback_binds_restricted(
+            "test_debug_trace_validation_with_unsupported_response",
+        )
+        .await
+        {
+            return;
+        }
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("test_cache.json");
         let cache_manager = Arc::new(CacheManager::new(100, cache_path).unwrap());

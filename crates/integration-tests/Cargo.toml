@@ -40,4 +40,4 @@ alloy-json-abi = { workspace = true }
 alloy-dyn-abi = { workspace = true }
 
 # REVM for hardfork specs
-revm = { workspace = true, features = ["std", "serde", "alloydb"] }
+revm = { workspace = true, features = ["std", "serde"] }

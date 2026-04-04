@@ -137,7 +137,7 @@ pub async fn get_or_create_fixture(name: &str) -> Result<EngineFixture> {
     info!("Setting up dedicated proxy for '{}'...", name);
     let proxy_url = proxy::setup_test_proxy_configurable(7200) // 2 hours timeout
         .await
-        .expect("Failed to setup test proxy");
+        .map_err(|error| eyre::eyre!("Failed to setup test proxy: {error}"))?;
 
     info!("Proxy for '{}' started at: {}", name, proxy_url);
     proxy::register_with_proxy(&proxy_url).await.ok();
@@ -146,7 +146,7 @@ pub async fn get_or_create_fixture(name: &str) -> Result<EngineFixture> {
     let tx_hash: TxHash = tx_hash_str.parse().expect("valid tx hash");
     let result = engine::replay_transaction_test(tx_hash, &proxy_url, false, None)
         .await
-        .expect("Failed to replay transaction");
+        .map_err(|error| eyre::eyre!("Failed to replay transaction: {error}"))?;
 
     if !result.success {
         panic!("Engine creation failed for {}: {:?}", name, result.errors);
@@ -438,11 +438,8 @@ impl PartialEq for TransactionAnalysisResult {
             return false;
         }
 
-        if self.performance_metrics != other.performance_metrics {
-            error!("Performance metrics mismatch");
-            return false;
-        }
-
+        // Performance metrics are observational and vary across runs, so they are not part of
+        // baseline correctness checks.
         true
     }
 }

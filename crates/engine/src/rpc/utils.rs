@@ -36,15 +36,27 @@ use eyre::{eyre, Result};
 use std::net::{SocketAddr, TcpListener};
 use tracing::{debug, info};
 
+const PORT_SCAN_WINDOW: u16 = 1024;
+
 /// Find an available port starting from a base port
 pub fn find_available_port(start_port: u16) -> Result<u16> {
-    for port in start_port..65535 {
+    let end_port = start_port.saturating_add(PORT_SCAN_WINDOW);
+
+    for port in start_port..=end_port {
         if is_port_available(port) {
             info!("Found available port: {}", port);
             return Ok(port);
         }
     }
-    Err(eyre!("No available port found in range {}-65534", start_port))
+
+    // Limit the linear scan to a small window so we do not burn through thousands of bind
+    // attempts under test load before asking the OS for an ephemeral port.
+    let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| {
+        eyre!("No available port found in {}-{} or via OS fallback: {}", start_port, end_port, e)
+    })?;
+    let port = listener.local_addr()?.port();
+    info!("Falling back to OS-assigned ephemeral port: {}", port);
+    Ok(port)
 }
 
 /// Check if a port is available on localhost
@@ -109,12 +121,25 @@ pub fn invalid_params(message: &str) -> crate::rpc::types::RpcError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::ErrorKind;
+
+    fn local_bind_is_restricted(error: &std::io::Error) -> bool {
+        matches!(error.kind(), ErrorKind::PermissionDenied) || error.raw_os_error() == Some(1)
+    }
 
     #[test]
     fn test_port_availability() {
-        // Test with a port that should be available
-        let port = find_available_port(50000).expect("Should find an available port");
-        assert!(port >= 50000);
+        let listener = match TcpListener::bind(("127.0.0.1", 0)) {
+            Ok(listener) => listener,
+            Err(error) if local_bind_is_restricted(&error) => return,
+            Err(error) => panic!("Should be able to probe local port binding: {error}"),
+        };
+        let start_port = listener.local_addr().unwrap().port();
+
+        assert!(!is_port_available(start_port));
+        drop(listener);
+
+        let port = find_available_port(start_port).expect("Should find an available port");
         assert!(is_port_available(port));
     }
 
