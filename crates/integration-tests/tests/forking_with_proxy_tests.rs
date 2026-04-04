@@ -22,6 +22,8 @@
 use alloy_primitives::TxHash;
 use edb_common::fork_and_prepare;
 use edb_integration_tests::test_utils::{init, proxy};
+use once_cell::sync::Lazy;
+use tokio::sync::Mutex;
 use tracing::{debug, info};
 
 /// Test transaction hash from a known mainnet transaction
@@ -30,13 +32,32 @@ const TEST_TX_HASH: &str = "0xc403cced1cf53cbeb72475be7271b731f846e91fcbd7b43f12
 /// Another test transaction for testing multiple transactions in a block
 const TEST_TX_HASH_2: &str = "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060";
 
+static FORKING_PROXY_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+fn local_proxy_bind_is_restricted(error: &(dyn std::error::Error + 'static)) -> bool {
+    error.to_string().contains("Operation not permitted")
+}
+
+async fn setup_test_proxy_or_skip(grace_period: u64, test_name: &str) -> Option<String> {
+    match proxy::setup_test_proxy_configurable(grace_period).await {
+        Ok(proxy_url) => Some(proxy_url),
+        Err(error) if local_proxy_bind_is_restricted(error.as_ref()) => {
+            info!("Skipping {test_name} because loopback binds are restricted: {error}");
+            None
+        }
+        Err(error) => panic!("Failed to setup test proxy: {error}"),
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_with_proxy_cache() {
+    let _guard = FORKING_PROXY_TEST_LOCK.lock().await;
     init::init_test_environment(true);
     info!("Testing fork and prepare with proxy caching");
 
-    let proxy_url =
-        proxy::setup_test_proxy_configurable(3000).await.expect("Failed to setup test proxy");
+    let Some(proxy_url) = setup_test_proxy_or_skip(3000, "test_fork_with_proxy_cache").await else {
+        return;
+    };
 
     proxy::register_with_proxy(&proxy_url).await.ok();
 
@@ -79,11 +100,15 @@ async fn test_fork_with_proxy_cache() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_multiple_transactions_with_cache() {
+    let _guard = FORKING_PROXY_TEST_LOCK.lock().await;
     init::init_test_environment(true);
     info!("Testing multiple transactions with proxy caching");
 
-    let proxy_url =
-        proxy::setup_test_proxy_configurable(30).await.expect("Failed to setup test proxy");
+    let Some(proxy_url) =
+        setup_test_proxy_or_skip(30, "test_multiple_transactions_with_cache").await
+    else {
+        return;
+    };
 
     proxy::register_with_proxy(&proxy_url).await.ok();
 
@@ -124,11 +149,13 @@ async fn test_multiple_transactions_with_cache() {
 
 #[tokio::test]
 async fn test_proxy_endpoints() {
+    let _guard = FORKING_PROXY_TEST_LOCK.lock().await;
     init::init_test_environment(true);
     debug!("Testing proxy endpoint functionality");
 
-    let proxy_url =
-        proxy::setup_test_proxy_configurable(30).await.expect("Failed to setup test proxy");
+    let Some(proxy_url) = setup_test_proxy_or_skip(30, "test_proxy_endpoints").await else {
+        return;
+    };
 
     let client = reqwest::Client::new();
 
@@ -169,12 +196,15 @@ async fn test_proxy_endpoints() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_and_prepare_quick_mode() {
+    let _guard = FORKING_PROXY_TEST_LOCK.lock().await;
     init::init_test_environment(true);
     info!("Testing fork and prepare in quick mode with caching");
 
     // Setup proxy with cache for more reliable testing
-    let proxy_url =
-        proxy::setup_test_proxy_configurable(30).await.expect("Failed to setup test proxy");
+    let Some(proxy_url) = setup_test_proxy_or_skip(30, "test_fork_and_prepare_quick_mode").await
+    else {
+        return;
+    };
 
     proxy::register_with_proxy(&proxy_url).await.ok();
 
@@ -244,12 +274,16 @@ async fn test_fork_and_prepare_quick_mode() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn test_fork_at_specific_hardfork_boundaries() {
+    let _guard = FORKING_PROXY_TEST_LOCK.lock().await;
     init::init_test_environment(true);
     info!("Testing fork at different hardfork boundaries");
 
     // Setup proxy with cache for more reliable testing
-    let proxy_url =
-        proxy::setup_test_proxy_configurable(30).await.expect("Failed to setup test proxy");
+    let Some(proxy_url) =
+        setup_test_proxy_or_skip(30, "test_fork_at_specific_hardfork_boundaries").await
+    else {
+        return;
+    };
 
     proxy::register_with_proxy(&proxy_url).await.ok();
 

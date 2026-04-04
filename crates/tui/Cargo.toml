@@ -55,6 +55,6 @@ alloy-json-abi = { workspace = true }
 alloy-dyn-abi = { workspace = true }
 
 # revm for trace types
-revm = { workspace = true, features = ["std", "serde", "alloydb"] }
+revm = { workspace = true, features = ["std", "serde"] }
 
 [dev-dependencies]

@@ -30,7 +30,7 @@ foundry-block-explorers = { workspace = true, features = ["foundry-compilers"] }
 foundry-compilers = { workspace = true, features = ["svm-solc"] }
 
 # revm
-revm = { workspace = true, features = ["std", "serde", "alloydb", "optional_block_gas_limit", "optional_no_base_fee", "optional_balance_check"] }
+revm = { workspace = true, features = ["std", "serde", "asyncdb", "optional_block_gas_limit", "optional_no_base_fee", "optional_balance_check"] }
 
 # async
 futures.workspace = true
@@ -41,8 +41,8 @@ serde = { workspace = true, features = ["derive"] }
 
 # http client
 reqwest = { workspace = true, features = [
-    "rustls-tls",
-    "rustls-tls-native-roots",
+    "rustls",
+    "rustls-native-certs",
 ] }
 
 # misc

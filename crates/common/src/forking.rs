@@ -18,7 +18,10 @@
 //!
 //! This module provides ACTUAL REVM TRANSACTION EXECUTION with transact_commit()
 
-use crate::{get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, EdbContext, EdbDB};
+use crate::{
+    get_blob_base_fee_update_fraction_by_spec_id, get_mainnet_spec_id, provider_db::ProviderDb,
+    EdbContext, EdbDB,
+};
 use alloy_primitives::{address, Address, TxHash, TxKind, B256, U256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types::{BlockNumberOrTag, Transaction, TransactionTrait};
@@ -27,7 +30,7 @@ use indicatif::ProgressBar;
 use revm::{
     context::{ContextTr, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
-    database::{AlloyDB, CacheDB},
+    database::CacheDB,
     Context, Database, DatabaseCommit, DatabaseRef, ExecuteCommitEvm, ExecuteEvm, MainBuilder,
     MainContext,
 };
@@ -170,7 +173,7 @@ pub async fn fork_and_prepare(
     };
 
     // Create revm database: we start with AlloyDB.
-    let alloy_db = AlloyDB::new(provider, (target_block_number - 1).into());
+    let alloy_db = ProviderDb::new(provider, (target_block_number - 1).into());
 
     // Try to use the current runtime handle for WrapDatabaseAsync
     // If we're in a LocalSet or CurrentThread runtime, this will return None
@@ -255,7 +258,8 @@ pub async fn fork_and_prepare(
             // Actually execute the transaction with commit
             match evm.transact_commit(tx_env.clone()) {
                 Ok(result) => match result {
-                    ExecutionResult::Success { gas_used, .. } => {
+                    ExecutionResult::Success { gas, .. } => {
+                        let gas_used = gas.used();
                         console_bar.set_message(format!("✅ 0x{short_hash}... gas: {gas_used}"));
                         debug!(
                             "Transaction {} executed and committed successfully, gas used: {}",
@@ -263,7 +267,8 @@ pub async fn fork_and_prepare(
                             gas_used
                         );
                     }
-                    ExecutionResult::Revert { gas_used, output } => {
+                    ExecutionResult::Revert { gas, output, .. } => {
+                        let gas_used = gas.used();
                         console_bar.set_message(format!("⚠️  0x{short_hash}... reverted"));
                         debug!(
                             "Transaction {} reverted but committed, gas used: {}, output: {:?}",
@@ -272,7 +277,8 @@ pub async fn fork_and_prepare(
                             output
                         );
                     }
-                    ExecutionResult::Halt { reason, gas_used } => {
+                    ExecutionResult::Halt { reason, gas, .. } => {
+                        let gas_used = gas.used();
                         console_bar.set_message(format!("❌ 0x{short_hash}... halted"));
                         debug!(
                             "Transaction {} halted, gas used: {}, reason: {:?}",

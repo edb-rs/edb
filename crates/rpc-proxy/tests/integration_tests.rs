@@ -22,7 +22,7 @@ use edb_rpc_proxy::{
 };
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::{collections::HashMap, net::SocketAddr, time::Duration};
+use std::{collections::HashMap, io::ErrorKind, net::SocketAddr, time::Duration};
 use tempfile::TempDir;
 use tokio::time::sleep;
 use wiremock::{
@@ -31,7 +31,32 @@ use wiremock::{
 };
 
 /// Helper to create a test proxy server
-async fn create_test_proxy(max_cache_items: u32) -> (ProxyServer, MockServer, TempDir) {
+async fn skip_if_loopback_binds_restricted(test_name: &str) -> bool {
+    match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => {
+            drop(listener);
+            false
+        }
+        Err(error)
+            if matches!(error.kind(), ErrorKind::PermissionDenied)
+                || error.raw_os_error() == Some(1) =>
+        {
+            eprintln!("Skipping {test_name} because loopback binds are restricted: {error}");
+            true
+        }
+        Err(error) => panic!("Failed to probe loopback bind availability: {error}"),
+    }
+}
+
+/// Helper to create a test proxy server
+async fn create_test_proxy(
+    test_name: &str,
+    max_cache_items: u32,
+) -> Option<(ProxyServer, MockServer, TempDir)> {
+    if skip_if_loopback_binds_restricted(test_name).await {
+        return None;
+    }
+
     let mock_server = MockServer::start().await;
     let temp_dir = TempDir::new().unwrap();
 
@@ -60,13 +85,23 @@ async fn create_test_proxy(max_cache_items: u32) -> (ProxyServer, MockServer, Te
         .await
         .unwrap();
 
-    (proxy, mock_server, temp_dir)
+    Some((proxy, mock_server, temp_dir))
 }
 
 /// Start proxy server on a random port and return the address
-async fn start_proxy_server(proxy: ProxyServer) -> SocketAddr {
+async fn start_proxy_server(test_name: &str, proxy: ProxyServer) -> Option<SocketAddr> {
     // Find an available port
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+        Ok(listener) => listener,
+        Err(error)
+            if matches!(error.kind(), ErrorKind::PermissionDenied)
+                || error.raw_os_error() == Some(1) =>
+        {
+            eprintln!("Skipping {test_name} because loopback binds are restricted: {error}");
+            return None;
+        }
+        Err(error) => panic!("Failed to bind proxy listener: {error}"),
+    };
     let actual_addr = listener.local_addr().unwrap();
     drop(listener); // Release the listener so proxy.serve can bind to it
 
@@ -76,7 +111,7 @@ async fn start_proxy_server(proxy: ProxyServer) -> SocketAddr {
 
     // Give the server a moment to start
     sleep(Duration::from_millis(200)).await;
-    actual_addr
+    Some(actual_addr)
 }
 
 /// Helper function to collect cache data from a proxy server
@@ -106,8 +141,14 @@ pub async fn get_cache_stats(proxy: &ProxyServer) -> Value {
 
 #[tokio::test]
 async fn test_proxy_health_endpoints() {
-    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
+    let Some((proxy, _mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_health_endpoints", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_health_endpoints", proxy).await else {
+        return;
+    };
 
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
@@ -143,8 +184,14 @@ async fn test_proxy_health_endpoints() {
 
 #[tokio::test]
 async fn test_proxy_registry_endpoints() {
-    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
+    let Some((proxy, _mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_registry_endpoints", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_registry_endpoints", proxy).await else {
+        return;
+    };
 
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
@@ -182,8 +229,15 @@ async fn test_proxy_registry_endpoints() {
 
 #[tokio::test]
 async fn test_proxy_cache_stats_endpoint() {
-    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(100).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
+    let Some((proxy, _mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_cache_stats_endpoint", 100).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_cache_stats_endpoint", proxy).await
+    else {
+        return;
+    };
 
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
@@ -210,8 +264,15 @@ async fn test_proxy_cache_stats_endpoint() {
 
 #[tokio::test]
 async fn test_proxy_active_instances_endpoint() {
-    let (proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(proxy).await;
+    let Some((proxy, _mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_active_instances_endpoint", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_active_instances_endpoint", proxy).await
+    else {
+        return;
+    };
 
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
@@ -276,8 +337,15 @@ async fn test_proxy_active_instances_endpoint() {
 #[tokio::test]
 async fn test_proxy_rpc_forwarding_and_caching() {
     // Create proxy pointing to mock server
-    let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
+    let Some((proxy, mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_rpc_forwarding_and_caching", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_rpc_forwarding_and_caching", proxy).await
+    else {
+        return;
+    };
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
 
@@ -324,8 +392,15 @@ async fn test_proxy_rpc_forwarding_and_caching() {
 #[tokio::test]
 async fn test_proxy_non_cacheable_forwarding() {
     // Create proxy pointing to mock server
-    let (_proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
+    let Some((proxy, mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_non_cacheable_forwarding", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_non_cacheable_forwarding", proxy).await
+    else {
+        return;
+    };
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
 
@@ -368,8 +443,16 @@ async fn test_proxy_non_cacheable_forwarding() {
 #[tokio::test]
 async fn test_proxy_non_deterministic_params_bypass_cache() {
     // Create proxy pointing to mock server
-    let (proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(proxy).await;
+    let Some((proxy, mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_non_deterministic_params_bypass_cache", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) =
+        start_proxy_server("test_proxy_non_deterministic_params_bypass_cache", proxy).await
+    else {
+        return;
+    };
 
     let response_data = json!({
         "jsonrpc": "2.0",
@@ -416,8 +499,16 @@ async fn test_proxy_non_deterministic_params_bypass_cache() {
 #[tokio::test]
 async fn test_proxy_cache_data_collection() {
     // Create proxy pointing to mock server
-    let (proxy, mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(proxy.clone()).await;
+    let Some((proxy, mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_cache_data_collection", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) =
+        start_proxy_server("test_proxy_cache_data_collection", proxy.clone()).await
+    else {
+        return;
+    };
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
 
@@ -478,8 +569,14 @@ async fn test_proxy_cache_data_collection() {
 
 #[tokio::test]
 async fn test_proxy_shutdown_endpoint() {
-    let (proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(proxy).await;
+    let Some((proxy, _mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_shutdown_endpoint", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_shutdown_endpoint", proxy).await else {
+        return;
+    };
 
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");
@@ -517,8 +614,15 @@ async fn test_proxy_shutdown_endpoint() {
 
 #[tokio::test]
 async fn test_proxy_invalid_request_handling() {
-    let (_proxy, _mock_server, _temp_dir) = create_test_proxy(10).await;
-    let proxy_addr = start_proxy_server(_proxy).await;
+    let Some((proxy, _mock_server, _temp_dir)) =
+        create_test_proxy("test_proxy_invalid_request_handling", 10).await
+    else {
+        return;
+    };
+    let Some(proxy_addr) = start_proxy_server("test_proxy_invalid_request_handling", proxy).await
+    else {
+        return;
+    };
 
     let client = Client::new();
     let proxy_url = format!("http://{proxy_addr}");

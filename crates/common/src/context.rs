@@ -21,7 +21,7 @@ use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     database::CacheDB,
     database_interface::DBErrorMarker,
-    primitives::{Address, HashMap, B256, U256},
+    primitives::{Address, AddressMap, B256, U256},
     state::{Account, AccountInfo, Bytecode},
     Context, Database, DatabaseCommit, DatabaseRef,
 };
@@ -152,7 +152,7 @@ where
     DB: DatabaseCommit + Database,
     <DB as Database>::Error: std::error::Error,
 {
-    fn commit(&mut self, changes: HashMap<Address, Account>) {
+    fn commit(&mut self, changes: AddressMap<Account>) {
         self.inner.commit(changes)
     }
 }

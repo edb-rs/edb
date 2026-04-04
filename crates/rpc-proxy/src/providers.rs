@@ -420,12 +420,33 @@ impl ProviderManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::ErrorKind;
     use tracing::{debug, info};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    async fn skip_if_loopback_binds_restricted(test_name: &str) -> bool {
+        match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+            Ok(listener) => {
+                drop(listener);
+                false
+            }
+            Err(error)
+                if matches!(error.kind(), ErrorKind::PermissionDenied)
+                    || error.raw_os_error() == Some(1) =>
+            {
+                info!("Skipping {test_name} because loopback binds are restricted: {error}");
+                true
+            }
+            Err(error) => panic!("Failed to probe loopback bind availability: {error}"),
+        }
+    }
+
     #[tokio::test]
     async fn test_provider_initialization() {
+        if skip_if_loopback_binds_restricted("test_provider_initialization").await {
+            return;
+        }
         edb_common::logging::ensure_test_logging(None);
         info!("Testing provider initialization with health checks");
 
@@ -465,6 +486,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_round_robin_selection() {
+        if skip_if_loopback_binds_restricted("test_round_robin_selection").await {
+            return;
+        }
         edb_common::logging::ensure_test_logging(None);
         info!("Testing round-robin provider selection");
 
@@ -501,6 +525,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_provider_failure_handling() {
+        if skip_if_loopback_binds_restricted("test_provider_failure_handling").await {
+            return;
+        }
         edb_common::logging::ensure_test_logging(None);
         debug!("Testing provider failure detection and handling");
 
@@ -531,6 +558,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_weighted_provider_selection() {
+        if skip_if_loopback_binds_restricted("test_weighted_provider_selection").await {
+            return;
+        }
         edb_common::logging::ensure_test_logging(None);
         debug!("Testing weighted provider selection based on response time");
 
