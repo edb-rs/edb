@@ -50,6 +50,7 @@ clap = { workspace = true, features = ["default", "derive", "env"] }
 webbrowser.workspace = true
 
 # misc
+dirs-next.workspace = true
 dotenv.workspace = true
 eyre.workspace = true
 tracing.workspace = true
@@ -62,3 +63,4 @@ futures.workspace = true
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
+tempfile.workspace = true

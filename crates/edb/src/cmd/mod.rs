@@ -17,11 +17,13 @@
 //! Command modules for the EDB CLI
 
 pub mod debug;
+pub mod local;
 pub mod proxy_status;
 pub mod replay;
 pub mod server;
 
 pub use debug::debug_foundry_test;
+pub use local::{init_local_project, run_local_workflow};
 pub use proxy_status::show_proxy_status;
 pub use replay::replay_transaction;
 pub use server::start_server;

@@ -73,6 +73,10 @@ pub struct EngineConfig {
     pub etherscan_api_key: Option<String>,
     /// Quick mode flag - when enabled, skips time-intensive operations for faster analysis
     pub quick: bool,
+    /// Local source configuration - when set, contract source code and compilation
+    /// artifacts are loaded from a local Foundry project instead of Etherscan, and
+    /// contract creation transactions come from the config rather than the explorer API.
+    pub local_source: Option<crate::LocalSourceConfig>,
 }
 
 impl Default for EngineConfig {
@@ -81,6 +85,7 @@ impl Default for EngineConfig {
             rpc_proxy_url: "http://localhost:8545".into(),
             etherscan_api_key: None,
             quick: false,
+            local_source: None,
         }
     }
 }
@@ -101,6 +106,12 @@ impl EngineConfig {
     /// Set the RPC proxy URL for blockchain interactions
     pub fn with_rpc_proxy_url(mut self, url: String) -> Self {
         self.rpc_proxy_url = url;
+        self
+    }
+
+    /// Use a local Foundry project as the source of contract code instead of Etherscan.
+    pub fn with_local_source(mut self, config: crate::LocalSourceConfig) -> Self {
+        self.local_source = Some(config);
         self
     }
 
@@ -261,14 +272,20 @@ impl Engine {
         );
         let replay_result = orchestration::replay_and_collect_trace(ctx.clone(), tx.clone())?;
 
-        // Step 2: Download verified source code for each contract
-        send_progress!(2, 8, "Downloading verified source code for each contract...");
-        let artifacts = orchestration::download_verified_source_code(
-            &self.config,
-            &replay_result,
-            ctx.chain_id().to::<u64>(),
-        )
-        .await?;
+        // Step 2: Download verified source code for each contract, or load it from a
+        // local Foundry project when running in local-source mode.
+        let artifacts = if let Some(local) = &self.config.local_source {
+            send_progress!(2, 8, "Compiling local source code for configured contracts...");
+            crate::utils::load_local_source_code(local)?
+        } else {
+            send_progress!(2, 8, "Downloading verified source code for each contract...");
+            orchestration::download_verified_source_code(
+                &self.config,
+                &replay_result,
+                ctx.chain_id().to::<u64>(),
+            )
+            .await?
+        };
 
         // Step 3: Analyze source code to identify instrumentation points
         send_progress!(3, 8, "Analyzing source code to identify instrumentation points...");

@@ -51,7 +51,7 @@
 //! This replaces the deployed bytecode at `contract_address` with the instrumented version,
 //! enabling advanced debugging features on the modified contract.
 
-use std::env;
+use std::{collections::HashMap, env};
 
 use alloy_primitives::{Address, Bytes, TxHash};
 use edb_common::{
@@ -89,6 +89,9 @@ where
     ctx: &'a mut EdbContext<DB>,
     rpc_url: String,
     etherscan_api_key: Option<String>,
+    /// Local map of contract address -> creation transaction hash. When an address is
+    /// present here, the Etherscan lookup in `get_creation_tx` is skipped.
+    local_creation_txs: Option<HashMap<Address, TxHash>>,
 }
 
 impl<'a, DB> CodeTweaker<'a, DB>
@@ -109,7 +112,14 @@ where
         rpc_url: String,
         etherscan_api_key: Option<String>,
     ) -> Self {
-        Self { ctx, rpc_url, etherscan_api_key }
+        Self { ctx, rpc_url, etherscan_api_key, local_creation_txs: None }
+    }
+
+    /// Provide locally-known contract creation transactions, bypassing the Etherscan
+    /// lookup for those addresses.
+    pub fn with_local_creation_txs(mut self, txs: HashMap<Address, TxHash>) -> Self {
+        self.local_creation_txs = Some(txs);
+        self
     }
 
     /// Replaces deployed contract bytecode with instrumented bytecode from artifacts.
@@ -212,6 +222,13 @@ where
     ///
     /// Returns the transaction hash that deployed the contract, or an error if not found.
     pub async fn get_creation_tx(&self, addr: &Address) -> Result<TxHash> {
+        if let Some(tx) =
+            self.local_creation_txs.as_ref().and_then(|txs| txs.get(addr).copied())
+        {
+            debug!("Using locally provided creation tx {tx} for {addr}");
+            return Ok(tx);
+        }
+
         let chain_id = self.ctx.cfg().chain_id();
 
         // Cache directory

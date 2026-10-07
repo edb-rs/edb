@@ -77,3 +77,6 @@ pub use persistent_data::*;
 
 mod visitor;
 pub use visitor::*;
+
+mod local_source;
+pub use local_source::*;

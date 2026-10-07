@@ -30,22 +30,36 @@ const PROXY_HEARTBEAT_INTERVAL: u64 = 10;
 const PROXY_GRACE_PERIOD: u64 = 30;
 
 pub async fn ensure_proxy_running(cli: &Cli) -> Result<()> {
-    // Check if proxy already exists and is healthy
-    match proxy_health_check(cli.proxy_port).await {
-        Ok(_) => {
-            info!("Found healthy proxy at port {}", cli.proxy_port);
-            register_with_proxy(cli.proxy_port).await?;
-            start_heartbeat_task(cli.proxy_port, PROXY_HEARTBEAT_INTERVAL);
-            return Ok(());
+    ensure_proxy_running_with_rpc_url(cli, None).await
+}
+
+pub async fn ensure_proxy_running_with_rpc_url(cli: &Cli, rpc_url_override: Option<&str>) -> Result<()> {
+    // For local mode, always restart the proxy to ensure it's configured with the correct RPC URL
+    // and cache directory. Otherwise, a stale proxy from a mainnet session could be reused.
+    if rpc_url_override.is_some() {
+        if proxy_health_check(cli.proxy_port).await.is_ok() {
+            info!("Local mode: shutting down existing proxy to restart with anvil RPC URL");
+            let _ = shutdown_proxy(cli.proxy_port).await;
+            sleep(Duration::from_secs(1)).await;
         }
-        Err(e) => {
-            debug!("Proxy health check failed: {}", e);
+    } else {
+        // Check if proxy already exists and is healthy
+        match proxy_health_check(cli.proxy_port).await {
+            Ok(_) => {
+                info!("Found healthy proxy at port {}", cli.proxy_port);
+                register_with_proxy(cli.proxy_port).await?;
+                start_heartbeat_task(cli.proxy_port, PROXY_HEARTBEAT_INTERVAL);
+                return Ok(());
+            }
+            Err(e) => {
+                debug!("Proxy health check failed: {}", e);
+            }
         }
     }
 
     // Spawn new one
-    info!("No healthy proxy found, spawning new instance");
-    spawn_proxy(cli).await?;
+    info!("Spawning new proxy instance");
+    spawn_proxy_with_rpc_url(cli, rpc_url_override).await?;
 
     // Wait for proxy to be ready
     wait_for_proxy_ready(cli.proxy_port).await?;
@@ -113,6 +127,26 @@ async fn register_with_proxy(port: u16) -> Result<()> {
     Ok(())
 }
 
+async fn shutdown_proxy(port: u16) -> Result<()> {
+    let client = reqwest::Client::new();
+    let request = json!({
+        "jsonrpc": "2.0",
+        "method": "edb_shutdown",
+        "params": [],
+        "id": 1
+    });
+
+    let _response = client
+        .post(format!("http://127.0.0.1:{port}"))
+        .json(&request)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await?;
+
+    info!("Sent shutdown signal to proxy");
+    Ok(())
+}
+
 fn start_heartbeat_task(port: u16, interval: u64) {
     tokio::spawn(async move {
         let client = reqwest::Client::new();
@@ -145,9 +179,11 @@ fn start_heartbeat_task(port: u16, interval: u64) {
 }
 
 async fn spawn_proxy(cli: &Cli) -> Result<()> {
-    let proxy_binary = find_proxy_binary()?;
+    spawn_proxy_with_rpc_url(cli, None).await
+}
 
-    info!("Spawning proxy binary: {:?}", proxy_binary);
+async fn spawn_proxy_with_rpc_url(cli: &Cli, rpc_url_override: Option<&str>) -> Result<()> {
+    let proxy_binary = find_proxy_binary()?;
 
     #[cfg(unix)]
     {
@@ -163,8 +199,22 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
             PROXY_HEARTBEAT_INTERVAL.to_string(),
         ];
 
-        // Add RPC URLs if provided, otherwise proxy will use defaults
-        if let Some(rpc_urls) = &cli.rpc_urls {
+        // Add RPC URLs: use override if provided (for local debugging), otherwise use CLI flag or defaults
+        if let Some(rpc_url) = rpc_url_override {
+            args.push("--rpc-urls".to_string());
+            args.push(rpc_url.to_string());
+            
+            // Use a separate cache directory for local debugging to avoid collision with mainnet cache
+            if let Some(cache_dir) = dirs_next::home_dir() {
+                let local_cache_dir = cache_dir.join(".edb").join("cache").join("rpc").join("local");
+                if let Err(e) = std::fs::create_dir_all(&local_cache_dir) {
+                    warn!("Failed to create local cache directory: {}", e);
+                } else {
+                    args.push("--cache-dir".to_string());
+                    args.push(local_cache_dir.to_string_lossy().to_string());
+                }
+            }
+        } else if let Some(rpc_urls) = &cli.rpc_urls {
             args.push("--rpc-urls".to_string());
             args.push(rpc_urls.clone());
         }
@@ -210,8 +260,22 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
             PROXY_HEARTBEAT_INTERVAL.to_string(),
         ];
 
-        // Add RPC URLs if provided, otherwise proxy will use defaults
-        if let Some(rpc_urls) = &cli.rpc_urls {
+        // Add RPC URLs: use override if provided (for local debugging), otherwise use CLI flag or defaults
+        if let Some(rpc_url) = rpc_url_override {
+            args.push("--rpc-urls".to_string());
+            args.push(rpc_url.to_string());
+            
+            // Use a separate cache directory for local debugging to avoid collision with mainnet cache
+            if let Some(cache_dir) = dirs_next::home_dir() {
+                let local_cache_dir = cache_dir.join(".edb").join("cache").join("rpc").join("local");
+                if let Err(e) = std::fs::create_dir_all(&local_cache_dir) {
+                    warn!("Failed to create local cache directory: {}", e);
+                } else {
+                    args.push("--cache-dir".to_string());
+                    args.push(local_cache_dir.to_string_lossy().to_string());
+                }
+            }
+        } else if let Some(rpc_urls) = &cli.rpc_urls {
             args.push("--rpc-urls".to_string());
             args.push(rpc_urls.clone());
         }
@@ -238,7 +302,6 @@ async fn spawn_proxy(cli: &Cli) -> Result<()> {
             .map_err(|e| eyre!("Failed to spawn proxy: {}", e))?;
     }
 
-    info!("Proxy process spawned successfully");
     Ok(())
 }
 

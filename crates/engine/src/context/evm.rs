@@ -149,6 +149,8 @@ where
             .value(value)
             .data(Bytes::copy_from_slice(data))
             .build_fill();
+        // build_fill may default chain_id to mainnet (1); match the forked chain.
+        tx_env.chain_id = Some(self.cfg.chain_id);
         relax_evm_tx_constraints(&mut tx_env);
 
         evm.transact_one(tx_env).map_err(|e| eyre!(e.to_string()))

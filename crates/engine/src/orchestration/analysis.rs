@@ -110,6 +110,9 @@ where
 
     let mut tweaker =
         CodeTweaker::new(ctx, config.rpc_proxy_url.clone(), config.etherscan_api_key.clone());
+    if let Some(local) = &config.local_source {
+        tweaker = tweaker.with_local_creation_txs(local.creation_txs());
+    }
 
     let mut contracts_in_tx = Vec::new();
 

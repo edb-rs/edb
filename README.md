@@ -85,6 +85,76 @@ edb --rpc-urls <RPC_ENDPOINTS> --ui=tui replay 0x5bedd885ff628e935fe47dacb6065c6
 
 > If none is provided, EDB falls back to the ten most popular public RPC endpoints, which may be slow and unreliable. Bring your own keys for the best experience.
 
+### Debug Local Contracts
+
+Debug contracts that aren't verified on any explorer—compile from your local Foundry project instead.
+
+For AI-assisted usage, give `LOCAL_AISKILL.md` to your AI assistant.
+
+#### Automated workflow
+
+The `edb local` command handles everything: starts anvil, discovers contracts, executes a test transaction, and launches the debugger.
+
+```bash
+# Full workflow: start anvil, discover contracts, run test tx, debug
+edb local /path/to/foundry/project
+
+# Skip anvil startup (if already running)
+edb local /path/to/project --no-anvil
+
+# Specify the transaction to debug
+edb local /path/to/project --tx-hash 0x...
+
+# Specify a deployment script
+edb local /path/to/project --script script/Deploy.s.sol:Deploy
+
+# Filter to a specific contract
+edb local /path/to/project --contract MyContract
+```
+
+Contract discovery priority:
+1. `edb.local.json` in the project root (manual config)
+2. `broadcast/` directory (auto-discovered from Foundry deployments)
+3. `--script` flag (runs `forge script` to deploy)
+
+#### Manual config
+
+For more control, create an `edb.local.json` config file:
+
+```json
+{
+  "project_root": "/path/to/foundry/project",
+  "solc_version": "0.8.26",
+  "contracts": [
+    {
+      "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      "name": "MyContract",
+      "source": "src/MyContract.sol",
+      "creation_tx": "0x1234...abcd",
+      "constructor_args": "0x"
+    }
+  ],
+  "test_transaction": {
+    "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+    "function": "myFunction(uint256)",
+    "args": ["42"]
+  }
+}
+```
+
+Then debug with:
+
+```bash
+# Start anvil and deploy your contracts first
+anvil --steps-tracing
+
+# Deploy contracts (e.g., via forge script)
+forge script script/Deploy.s.sol --broadcast --rpc-url http://localhost:8545
+
+# Debug using the config
+edb --rpc-urls http://localhost:8545 --local edb.local.json replay <tx-hash>
+```
+
 #### Web UI (default)
 
 Without any extra flag, EDB opens a browser-based debugger that shares the engine's port (no extra binary). Both dark and light themes ship by default.

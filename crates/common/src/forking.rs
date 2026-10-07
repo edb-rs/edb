@@ -152,17 +152,33 @@ pub async fn fork_and_prepare(
     // Get the transactions in the block
     let transactions = block.transactions.as_transactions().unwrap_or_default();
 
+    debug!("Block has {} transactions", transactions.len());
+    debug!("Looking for transaction: {:?}", target_tx_hash);
+
     // Find target transaction index
     let target_index = transactions
         .iter()
-        .position(|tx| *tx.inner.hash() == target_tx_hash)
-        .ok_or_else(|| eyre::eyre!("Target transaction not found in block"))?;
+        .position(|tx| {
+            let tx_hash = *tx.inner.hash();
+            debug!("Comparing with tx hash: {:?}", tx_hash);
+            tx_hash == target_tx_hash
+        })
+        .ok_or_else(|| {
+            error!("Target transaction not found in block. Block transactions:");
+            for (i, tx) in transactions.iter().enumerate() {
+                error!("  [{}] {:?}", i, tx.inner.hash());
+            }
+            eyre::eyre!("Target transaction not found in block")
+        })?;
 
     // Get all transactions before the target
     let preceding_txs: Vec<&Transaction> = transactions.iter().take(target_index).collect();
 
-    // Get the spec ID for the block using our mainnet mapping
-    let spec_id = get_mainnet_spec_id(target_block_number);
+    // Get the spec ID for the block. On mainnet we map the block number to the
+    // historical hardfork; on any other chain (e.g. a local anvil/dev node with low
+    // block numbers) that mapping is meaningless, so use the latest known spec.
+    let spec_id =
+        if chain_id == 1 { get_mainnet_spec_id(target_block_number) } else { SpecId::default() };
     info!("Block {} is under {:?} hardfork", target_block_number, spec_id);
 
     // Create fork info

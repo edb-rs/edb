@@ -43,6 +43,7 @@ fn test_config_with_custom_values() {
         rpc_proxy_url: "http://localhost:9545".to_string(),
         etherscan_api_key: Some("test_key".to_string()),
         quick: true,
+        local_source: None,
     };
 
     assert_eq!(config.rpc_proxy_url, "http://localhost:9545");
@@ -58,6 +59,7 @@ fn test_config_clone() {
         rpc_proxy_url: "http://localhost:8080".to_string(),
         etherscan_api_key: Some("key".to_string()),
         quick: false,
+        local_source: None,
     };
 
     let cloned = config.clone();
